@@ -13,7 +13,7 @@ git:
   # branch: "ralph/my-task"
   # Optional: auto-commit after successful iterations
   # commit: true
-  # commit_message: "Ralph {iteration}: {status} ({test})"
+# commit_message: "Loopy {iteration}: {status} ({test})"
 hooks:
   preIteration: "echo pre"
   postIteration: "echo post"

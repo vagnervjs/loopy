@@ -1,6 +1,6 @@
-# Ralph Loop Runner
+# Loopy
 
-A Node.js CLI that runs a Ralph-style coding agent loop with durable state, guardrails, and logs.
+Loopy is a Node.js CLI that runs a Ralph-style coding agent loop with durable state, guardrails, and logs.
 
 ## Requirements
 
@@ -14,7 +14,7 @@ A Node.js CLI that runs a Ralph-style coding agent loop with durable state, guar
 npm install
 ```
 
-Optional: install the `ralph` binary on your PATH:
+Optional: install the `loopy` binary on your PATH:
 
 ```bash
 npm link
@@ -25,22 +25,22 @@ npm link
 Show help:
 
 ```bash
-ralph help
-# or: node bin/ralph.js --help
+loopy help
+# or: node bin/loopy.js --help
 ```
 
 Single iteration:
 
 ```bash
-ralph run --agent-cmd "cursor-agent"
-# or: node bin/ralph.js run --agent-cmd "cursor-agent"
+loopy run --agent-cmd "cursor-agent"
+# or: node bin/loopy.js run --agent-cmd "cursor-agent"
 ```
 
 Loop until completion/caps:
 
 ```bash
-ralph loop --agent-cmd "cursor-agent"
-# or: node bin/ralph.js loop --agent-cmd "cursor-agent"
+loopy loop --agent-cmd "cursor-agent"
+# or: node bin/loopy.js loop --agent-cmd "cursor-agent"
 ```
 
 ### Task file
@@ -98,7 +98,7 @@ See `examples/RALPH_TASK.md` for a starter template.
 
 ## Git integration (optional)
 
-Ralph can optionally:
+Loopy can optionally:
 
 - create/switch a branch before running
 - create/switch a worktree before running (then run the loop *inside* that worktree)
@@ -109,19 +109,19 @@ Ralph can optionally:
 Create/switch a branch before the first iteration:
 
 ```bash
-ralph loop --git-branch "ralph/my-task"
+loopy loop --git-branch "ralph/my-task"
 ```
 
 Run inside a worktree (creates it if missing):
 
 ```bash
-ralph loop --git-worktree "../wt/ralph-my-task" --git-worktree-branch "ralph/my-task"
+loopy loop --git-worktree "../wt/ralph-my-task" --git-worktree-branch "ralph/my-task"
 ```
 
 Auto-commit after successful iterations (with a template):
 
 ```bash
-ralph loop --git-commit --git-commit-message "Ralph {iteration}: {status} ({test})"
+loopy loop --git-commit --git-commit-message "Loopy {iteration}: {status} ({test})"
 ```
 
 Supported commit template variables:
@@ -146,15 +146,15 @@ git:
   worktree_branch: "ralph/my-task"
   branch: "ralph/my-task"
   commit: true
-  commit_message: "Ralph {iteration}: {status} ({test})"
+  commit_message: "Loopy {iteration}: {status} ({test})"
 ---
 ```
 
 ### Safety notes
 
-- Ralph **never pushes** to remotes.
-- If `--git-worktree` is set without a branch, Ralph creates a **detached HEAD** worktree (`git worktree add --detach ...`).
-- If `--git-branch` is set, Ralph refuses to switch branches when there are **uncommitted changes**.
+- Loopy **never pushes** to remotes.
+- If `--git-worktree` is set without a branch, Loopy creates a **detached HEAD** worktree (`git worktree add --detach ...`).
+- If `--git-branch` is set, Loopy refuses to switch branches when there are **uncommitted changes**.
 - Auto-commit runs `git add -A` and then `git commit -m "<rendered message>"`.
 - Git commits require an author/committer identity (via repo config or environment variables).
 
@@ -169,4 +169,4 @@ git:
 
 - Logs redact common secret patterns, but avoid writing secrets to stdout/stderr.
 - The loop stops when all checkboxes in `RALPH_TASK.md` are checked.
- - The loop also stops on “gutter” guardrails (repeated identical failures or file thrashing); see `.ralph/guardrails.md` and `.ralph/progress.md`.
+- The loop also stops on “gutter” guardrails (repeated identical failures or file thrashing); see `.ralph/guardrails.md` and `.ralph/progress.md`.

@@ -1,10 +1,10 @@
 {
-  "name": "ralph-loop-runner",
+  "name": "loopy",
   "version": "0.1.0",
-  "description": "Node.js CLI for running a Ralph-style coding agent loop",
+  "description": "Loopy is a Node.js CLI for running a Ralph-style coding agent loop",
   "license": "MIT",
   "bin": {
-    "ralph": "bin/ralph.js"
+    "loopy": "bin/loopy.js"
   },
   "main": "src/ralph.js",
   "scripts": {

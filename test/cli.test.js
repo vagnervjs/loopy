@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 
-const CLI_PATH = path.resolve(__dirname, "..", "bin", "ralph.js");
+const CLI_PATH = path.resolve(__dirname, "..", "bin", "loopy.js");
 
 function runNodeCli(args, { cwd, env } = {}) {
   return new Promise((resolve, reject) => {
@@ -87,13 +87,13 @@ test("`--help` prints usage and exits 0", async () => {
   assert.equal(code, 0);
   assert.equal(stderr, "");
   assert.match(stdout, /Usage:/);
-  assert.match(stdout, /\bralph help\b/);
+  assert.match(stdout, /\bloopy help\b/);
 });
 
 test("`help` command prints usage and exits 0", async () => {
   const { code, stdout } = await runNodeCli([CLI_PATH, "help"]);
   assert.equal(code, 0);
-  assert.match(stdout, /Ralph Loop Runner/);
+  assert.match(stdout, /Loopy/);
 });
 
 test("unknown command exits 1", async () => {
@@ -217,8 +217,7 @@ test("`--git-worktree` runs loop inside worktree path", async () => {
   assert.equal(head.stdout.trim(), "ralph/wt-branch");
 
   const promptInWorktree = await fs.readFile(path.join(wt, "PROMPT.md"), "utf8");
-  assert.match(promptInWorktree, /Ralph Loop Prompt/);
+  assert.match(promptInWorktree, /Loopy Loop Prompt/);
 
   await assert.rejects(() => fs.readFile(path.join(tmp, "PROMPT.md"), "utf8"));
 });
-

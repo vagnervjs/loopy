@@ -1,4 +1,4 @@
-# PRD: Ralph Loop Runner (Node.js)
+# PRD: Loopy (Ralph Loop Runner)
 
 ## Problem Statement
 Build a Node.js CLI that runs a Ralph-style coding agent loop reliably, preserving state in files/git and avoiding context pollution, while giving clear progress and safety controls.
@@ -49,7 +49,7 @@ Build a Node.js CLI that runs a Ralph-style coding agent loop reliably, preservi
 - [N5] Observability: logs are human-readable and append-only.
 
 ## User Stories (MVP)
-- As a developer, I want to run `ralph loop` overnight and wake up to a progress log.
+- As a developer, I want to run `loopy loop` overnight and wake up to a progress log.
 - As a developer, I want to run a single iteration to validate the prompt.
 - As a developer, I want the loop to stop when success criteria are met.
 

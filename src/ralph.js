@@ -16,7 +16,7 @@ const DEFAULTS = {
   backoffMs: 5000,
   rotateBytes: 150000,
   maxOutputBytes: 1024 * 1024,
-  gitCommitMessage: "Ralph iteration {iteration}: {status}",
+  gitCommitMessage: "Loopy iteration {iteration}: {status}",
 };
 
 let stopRequested = false;
@@ -174,7 +174,7 @@ function parseTask(text) {
 
 function formatProgress(state) {
   const lines = [
-    "# Ralph Progress",
+    "# Loopy Progress",
     "",
     `- Iteration: ${state.iteration || 0}`,
     `- Last status: ${state.lastStatus || "n/a"}`,
@@ -198,7 +198,7 @@ function formatProgress(state) {
 
 function ensureGuardrails(text) {
   if (!text || !text.trim()) {
-    return "# Ralph Guardrails\n\n## Signs\n";
+    return "# Loopy Guardrails\n\n## Signs\n";
   }
   if (!text.includes("## Signs")) {
     return text.trimEnd() + "\n\n## Signs\n";
@@ -214,7 +214,7 @@ function appendSign(guardrailsText, message) {
 
 function formatPrompt({ iteration, taskText, guardrailsText, progressText, lastOutput, rotationPending }) {
   const lines = [
-    "# Ralph Loop Prompt",
+    "# Loopy Loop Prompt",
     "",
     `Timestamp: ${new Date().toISOString()}`,
     `Iteration: ${iteration}`,
@@ -929,12 +929,12 @@ async function runLoop(command, flags) {
 
 function printHelp() {
   const lines = [
-    "Ralph Loop Runner",
+    "Loopy",
     "",
     "Usage:",
-    "  ralph run [options]",
-    "  ralph loop [options]",
-    "  ralph help",
+    "  loopy run [options]",
+    "  loopy loop [options]",
+    "  loopy help",
     "",
     "Options:",
     "  --task <file>           Task file (default: RALPH_TASK.md)",
