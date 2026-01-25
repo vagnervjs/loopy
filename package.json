@@ -1,0 +1,19 @@
+{
+  "name": "ralph-loop-runner",
+  "version": "0.1.0",
+  "description": "Node.js CLI for running a Ralph-style coding agent loop",
+  "license": "MIT",
+  "bin": {
+    "ralph": "bin/ralph.js"
+  },
+  "main": "src/ralph.js",
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}
