@@ -29,6 +29,13 @@ loopy help
 # or: node bin/loopy.js --help
 ```
 
+Show last run status (from `.ralph/state.json`):
+
+```bash
+loopy status
+# or: node bin/loopy.js status
+```
+
 Single iteration:
 
 ```bash
@@ -107,6 +114,19 @@ To also mirror the agent output to your terminal, pass `--stream`:
 ```bash
 loopy loop --agent-cmd "cursor-agent" --stream
 ```
+
+## Status command
+
+`loopy status` reads `.ralph/state.json` and prints a short summary:
+
+- iteration
+- last status
+- last test
+- last error
+- last bytes
+- updated at
+
+If `.ralph/state.json` is missing or invalid, it prints a friendly error and exits with code 1.
 
 ## Git integration (optional)
 

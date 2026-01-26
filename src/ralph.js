@@ -1084,6 +1084,7 @@ function printHelp() {
     "Usage:",
     "  loopy run [options]",
     "  loopy loop [options]",
+    "  loopy status [options]",
     "  loopy help",
     "",
     "Options:",
@@ -1113,11 +1114,62 @@ function printHelp() {
   console.log(lines.join("\n"));
 }
 
+async function runStatus(flags) {
+  const cwd = process.cwd();
+  const stateFile = resolveFrom(cwd, flags.state || DEFAULTS.stateFile);
+
+  let text = "";
+  try {
+    text = await fs.readFile(stateFile, "utf8");
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      console.error(
+        `No Loopy state found at ${path.relative(cwd, stateFile) || stateFile}.\n` +
+          "Run `loopy run` or `loopy loop` first."
+      );
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
+  }
+
+  let state = null;
+  try {
+    state = JSON.parse(text);
+  } catch (err) {
+    console.error(
+      `Failed to parse Loopy state at ${path.relative(cwd, stateFile) || stateFile}: ${
+        err && err.message ? err.message : String(err)
+      }`
+    );
+    process.exitCode = 1;
+    return;
+  }
+
+  const lines = [
+    `Loopy status (${path.relative(cwd, stateFile) || stateFile})`,
+    "",
+    `Iteration: ${state && state.iteration != null ? state.iteration : 0}`,
+    `Last status: ${(state && state.lastStatus) || "n/a"}`,
+    `Last test: ${(state && state.lastTest) || "n/a"}`,
+    `Last error: ${(state && state.lastError) || "n/a"}`,
+    `Last bytes: ${state && state.lastBytes != null ? state.lastBytes : 0}`,
+    `Updated at: ${(state && state.updatedAt) || "n/a"}`,
+    "",
+  ];
+  console.log(lines.join("\n"));
+}
+
 async function runCli(argv) {
   const { command, flags } = parseArgs(argv);
 
   if (!command || flags.help || command === "help") {
     printHelp();
+    return;
+  }
+
+  if (command === "status") {
+    await runStatus(flags);
     return;
   }
 

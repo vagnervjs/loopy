@@ -96,6 +96,47 @@ test("`help` command prints usage and exits 0", async () => {
   assert.match(stdout, /Loopy/);
 });
 
+test("`status` prints summary from `.ralph/state.json`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-status-"));
+  await fs.mkdir(path.join(tmp, ".ralph"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".ralph", "state.json"),
+    JSON.stringify(
+      {
+        iteration: 12,
+        lastStatus: "guardrail-stop",
+        lastTest: "n/a",
+        lastError: "Repeated failure signature (>= 3).",
+        lastBytes: 8856,
+        updatedAt: "2026-01-26T01:16:24.741Z",
+      },
+      null,
+      2
+    ) + "\n",
+    "utf8"
+  );
+
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "status"], { cwd: tmp });
+  assert.equal(code, 0);
+  assert.equal(stderr, "");
+  assert.match(stdout, /Loopy status/);
+  assert.match(stdout, /Iteration:\s+12/);
+  assert.match(stdout, /Last status:\s+guardrail-stop/);
+  assert.match(stdout, /Last test:\s+n\/a/);
+  assert.match(stdout, /Last error:\s+Repeated failure signature/);
+  assert.match(stdout, /Last bytes:\s+8856/);
+  assert.match(stdout, /Updated at:\s+2026-01-26T01:16:24.741Z/);
+});
+
+test("`status` exits 1 with friendly message when state file is missing", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-status-missing-"));
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "status"], { cwd: tmp });
+  assert.equal(code, 1);
+  assert.equal(stdout, "");
+  assert.match(stderr, /No Loopy state found/);
+  assert.match(stderr, /loopy run|loopy loop/);
+});
+
 test("unknown command exits 1", async () => {
   const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "nope"]);
   assert.equal(code, 1);
