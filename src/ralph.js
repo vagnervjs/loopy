@@ -18,7 +18,7 @@ const DEFAULTS = {
   backoffMs: 5000,
   rotateBytes: 150000,
   maxOutputBytes: 1024 * 1024,
-  gitCommitMessage: "Loopy iteration {iteration}: {status}",
+  gitCommitMessage: "loopy: {task_summary} (iter {iteration} - {status}, {test})",
 };
 
 let stopRequested = false;
@@ -172,6 +172,21 @@ function parseTask(text) {
   result.checklist = checklist;
   result.allChecked = checklist.length > 0 && checklist.every((item) => item.checked);
   return result;
+}
+
+function getTaskSummary(text) {
+  if (!text) return "task update";
+  const parsed = parseTask(text);
+  const firstOpen = parsed.checklist.find((item) => !item.checked);
+  if (firstOpen && firstOpen.text) return firstOpen.text.trim();
+  const firstItem = parsed.checklist[0];
+  if (firstItem && firstItem.text) return firstItem.text.trim();
+  const bodyLines = (parsed.body || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (bodyLines.length) return bodyLines[0];
+  return "task update";
 }
 
 function formatProgress(state) {
@@ -563,7 +578,7 @@ async function ensureGitWorktree(baseCwd, worktreePath, worktreeBranch) {
   return absPath;
 }
 
-async function gitCommitIfNeeded(config, { iteration, status, testStatus, taskComplete }) {
+async function gitCommitIfNeeded(config, { iteration, status, testStatus, taskComplete, taskSummary }) {
   if (!config.gitCommit) return { committed: false, reason: "disabled" };
 
   await ensureGitRepo(config.cwd);
@@ -595,6 +610,7 @@ async function gitCommitIfNeeded(config, { iteration, status, testStatus, taskCo
     test: testStatus,
     timestamp: new Date().toISOString(),
     taskComplete: taskComplete ? "true" : "false",
+    task_summary: taskSummary,
     branch,
   });
 
@@ -869,6 +885,7 @@ async function runIteration(config) {
   const taskAfter = await readText(config.taskFile);
   bytesRead += Buffer.byteLength(taskAfter);
   const taskComplete = taskAfter ? parseTask(taskAfter).allChecked : false;
+  const taskSummary = getTaskSummary(taskAfter || taskText);
 
   let postIterationRan = false;
   if (status === "success" && config.postIteration) {
@@ -886,6 +903,7 @@ async function runIteration(config) {
         status,
         testStatus,
         taskComplete,
+        taskSummary,
       });
       if (commitResult.committed) {
         await appendActivity(config.activityLog, [

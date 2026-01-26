@@ -153,11 +153,12 @@ loopy loop --git-worktree "../wt/ralph-my-task" --git-worktree-branch "ralph/my-
 Auto-commit after successful iterations (with a template):
 
 ```bash
-loopy loop --git-commit --git-commit-message "Loopy {iteration}: {status} ({test})"
+loopy loop --git-commit --git-commit-message "loopy: {task_summary} (iter {iteration} - {status}, {test})"
 ```
 
 Supported commit template variables:
 
+- `{task_summary}`: first unchecked task line (falls back to first task item or first body line)
 - `{iteration}`: iteration number (1-based)
 - `{status}`: `success` / `failure` (commit only runs on success)
 - `{test}`: test status string (e.g. `pass @ 2026-01-01T00:00:00.000Z`, or `n/a`)
@@ -178,7 +179,7 @@ git:
   worktree_branch: "ralph/my-task"
   branch: "ralph/my-task"
   commit: true
-  commit_message: "Loopy {iteration}: {status} ({test})"
+  commit_message: "loopy: {task_summary} (iter {iteration} - {status}, {test})"
 ---
 ```
 
