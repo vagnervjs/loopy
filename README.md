@@ -29,6 +29,13 @@ loopy help
 # or: node bin/loopy.js --help
 ```
 
+Show version:
+
+```bash
+loopy --version
+# or: node bin/loopy.js --version
+```
+
 Show last run status (from `.ralph/state.json`):
 
 ```bash
@@ -91,6 +98,7 @@ See `examples/RALPH_TASK.md` for a starter template.
 
 ## Options
 
+- `--version` print version and exit
 - `--task <file>` task file path (default: `RALPH_TASK.md`)
 - `--prompt <file>` prompt output file (default: `PROMPT.md`)
 - `--progress <file>` progress file (default: `.ralph/progress.md`)

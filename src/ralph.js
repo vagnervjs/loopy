@@ -24,6 +24,17 @@ const DEFAULTS = {
 let stopRequested = false;
 let currentActivityLog = DEFAULTS.activityLog;
 
+function getLoopyVersion() {
+  try {
+    // `src/ralph.js` lives one level below `package.json`.
+    // eslint-disable-next-line global-require
+    const pkg = require("../package.json");
+    return (pkg && pkg.version) || "";
+  } catch (_) {
+    return "";
+  }
+}
+
 function resolveFrom(cwd, maybePath) {
   if (!maybePath) return maybePath;
   if (path.isAbsolute(maybePath)) return maybePath;
@@ -1230,12 +1241,14 @@ function printHelp() {
     "Loopy",
     "",
     "Usage:",
+    "  loopy --version",
     "  loopy run [options]",
     "  loopy loop [options]",
     "  loopy status [options]",
     "  loopy help",
     "",
     "Options:",
+    "  --version               Print version and exit",
     "  --task <file>           Task file (default: RALPH_TASK.md)",
     "  --prompt <file>         Prompt file (default: PROMPT.md)",
     "  --progress <file>       Progress file (default: .ralph/progress.md)",
@@ -1310,6 +1323,11 @@ async function runStatus(flags) {
 
 async function runCli(argv) {
   const { command, flags } = parseArgs(argv);
+
+  if (flags.version) {
+    console.log(getLoopyVersion());
+    return;
+  }
 
   if (!command || flags.help || command === "help") {
     printHelp();
