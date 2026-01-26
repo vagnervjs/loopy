@@ -1,3 +1,10 @@
+const { runCli } = require("./cli");
+
+module.exports = {
+  runCli,
+};
+
+/*
 const fs = require("fs/promises");
 const os = require("os");
 const path = require("path");
@@ -1364,3 +1371,4 @@ async function runCli(argv) {
 module.exports = {
   runCli,
 };
+*/

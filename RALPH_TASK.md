@@ -11,8 +11,8 @@ git:
 ---
 # Task
 
-- [ ] refactor: Split `src/ralph.js` into focused modules (config, task parsing, git helpers, loop runner, etc).
-- [ ] refactor: Keep CLI entrypoint thin and move helpers into new files under `src/`.
-- [ ] refactor: Preserve behavior and update imports/exports.
+- [x] refactor: Split `src/ralph.js` into focused modules (config, task parsing, git helpers, loop runner, etc).
+- [x] refactor: Keep CLI entrypoint thin and move helpers into new files under `src/`.
+- [x] refactor: Preserve behavior and update imports/exports.
 - [ ] test: Run existing tests and fix any breakage from the refactor.
-- [ ] docs: Update README if any public APIs or paths change.
+- [x] docs: Update README if any public APIs or paths change.
