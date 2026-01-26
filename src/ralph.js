@@ -1,4 +1,5 @@
 const fs = require("fs/promises");
+const { createWriteStream } = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const yaml = require("js-yaml");
@@ -10,6 +11,7 @@ const DEFAULTS = {
   progressFile: ".ralph/progress.md",
   guardrailsFile: ".ralph/guardrails.md",
   activityLog: ".ralph/activity.log",
+  agentStreamLog: ".ralph/agent_stream.log",
   stateFile: ".ralph/state.json",
   maxIterations: 50,
   maxMinutes: 120,
@@ -256,8 +258,26 @@ function formatDuration(minutes) {
   return `${minutes}m`;
 }
 
-async function runShellCommand(command, input, maxOutputBytes, { cwd } = {}) {
+async function runShellCommand(command, input, maxOutputBytes, options = {}) {
   const limit = maxOutputBytes || DEFAULTS.maxOutputBytes;
+  const cwd = options && options.cwd ? options.cwd : undefined;
+  const agentStreamLogPath =
+    options && options.agentStreamLogPath ? String(options.agentStreamLogPath) : "";
+  const streamToTerminal = Boolean(options && options.streamToTerminal);
+
+  let logStream = null;
+  if (agentStreamLogPath) {
+    try {
+      await fs.mkdir(path.dirname(agentStreamLogPath), { recursive: true });
+      logStream = createWriteStream(agentStreamLogPath, { flags: "a" });
+      logStream.on("error", () => {
+        // If the log stream fails, keep running the command.
+      });
+    } catch (_) {
+      logStream = null;
+    }
+  }
+
   return new Promise((resolve) => {
     const child = spawn(command, {
       shell: true,
@@ -268,24 +288,39 @@ async function runShellCommand(command, input, maxOutputBytes, { cwd } = {}) {
 
     let stdout = "";
     let stderr = "";
+    const cleanup = () => {
+      if (!logStream) return;
+      try {
+        logStream.end();
+      } catch (_) {
+        // ignore
+      }
+      logStream = null;
+    };
 
     child.stdout.on("data", (chunk) => {
+      if (streamToTerminal) process.stdout.write(chunk);
+      if (logStream) logStream.write(redact(chunk.toString()));
       if (Buffer.byteLength(stdout) < limit) {
         stdout += chunk.toString();
       }
     });
 
     child.stderr.on("data", (chunk) => {
+      if (streamToTerminal) process.stderr.write(chunk);
+      if (logStream) logStream.write(redact(chunk.toString()));
       if (Buffer.byteLength(stderr) < limit) {
         stderr += chunk.toString();
       }
     });
 
     child.on("error", (err) => {
+      cleanup();
       resolve({ code: 1, stdout, stderr: stderr + err.message });
     });
 
     child.on("close", (code) => {
+      cleanup();
       resolve({ code: code ?? 1, stdout, stderr });
     });
 
@@ -540,6 +575,7 @@ function mergeConfig(flags, frontMatter) {
     progressFile: flags.progress || DEFAULTS.progressFile,
     guardrailsFile: flags.guardrails || DEFAULTS.guardrailsFile,
     activityLog: flags["activity-log"] || DEFAULTS.activityLog,
+    agentStreamLog: DEFAULTS.agentStreamLog,
     stateFile: flags.state || DEFAULTS.stateFile,
     agentCommand: normalizeCommand(flags["agent-cmd"] || fm.agent_command || fm.agentCommand || ""),
     testCommand: normalizeCommand(fm.test_command || fm.testCommand || ""),
@@ -593,6 +629,7 @@ function mergeConfig(flags, frontMatter) {
       1024
     ),
     dryRun: Boolean(flags["dry-run"]),
+    stream: Boolean(flags.stream),
   };
 }
 
@@ -679,8 +716,24 @@ async function runIteration(config) {
     ]);
   }
 
+  const agentStreamLogPath = config.agentStreamLog
+    ? resolveFrom(config.cwd, config.agentStreamLog)
+    : path.join(config.ralphDir, "agent_stream.log");
+
+  // Write a small header so runs are easy to separate.
+  await fs.mkdir(path.dirname(agentStreamLogPath), { recursive: true });
+  await fs.appendFile(
+    agentStreamLogPath,
+    `\n\n===== Iteration ${iteration} @ ${new Date().toISOString()} =====\n$ ${redact(
+      config.agentCommand
+    )}\n\n`,
+    "utf8"
+  );
+
   const agentResult = await runShellCommand(config.agentCommand, prompt, DEFAULTS.maxOutputBytes, {
     cwd: config.cwd,
+    agentStreamLogPath,
+    streamToTerminal: Boolean(config.stream),
   });
   const redactedStdout = redact(agentResult.stdout);
   const redactedStderr = redact(agentResult.stderr);
@@ -944,6 +997,7 @@ function printHelp() {
     "  --activity-log <file>   Activity log (default: .ralph/activity.log)",
     "  --state <file>          State file (default: .ralph/state.json)",
     "  --agent-cmd <command>   Agent command (overrides task front matter)",
+    "  --stream                Mirror agent stdout/stderr to your terminal",
     "  --git-worktree <path>   Use/create git worktree at path (optional)",
     "  --git-worktree-branch <name>  Branch for worktree add/checkout (optional)",
     "  --git-branch <name>     Create/checkout branch before iteration (optional)",

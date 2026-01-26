@@ -23,6 +23,6 @@ git:
 - [x] Add optional git commit support with a configurable message template.
 - [x] Add optional git worktree support (create/switch worktree before iteration).
 - [x] Document git support in README with examples and safety notes.
-- [ ] Add live streaming of agent stdout/stderr to a log file (e.g. .ralph/agent_stream.log).
-- [ ] Add optional --stream flag to mirror agent output to terminal.
-- [ ] Document streaming in README.
+- [x] Add live streaming of agent stdout/stderr to a log file (e.g. .ralph/agent_stream.log).
+- [x] Add optional --stream flag to mirror agent output to terminal.
+- [x] Document streaming in README.

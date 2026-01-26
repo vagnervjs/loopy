@@ -221,3 +221,56 @@ test("`--git-worktree` runs loop inside worktree path", async () => {
 
   await assert.rejects(() => fs.readFile(path.join(tmp, "PROMPT.md"), "utf8"));
 });
+
+test("agent output streams to `.ralph/agent_stream.log`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-stream-log-"));
+  await fs.writeFile(
+    path.join(tmp, "RALPH_TASK.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
+      "\n"
+    ),
+    "utf8"
+  );
+
+  const agentCmd = 'node -e "console.log(\\"out\\"); console.error(\\"err\\")"';
+  const { code, stderr } = await runNodeCli(
+    [CLI_PATH, "run", "--task", "RALPH_TASK.md", "--agent-cmd", agentCmd, "--max-minutes", "1"],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const streamLog = await fs.readFile(path.join(tmp, ".ralph", "agent_stream.log"), "utf8");
+  assert.match(streamLog, /Iteration 1/);
+  assert.match(streamLog, /\bout\b/);
+  assert.match(streamLog, /\berr\b/);
+});
+
+test("`--stream` mirrors agent output to terminal", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-stream-terminal-"));
+  await fs.writeFile(
+    path.join(tmp, "RALPH_TASK.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
+      "\n"
+    ),
+    "utf8"
+  );
+
+  const agentCmd = 'node -e "console.log(\\"out\\"); console.error(\\"err\\")"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--task",
+      "RALPH_TASK.md",
+      "--agent-cmd",
+      agentCmd,
+      "--stream",
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0);
+  assert.match(stdout, /\bout\b/);
+  assert.match(stderr, /\berr\b/);
+});
