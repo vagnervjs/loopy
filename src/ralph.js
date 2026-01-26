@@ -1,5 +1,4 @@
 const fs = require("fs/promises");
-const { createWriteStream } = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const yaml = require("js-yaml");
@@ -258,23 +257,84 @@ function formatDuration(minutes) {
   return `${minutes}m`;
 }
 
+function loadPty() {
+  try {
+    // eslint-disable-next-line global-require
+    return require("node-pty");
+  } catch (_) {
+    return null;
+  }
+}
+
+function buildShellCommand(command) {
+  if (process.platform === "win32") {
+    return { shell: "cmd.exe", args: ["/c", command] };
+  }
+  const shell = process.env.SHELL || "/bin/bash";
+  return { shell, args: ["-lc", command] };
+}
+
 async function runShellCommand(command, input, maxOutputBytes, options = {}) {
   const limit = maxOutputBytes || DEFAULTS.maxOutputBytes;
   const cwd = options && options.cwd ? options.cwd : undefined;
   const agentStreamLogPath =
     options && options.agentStreamLogPath ? String(options.agentStreamLogPath) : "";
   const streamToTerminal = Boolean(options && options.streamToTerminal);
+  const usePty = Boolean(agentStreamLogPath || streamToTerminal);
 
-  let logStream = null;
+  let appendQueue = Promise.resolve();
+  const appendToLog = (payload) => {
+    if (!agentStreamLogPath) return;
+    appendQueue = appendQueue
+      .then(() => fs.appendFile(agentStreamLogPath, payload, "utf8"))
+      .catch(() => {
+        // If log writes fail, keep running the command.
+      });
+  };
+
   if (agentStreamLogPath) {
     try {
       await fs.mkdir(path.dirname(agentStreamLogPath), { recursive: true });
-      logStream = createWriteStream(agentStreamLogPath, { flags: "a" });
-      logStream.on("error", () => {
-        // If the log stream fails, keep running the command.
-      });
     } catch (_) {
-      logStream = null;
+      // ignore
+    }
+  }
+
+  if (usePty) {
+    const pty = loadPty();
+    if (pty) {
+      return new Promise((resolve) => {
+        const { shell, args } = buildShellCommand(command);
+        const child = pty.spawn(shell, args, {
+          name: "xterm-color",
+          cols: 120,
+          rows: 40,
+          cwd: cwd || process.cwd(),
+          env: process.env,
+        });
+
+        let stdout = "";
+
+        child.onData((data) => {
+          if (streamToTerminal) process.stdout.write(data);
+          if (agentStreamLogPath) appendToLog(redact(data));
+          if (Buffer.byteLength(stdout) < limit) {
+            stdout += data;
+          }
+        });
+
+        child.onExit(({ exitCode }) => {
+          Promise.resolve(appendQueue).finally(() => {
+            resolve({ code: exitCode ?? 1, stdout, stderr: "" });
+          });
+        });
+
+        if (input) {
+          child.write(input);
+          if (!input.endsWith("\n")) child.write("\n");
+          child.write("\x04");
+        }
+      });
     }
   }
 
@@ -288,19 +348,9 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
 
     let stdout = "";
     let stderr = "";
-    const cleanup = () => {
-      if (!logStream) return;
-      try {
-        logStream.end();
-      } catch (_) {
-        // ignore
-      }
-      logStream = null;
-    };
-
     child.stdout.on("data", (chunk) => {
       if (streamToTerminal) process.stdout.write(chunk);
-      if (logStream) logStream.write(redact(chunk.toString()));
+      if (agentStreamLogPath) appendToLog(redact(chunk.toString()));
       if (Buffer.byteLength(stdout) < limit) {
         stdout += chunk.toString();
       }
@@ -308,20 +358,22 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
 
     child.stderr.on("data", (chunk) => {
       if (streamToTerminal) process.stderr.write(chunk);
-      if (logStream) logStream.write(redact(chunk.toString()));
+      if (agentStreamLogPath) appendToLog(redact(chunk.toString()));
       if (Buffer.byteLength(stderr) < limit) {
         stderr += chunk.toString();
       }
     });
 
     child.on("error", (err) => {
-      cleanup();
-      resolve({ code: 1, stdout, stderr: stderr + err.message });
+      Promise.resolve(appendQueue).finally(() => {
+        resolve({ code: 1, stdout, stderr: stderr + err.message });
+      });
     });
 
     child.on("close", (code) => {
-      cleanup();
-      resolve({ code: code ?? 1, stdout, stderr });
+      Promise.resolve(appendQueue).finally(() => {
+        resolve({ code: code ?? 1, stdout, stderr });
+      });
     });
 
     if (input) {
