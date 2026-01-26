@@ -15,9 +15,9 @@ git:
 ---
 # Task
 
-- [ ] feat: Add `--version` flag to print the Loopy version.
-- [ ] test: Add CLI test for `--version` output.
-- [ ] docs: Document `--version` in README.
+- [x] feat: Add `--version` flag to print the Loopy version.
+- [x] test: Add CLI test for `--version` output.
+- [x] docs: Document `--version` in README.
 - [x] Add tests covering status output and missing state file.
 - [x] Document the new command in `README.md`.
 - [x] Print status on the terminal for every step

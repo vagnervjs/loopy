@@ -6,6 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const CLI_PATH = path.resolve(__dirname, "..", "bin", "loopy.js");
+const { version: LOOPY_VERSION } = require("../package.json");
 
 function runNodeCli(args, { cwd, env } = {}) {
   return new Promise((resolve, reject) => {
@@ -88,6 +89,13 @@ test("`--help` prints usage and exits 0", async () => {
   assert.equal(stderr, "");
   assert.match(stdout, /Usage:/);
   assert.match(stdout, /\bloopy help\b/);
+});
+
+test("`--version` prints version and exits 0", async () => {
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "--version"]);
+  assert.equal(code, 0);
+  assert.equal(stderr, "");
+  assert.equal(stdout.trim(), LOOPY_VERSION);
 });
 
 test("`help` command prints usage and exits 0", async () => {
