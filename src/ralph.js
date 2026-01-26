@@ -1,5 +1,3 @@
-const { runCli } = require("./cli");
-
-module.exports = {
-  runCli,
-};
+// Backwards-compatible entry point.
+// The canonical entry module is now `src/loopy.js`.
+module.exports = require("./loopy");
