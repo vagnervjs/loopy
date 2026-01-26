@@ -109,6 +109,8 @@ See `examples/RALPH_TASK.md` for a starter template.
 
 Loopy always writes the agent's stdout/stderr to `.ralph/agent_stream.log` as it runs.
 
+Loopy also prints short **step status** lines to the terminal (iteration start, hooks, agent run, tests, git, state updates).
+
 To also mirror the agent output to your terminal, pass `--stream`:
 
 ```bash
@@ -153,11 +155,12 @@ loopy loop --git-worktree "../wt/ralph-my-task" --git-worktree-branch "ralph/my-
 Auto-commit after successful iterations (with a template):
 
 ```bash
-loopy loop --git-commit --git-commit-message "loopy: {task_summary} (iter {iteration} - {status}, {test})"
+loopy loop --git-commit --git-commit-message "loopy: {change_type} {task_summary}"
 ```
 
 Supported commit template variables:
 
+- `{change_type}`: inferred from task line (prefix like `feat:` wins; otherwise agent-based classification with heuristic fallback)
 - `{task_summary}`: first unchecked task line (falls back to first task item or first body line)
 - `{iteration}`: iteration number (1-based)
 - `{status}`: `success` / `failure` (commit only runs on success)
@@ -179,7 +182,7 @@ git:
   worktree_branch: "ralph/my-task"
   branch: "ralph/my-task"
   commit: true
-  commit_message: "loopy: {task_summary} (iter {iteration} - {status}, {test})"
+  commit_message: "loopy: {change_type} {task_summary}"
 ---
 ```
 

@@ -286,6 +286,27 @@ test("agent output streams to `.ralph/agent_stream.log`", async () => {
   assert.match(streamLog, /\berr\b/);
 });
 
+test("prints step status lines to terminal during run", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-step-status-"));
+  await fs.writeFile(
+    path.join(tmp, "RALPH_TASK.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
+      "\n"
+    ),
+    "utf8"
+  );
+
+  const agentCmd = 'node -e "process.exit(0)"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [CLI_PATH, "run", "--task", "RALPH_TASK.md", "--agent-cmd", agentCmd, "--max-minutes", "1"],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /\[loopy\] iter 1: Iteration start/);
+  assert.match(stdout, /\[loopy\] iter 1: Running agent:/);
+  assert.match(stdout, /\[loopy\] iter 1: State updated:/);
+});
+
 test("`--stream` mirrors agent output to terminal", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-stream-terminal-"));
   await fs.writeFile(
