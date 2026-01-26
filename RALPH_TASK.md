@@ -6,11 +6,14 @@ max_minutes: 60
 backoff_ms: 5000
 rotate_bytes: 150000
 git:
-  branch: "ralph/streaming"
+  branch: "ralph/refactor"
   commit: true
 ---
 # Task
 
-- [x] feat: Add `--version` flag to print the Loopy version.
-- [x] test: Add CLI test for `--version` output.
-- [x] docs: Document `--version` in README.
+- [x] refactor: Rename `src/ralph.js` to `src/loopy.js`.
+- [x] refactor: Split `src/loopy.js` into focused modules (config, task parsing, git helpers, loop runner).
+- [x] refactor: Keep CLI entrypoint thin and move helpers into new files under `src/`.
+- [x] refactor: Preserve behavior and update imports/exports.
+- [x] test: Run existing tests and fix any breakage from the refactor.
+- [x] docs: Update README if any public APIs or paths change.

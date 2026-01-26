@@ -6,7 +6,7 @@
   "bin": {
     "loopy": "bin/loopy.js"
   },
-  "main": "src/ralph.js",
+  "main": "src/loopy.js",
   "scripts": {
     "test": "node --test"
   },
