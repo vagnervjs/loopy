@@ -78,6 +78,7 @@ See `examples/RALPH_TASK.md` for a starter template.
 - `.ralph/guardrails.md` guardrails and failure signs
 - `.ralph/state.json` internal state for gutter detection
 - `.ralph/last_agent_output.txt` most recent agent output (redacted)
+- `.ralph/agent_stream.log` live agent stdout/stderr stream (redacted)
 - `.ralph/last_test_output.txt` most recent test output (redacted)
 - `PROMPT.md` generated prompt input for each iteration
 
@@ -90,11 +91,22 @@ See `examples/RALPH_TASK.md` for a starter template.
 - `--activity-log <file>` activity log (default: `.ralph/activity.log`)
 - `--state <file>` state file (default: `.ralph/state.json`)
 - `--agent-cmd <command>` agent command (overrides task front matter)
+- `--stream` mirror agent stdout/stderr to your terminal
 - `--max-iterations <n>` max iterations (default: 50)
 - `--max-minutes <n>` max wall time in minutes (default: 120)
 - `--backoff-ms <n>` delay between iterations (default: 5000)
 - `--rotate-bytes <n>` byte threshold to force prompt rotation (default: 150000)
 - `--dry-run` build prompt only, skip agent execution
+
+## Streaming agent output
+
+Loopy always writes the agent's stdout/stderr to `.ralph/agent_stream.log` as it runs.
+
+To also mirror the agent output to your terminal, pass `--stream`:
+
+```bash
+loopy loop --agent-cmd "cursor-agent" --stream
+```
 
 ## Git integration (optional)
 
