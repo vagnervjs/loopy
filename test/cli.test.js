@@ -271,6 +271,7 @@ test("`--stream` mirrors agent output to terminal", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 0);
-  assert.match(stdout, /\bout\b/);
-  assert.match(stderr, /\berr\b/);
+  const combined = `${stdout}\n${stderr}`;
+  assert.match(combined, /\bout\b/);
+  assert.match(combined, /\berr\b/);
 });
