@@ -51,17 +51,17 @@ function runCmd(command, args, { cwd, env } = {}) {
 
 async function initGitRepo(tmp, { withTask = true } = {}) {
   const gitEnv = {
-    GIT_AUTHOR_NAME: "ralph-test",
-    GIT_AUTHOR_EMAIL: "ralph-test@example.com",
-    GIT_COMMITTER_NAME: "ralph-test",
-    GIT_COMMITTER_EMAIL: "ralph-test@example.com",
+    GIT_AUTHOR_NAME: "loopy-test",
+    GIT_AUTHOR_EMAIL: "loopy-test@example.com",
+    GIT_COMMITTER_NAME: "loopy-test",
+    GIT_COMMITTER_EMAIL: "loopy-test@example.com",
   };
   await runCmd("git", ["init"], { cwd: tmp });
-  await fs.writeFile(path.join(tmp, ".gitignore"), ["/.ralph", "/PROMPT.md"].join("\n") + "\n", "utf8");
+  await fs.writeFile(path.join(tmp, ".gitignore"), ["/.loopy", "/PROMPT.md"].join("\n") + "\n", "utf8");
 
   if (withTask) {
     await fs.writeFile(
-      path.join(tmp, "RALPH_TASK.md"),
+      path.join(tmp, "LOOPY_TASK.md"),
       [
         "---",
         "max_iterations: 1",
@@ -104,11 +104,11 @@ test("`help` command prints usage and exits 0", async () => {
   assert.match(stdout, /Loopy/);
 });
 
-test("`status` prints summary from `.ralph/state.json`", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-status-"));
-  await fs.mkdir(path.join(tmp, ".ralph"), { recursive: true });
+test("`status` prints summary from `.loopy/state.json`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-status-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
-    path.join(tmp, ".ralph", "state.json"),
+    path.join(tmp, ".loopy", "state.json"),
     JSON.stringify(
       {
         iteration: 12,
@@ -137,7 +137,7 @@ test("`status` prints summary from `.ralph/state.json`", async () => {
 });
 
 test("`status` exits 1 with friendly message when state file is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-status-missing-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-status-missing-"));
   const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "status"], { cwd: tmp });
   assert.equal(code, 1);
   assert.equal(stdout, "");
@@ -153,8 +153,8 @@ test("unknown command exits 1", async () => {
 });
 
 test("loop stops on repeated failure signature guardrail", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-test-"));
-  const taskPath = path.join(tmp, "RALPH_TASK.md");
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-test-"));
+  const taskPath = path.join(tmp, "LOOPY_TASK.md");
   await fs.writeFile(
     taskPath,
     [
@@ -179,7 +179,7 @@ test("loop stops on repeated failure signature guardrail", async () => {
       CLI_PATH,
       "loop",
       "--task",
-      "RALPH_TASK.md",
+      "LOOPY_TASK.md",
       "--agent-cmd",
       agentCmd,
       "--max-iterations",
@@ -194,28 +194,28 @@ test("loop stops on repeated failure signature guardrail", async () => {
 
   assert.equal(code, 0);
 
-  const progress = await fs.readFile(path.join(tmp, ".ralph", "progress.md"), "utf8");
+  const progress = await fs.readFile(path.join(tmp, ".loopy", "progress.md"), "utf8");
   assert.match(progress, /Last status:\s+guardrail-stop/);
   assert.match(progress, /Repeated failure signature/);
 });
 
 test("`--git-branch` creates/switches branch before iteration", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-git-branch-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-git-branch-"));
   const gitEnv = await initGitRepo(tmp);
 
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--git-branch", "ralph/test-branch"],
+    [CLI_PATH, "run", "--dry-run", "--git-branch", "loopy/test-branch"],
     { cwd: tmp, env: gitEnv }
   );
   assert.equal(code, 0, stderr);
 
   const head = await runCmd("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: tmp });
   assert.equal(head.code, 0);
-  assert.equal(head.stdout.trim(), "ralph/test-branch");
+  assert.equal(head.stdout.trim(), "loopy/test-branch");
 });
 
 test("`--git-commit` commits changes after successful iteration", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-git-commit-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-git-commit-"));
   const gitEnv = await initGitRepo(tmp);
 
   await fs.writeFile(path.join(tmp, "tracked.txt"), "one\n", "utf8");
@@ -228,7 +228,7 @@ test("`--git-commit` commits changes after successful iteration", async () => {
       CLI_PATH,
       "run",
       "--task",
-      "RALPH_TASK.md",
+      "LOOPY_TASK.md",
       "--agent-cmd",
       agentCmd,
       "--git-commit",
@@ -251,19 +251,19 @@ test("`--git-commit` commits changes after successful iteration", async () => {
 });
 
 test("`--git-worktree` runs loop inside worktree path", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-git-worktree-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-git-worktree-"));
   const gitEnv = await initGitRepo(tmp);
 
   const wt = path.join(tmp, "wt");
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--git-worktree", wt, "--git-worktree-branch", "ralph/wt-branch"],
+    [CLI_PATH, "run", "--dry-run", "--git-worktree", wt, "--git-worktree-branch", "loopy/wt-branch"],
     { cwd: tmp, env: gitEnv }
   );
   assert.equal(code, 0, stderr);
 
   const head = await runCmd("git", ["-C", wt, "rev-parse", "--abbrev-ref", "HEAD"]);
   assert.equal(head.code, 0);
-  assert.equal(head.stdout.trim(), "ralph/wt-branch");
+  assert.equal(head.stdout.trim(), "loopy/wt-branch");
 
   const promptInWorktree = await fs.readFile(path.join(wt, "PROMPT.md"), "utf8");
   assert.match(promptInWorktree, /Loopy Loop Prompt/);
@@ -271,10 +271,10 @@ test("`--git-worktree` runs loop inside worktree path", async () => {
   await assert.rejects(() => fs.readFile(path.join(tmp, "PROMPT.md"), "utf8"));
 });
 
-test("agent output streams to `.ralph/agent_stream.log`", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-stream-log-"));
+test("agent output streams to `.loopy/agent_stream.log`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-log-"));
   await fs.writeFile(
-    path.join(tmp, "RALPH_TASK.md"),
+    path.join(tmp, "LOOPY_TASK.md"),
     ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
       "\n"
     ),
@@ -283,21 +283,21 @@ test("agent output streams to `.ralph/agent_stream.log`", async () => {
 
   const agentCmd = 'node -e "console.log(\\"out\\"); console.error(\\"err\\")"';
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--task", "RALPH_TASK.md", "--agent-cmd", agentCmd, "--max-minutes", "1"],
+    [CLI_PATH, "run", "--task", "LOOPY_TASK.md", "--agent-cmd", agentCmd, "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
 
-  const streamLog = await fs.readFile(path.join(tmp, ".ralph", "agent_stream.log"), "utf8");
+  const streamLog = await fs.readFile(path.join(tmp, ".loopy", "agent_stream.log"), "utf8");
   assert.match(streamLog, /Iteration 1/);
   assert.match(streamLog, /\bout\b/);
   assert.match(streamLog, /\berr\b/);
 });
 
 test("prints step status lines to terminal during run", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-step-status-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-step-status-"));
   await fs.writeFile(
-    path.join(tmp, "RALPH_TASK.md"),
+    path.join(tmp, "LOOPY_TASK.md"),
     ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
       "\n"
     ),
@@ -306,7 +306,7 @@ test("prints step status lines to terminal during run", async () => {
 
   const agentCmd = 'node -e "process.exit(0)"';
   const { code, stdout, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--task", "RALPH_TASK.md", "--agent-cmd", agentCmd, "--max-minutes", "1"],
+    [CLI_PATH, "run", "--task", "LOOPY_TASK.md", "--agent-cmd", agentCmd, "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
@@ -316,9 +316,9 @@ test("prints step status lines to terminal during run", async () => {
 });
 
 test("`--stream` mirrors agent output to terminal", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "ralph-stream-terminal-"));
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-terminal-"));
   await fs.writeFile(
-    path.join(tmp, "RALPH_TASK.md"),
+    path.join(tmp, "LOOPY_TASK.md"),
     ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
       "\n"
     ),
@@ -331,7 +331,7 @@ test("`--stream` mirrors agent output to terminal", async () => {
       CLI_PATH,
       "run",
       "--task",
-      "RALPH_TASK.md",
+      "LOOPY_TASK.md",
       "--agent-cmd",
       agentCmd,
       "--stream",

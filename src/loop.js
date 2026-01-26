@@ -97,7 +97,7 @@ async function runIteration(config) {
   }
 
   if (!config.agentCommand) {
-    throw new Error("Missing agent_command. Set it in RALPH_TASK.md front matter or use --agent-cmd.");
+    throw new Error("Missing agent_command. Set it in LOOPY_TASK.md front matter or use --agent-cmd.");
   }
 
   if (config.preIteration) {

@@ -36,7 +36,7 @@ loopy --version
 # or: node bin/loopy.js --version
 ```
 
-Show last run status (from `.ralph/state.json`):
+Show last run status (from `.loopy/state.json`):
 
 ```bash
 loopy status
@@ -59,7 +59,7 @@ loopy loop --agent-cmd "cursor-agent"
 
 ### Task file
 
-Create `RALPH_TASK.md` in the repo root. Example:
+Create `LOOPY_TASK.md` in the repo root. Example:
 
 ```md
 ---
@@ -83,28 +83,28 @@ hooks:
 ```
 
 You can also pass `--agent-cmd` to override the task front matter.
-See `examples/RALPH_TASK.md` for a starter template.
+See `examples/LOOPY_TASK.md` for a starter template.
 
 ## Files created
 
-- `.ralph/activity.log` append-only activity log
-- `.ralph/progress.md` iteration status and test results
-- `.ralph/guardrails.md` guardrails and failure signs
-- `.ralph/state.json` internal state for gutter detection
-- `.ralph/last_agent_output.txt` most recent agent output (redacted)
-- `.ralph/agent_stream.log` live agent stdout/stderr stream (redacted)
-- `.ralph/last_test_output.txt` most recent test output (redacted)
+- `.loopy/activity.log` append-only activity log
+- `.loopy/progress.md` iteration status and test results
+- `.loopy/guardrails.md` guardrails and failure signs
+- `.loopy/state.json` internal state for gutter detection
+- `.loopy/last_agent_output.txt` most recent agent output (redacted)
+- `.loopy/agent_stream.log` live agent stdout/stderr stream (redacted)
+- `.loopy/last_test_output.txt` most recent test output (redacted)
 - `PROMPT.md` generated prompt input for each iteration
 
 ## Options
 
 - `--version` print version and exit
-- `--task <file>` task file path (default: `RALPH_TASK.md`)
+- `--task <file>` task file path (default: `LOOPY_TASK.md`)
 - `--prompt <file>` prompt output file (default: `PROMPT.md`)
-- `--progress <file>` progress file (default: `.ralph/progress.md`)
-- `--guardrails <file>` guardrails file (default: `.ralph/guardrails.md`)
-- `--activity-log <file>` activity log (default: `.ralph/activity.log`)
-- `--state <file>` state file (default: `.ralph/state.json`)
+- `--progress <file>` progress file (default: `.loopy/progress.md`)
+- `--guardrails <file>` guardrails file (default: `.loopy/guardrails.md`)
+- `--activity-log <file>` activity log (default: `.loopy/activity.log`)
+- `--state <file>` state file (default: `.loopy/state.json`)
 - `--agent-cmd <command>` agent command (overrides task front matter)
 - `--stream` mirror agent stdout/stderr to your terminal
 - `--max-iterations <n>` max iterations (default: 50)
@@ -115,7 +115,7 @@ See `examples/RALPH_TASK.md` for a starter template.
 
 ## Streaming agent output
 
-Loopy always writes the agent's stdout/stderr to `.ralph/agent_stream.log` as it runs.
+Loopy always writes the agent's stdout/stderr to `.loopy/agent_stream.log` as it runs.
 
 Loopy also prints short **step status** lines to the terminal (iteration start, hooks, agent run, tests, git, state updates).
 
@@ -127,7 +127,7 @@ loopy loop --agent-cmd "cursor-agent" --stream
 
 ## Status command
 
-`loopy status` reads `.ralph/state.json` and prints a short summary:
+`loopy status` reads `.loopy/state.json` and prints a short summary:
 
 - iteration
 - last status
@@ -136,7 +136,7 @@ loopy loop --agent-cmd "cursor-agent" --stream
 - last bytes
 - updated at
 
-If `.ralph/state.json` is missing or invalid, it prints a friendly error and exits with code 1.
+If `.loopy/state.json` is missing or invalid, it prints a friendly error and exits with code 1.
 
 ## Git integration (optional)
 
@@ -151,13 +151,13 @@ Loopy can optionally:
 Create/switch a branch before the first iteration:
 
 ```bash
-loopy loop --git-branch "ralph/my-task"
+loopy loop --git-branch "loopy/my-task"
 ```
 
 Run inside a worktree (creates it if missing):
 
 ```bash
-loopy loop --git-worktree "../wt/ralph-my-task" --git-worktree-branch "ralph/my-task"
+loopy loop --git-worktree "../wt/loopy-my-task" --git-worktree-branch "loopy/my-task"
 ```
 
 Auto-commit after successful iterations (with a template):
@@ -179,16 +179,16 @@ Supported commit template variables:
 
 ### Task front matter
 
-You can also configure git via `RALPH_TASK.md` front matter:
+You can also configure git via `LOOPY_TASK.md` front matter:
 
 ```md
 ---
 agent_command: "cursor-agent"
 test_command: "npm test"
 git:
-  worktree: "../wt/ralph-my-task"
-  worktree_branch: "ralph/my-task"
-  branch: "ralph/my-task"
+  worktree: "../wt/loopy-my-task"
+  worktree_branch: "loopy/my-task"
+  branch: "loopy/my-task"
   commit: true
   commit_message: "loopy: {change_type} {task_summary}"
 ---
@@ -204,13 +204,13 @@ git:
 
 ## Troubleshooting
 
-- Missing `RALPH_TASK.md`: create the file and include at least one checklist item.
+- Missing `LOOPY_TASK.md`: create the file and include at least one checklist item.
 - Agent exits immediately: verify `agent_command` is correct and accepts stdin.
-- Loop stops early: check `.ralph/progress.md` and `.ralph/activity.log` for caps or completion.
+- Loop stops early: check `.loopy/progress.md` and `.loopy/activity.log` for caps or completion.
 - Guardrails growing: repeated failures or file thrashing were detected.
 
 ## Notes
 
 - Logs redact common secret patterns, but avoid writing secrets to stdout/stderr.
-- The loop stops when all checkboxes in `RALPH_TASK.md` are checked.
-- The loop also stops on “gutter” guardrails (repeated identical failures or file thrashing); see `.ralph/guardrails.md` and `.ralph/progress.md`.
+- The loop stops when all checkboxes in `LOOPY_TASK.md` are checked.
+- The loop also stops on “gutter” guardrails (repeated identical failures or file thrashing); see `.loopy/guardrails.md` and `.loopy/progress.md`.

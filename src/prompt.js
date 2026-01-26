@@ -46,7 +46,7 @@ function formatPrompt({ iteration, taskText, guardrailsText, progressText, lastO
     `Iteration: ${iteration}`,
     `Rotation: ${rotationPending ? "fresh" : "standard"}`,
     "",
-    "## Task (RALPH_TASK.md)",
+    "## Task (LOOPY_TASK.md)",
     taskText.trimEnd(),
     "",
     "## Guardrails",
@@ -63,7 +63,7 @@ function formatPrompt({ iteration, taskText, guardrailsText, progressText, lastO
   lines.push(
     "",
     "## Instructions",
-    "- Follow the task checklist in RALPH_TASK.md.",
+    "- Follow the task checklist in LOOPY_TASK.md.",
     "- Update task checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",

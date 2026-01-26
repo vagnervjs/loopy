@@ -101,7 +101,7 @@ async function gitCommitIfNeeded(
   const hasChanges = porcelain
     .split(/\r?\n/)
     .filter(Boolean)
-    .some((line) => !line.startsWith("?? .ralph") && !line.startsWith("?? PROMPT.md"));
+    .some((line) => !line.startsWith("?? .loopy") && !line.startsWith("?? PROMPT.md"));
 
   if (!hasChanges) return { committed: false, reason: "no-changes" };
 

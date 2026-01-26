@@ -1,14 +1,14 @@
 const path = require("path");
 
 const DEFAULTS = {
-  taskFile: "RALPH_TASK.md",
+  taskFile: "LOOPY_TASK.md",
   promptFile: "PROMPT.md",
-  ralphDir: ".ralph",
-  progressFile: ".ralph/progress.md",
-  guardrailsFile: ".ralph/guardrails.md",
-  activityLog: ".ralph/activity.log",
-  agentStreamLog: ".ralph/agent_stream.log",
-  stateFile: ".ralph/state.json",
+  ralphDir: ".loopy",
+  progressFile: ".loopy/progress.md",
+  guardrailsFile: ".loopy/guardrails.md",
+  activityLog: ".loopy/activity.log",
+  agentStreamLog: ".loopy/agent_stream.log",
+  stateFile: ".loopy/state.json",
   maxIterations: 50,
   maxMinutes: 120,
   backoffMs: 5000,

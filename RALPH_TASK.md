@@ -1,16 +1,9 @@
 ---
-agent_command: "cursor-agent"
-test_command: "npm test"
-max_iterations: 10
-max_minutes: 60
-backoff_ms: 5000
-rotate_bytes: 150000
-git:
-  branch: "ralph/refactor-2"
-  commit: true
+# Deprecated: this file has been renamed to `LOOPY_TASK.md`.
+#
+# Loopy now defaults to `LOOPY_TASK.md`, but this file is kept as a shim so
+# older docs/scripts still work if they reference `RALPH_TASK.md`.
 ---
 # Task
 
-- [ ] refactor: Rename `.ralph/` to `.loopy/` and update defaults.
-- [ ] refactor: Rename `RALPH_TASK.md` to `LOOPY_TASK.md` and update references.
-- [ ] refactor: Update docs, examples, and tests to use Loopy naming.
+- [x] This task file has moved to `LOOPY_TASK.md`.
