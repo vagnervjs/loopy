@@ -10,7 +10,7 @@ hooks:
   postIteration: "echo post"
   onFailure: "echo failed"
 git:
-  branch: "ralph/streaming"
+  branch: "ralph/status-1"
   commit: true
 ---
 # Task
@@ -30,3 +30,4 @@ git:
 - [x] Handle missing/invalid `.ralph/state.json` with a friendly message and exit code 1.
 - [x] Add tests covering status output and missing state file.
 - [x] Document the new command in `README.md`.
+- [ ] Print status on the terminal for every step
