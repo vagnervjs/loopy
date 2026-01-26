@@ -25,8 +25,8 @@ git:
 - [x] Add live streaming of agent stdout/stderr to a log file (e.g. .ralph/agent_stream.log).
 - [x] Add optional --stream flag to mirror agent output to terminal.
 - [x] Document streaming in README.
-- [ ] Add `loopy status` command that prints summary from `.ralph/state.json`.
-- [ ] Include: iteration, last status, last test, last error, last bytes, updated at.
-- [ ] Handle missing/invalid `.ralph/state.json` with a friendly message and exit code 1.
-- [ ] Add tests covering status output and missing state file.
-- [ ] Document the new command in `README.md`.
+- [x] Add `loopy status` command that prints summary from `.ralph/state.json`.
+- [x] Include: iteration, last status, last test, last error, last bytes, updated at.
+- [x] Handle missing/invalid `.ralph/state.json` with a friendly message and exit code 1.
+- [x] Add tests covering status output and missing state file.
+- [x] Document the new command in `README.md`.
