@@ -1,7 +1,7 @@
-# PRD: Loopy (Ralph Loop Runner)
+# PRD: Loopy (Loop Runner)
 
 ## Problem Statement
-Build a Node.js CLI that runs a Ralph-style coding agent loop reliably, preserving state in files/git and avoiding context pollution, while giving clear progress and safety controls.
+Build a Node.js CLI that runs a coding agent loop reliably, preserving state in files/git and avoiding context pollution, while giving clear progress and safety controls.
 
 ## Goals
 - Enable repeatable, long-running agent loops with simple prompts and durable state.

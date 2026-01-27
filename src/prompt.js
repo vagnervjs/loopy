@@ -3,6 +3,7 @@ function formatProgress(state) {
     "# Loopy Progress",
     "",
     `- Iteration: ${state.iteration || 0}`,
+    `- Current phase: ${state.currentPhase || "n/a"}`,
     `- Last status: ${state.lastStatus || "n/a"}`,
     `- Last test: ${state.lastTest || "n/a"}`,
     `- Last error: ${state.lastError || "n/a"}`,
@@ -15,6 +16,13 @@ function formatProgress(state) {
   if (state.history && state.history.length) {
     lines.push("", "## History");
     for (const entry of state.history.slice(-20)) {
+      lines.push(`- ${entry}`);
+    }
+  }
+
+  if (state.phaseHistory && state.phaseHistory.length) {
+    lines.push("", "## Phase History");
+    for (const entry of state.phaseHistory.slice(-20)) {
       lines.push(`- ${entry}`);
     }
   }
@@ -38,14 +46,32 @@ function appendSign(guardrailsText, message) {
   return updated.trimEnd() + "\n" + line + "\n";
 }
 
-function formatPrompt({ iteration, taskText, guardrailsText, progressText, lastOutput, rotationPending }) {
+function formatPrompt({
+  iteration,
+  taskText,
+  taskSeedText,
+  taskSeedSource,
+  guardrailsText,
+  progressText,
+  lastOutput,
+  rotationPending,
+  currentPhase,
+}) {
+  const seedLabel = taskSeedText
+    ? `## Task file (PRD)${taskSeedSource ? ` (${taskSeedSource})` : ""}`
+    : "";
+
   const lines = [
     "# Loopy Loop Prompt",
     "",
     `Timestamp: ${new Date().toISOString()}`,
     `Iteration: ${iteration}`,
     `Rotation: ${rotationPending ? "fresh" : "standard"}`,
+    currentPhase ? `Phase: ${currentPhase}` : "",
     "",
+    seedLabel,
+    taskSeedText ? String(taskSeedText).trimEnd() : "",
+    taskSeedText ? "" : "",
     "## Task (LOOPY_TASK.md)",
     taskText.trimEnd(),
     "",

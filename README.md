@@ -22,6 +22,27 @@ npm link
 
 ## Usage
 
+### Auto-phase quickstart (recommended)
+
+Generate or update `LOOPY_TASK.md` from a simple prompt, then start looping:
+
+```bash
+loopy loop --agent-cmd "cursor-agent" --task-prompt "Add OAuth login to the app" --auto-apply
+```
+
+Or read the task prompt from a file (or stdin via `-`):
+
+```bash
+loopy loop --agent-cmd "cursor-agent" --task-file ./task.txt --auto-apply
+```
+
+By default, Loopy will try to auto-phase (create `phases` + per-phase checklists) when a task file has no phases.
+To disable auto-phase and use the legacy “single checklist” behavior:
+
+```bash
+loopy loop --auto-phase=false
+```
+
 Show help:
 
 ```bash
@@ -57,9 +78,16 @@ loopy loop --agent-cmd "cursor-agent"
 # or: node bin/loopy.js loop --agent-cmd "cursor-agent"
 ```
 
-### Task file
+### Task doc (`--task`, default `LOOPY_TASK.md`)
 
-Create `LOOPY_TASK.md` in the repo root. Example:
+Loopy’s **task doc** is the durable source of truth the loop reads on every iteration. It contains:
+
+- YAML front matter (agent command, test command, loop limits, git settings, phases)
+- The checklist(s) that represent progress and completion
+
+By default this file is `LOOPY_TASK.md`, but you can point Loopy at any path via `--task <file>`.
+
+Example:
 
 ```md
 ---
@@ -85,6 +113,78 @@ hooks:
 You can also pass `--agent-cmd` to override the task front matter.
 See `examples/LOOPY_TASK.md` for a starter template.
 
+### Task seed prompt (`--task-prompt` / `--task-file`)
+
+The **task seed prompt** is a PRD-style requirements/implementation notes document. Loopy uses it to generate/update the task doc (usually `LOOPY_TASK.md`) before looping, and also includes it in the per-iteration prompt for clarity.
+
+Where it’s used:
+
+- If the task doc (`--task`) does not exist, Loopy uses the seed prompt to generate it.
+- If the task doc exists and you provide a seed prompt, Loopy proposes a rewrite/update and asks for confirmation (or applies with `--auto-apply`).
+- If provided, Loopy includes the seed prompt in `PROMPT.md` under `## Task file (PRD)` so the agent can reference the original requirements verbatim.
+
+How to provide it:
+
+- `--task-prompt "<text>"`: inline text.
+- `--task-file <path>`: read text from a file (any extension; `.md` recommended).
+- `--task-file -`: read text from stdin.
+- `--task-prompt` and `--task-file` are mutually exclusive.
+
+Validation / normalization (current behavior):
+
+- The seed prompt is read as **UTF-8 text** (BOM stripped if present).
+- Line endings are normalized (CRLF/CR → LF).
+- Loopy trims only leading/trailing *empty lines* (internal whitespace/newlines are preserved).
+- If the resulting content is empty, Loopy errors (stdin: “Task prompt from --task-file '-' (stdin) is empty.”; file: “Task prompt file is empty: ...”).
+- If the file path does not exist, Loopy errors (“Task prompt file not found: ...”).
+- If the path is a directory, Loopy errors (“Task prompt path is a directory: ...”).
+- If the file is unreadable due to permissions, Loopy errors (“Permission denied reading task prompt file: ...”).
+- There is no explicit max size cap today; very large seed prompts can degrade planning quality and make confirmations noisy.
+
+### Phase schema (auto-phase)
+
+Loopy supports phased execution via front matter:
+
+```md
+---
+phase_defaults:
+  stop_on: all_checked
+  test_command: "npm test"
+phases:
+  - id: plan
+    title: Plan
+  - id: implement
+    title: Implement
+  - id: verify
+    title: Verify
+    stop_on: [all_checked, tests_pass]
+    test_command: "npm test"
+---
+```
+
+And a matching body structure:
+
+```md
+## Phase: plan
+<!-- loopy:phase plan -->
+- [ ] Clarify requirements and outline approach.
+
+## Phase: implement
+<!-- loopy:phase implement -->
+- [ ] Implement the requested changes.
+
+## Phase: verify
+<!-- loopy:phase verify -->
+- [ ] Run tests and validate behavior.
+```
+
+Notes:
+
+- `stop_on` supports `all_checked` and `tests_pass`.
+- `test_command` can be set per-phase; if present, Loopy runs it after a successful agent iteration.
+- `--phase-only` stops once the current phase meets its `stop_on` criteria.
+- If phases are absent and `--auto-phase=false`, Loopy behaves like the legacy single-checklist flow.
+
 ## Files created
 
 - `.loopy/activity.log` append-only activity log
@@ -101,11 +201,19 @@ See `examples/LOOPY_TASK.md` for a starter template.
 - `--version` print version and exit
 - `--task <file>` task file path (default: `LOOPY_TASK.md`)
 - `--prompt <file>` prompt output file (default: `PROMPT.md`)
+- `--task-prompt <text>` PRD-style seed prompt (inline) to generate/update the task doc before looping
+- `--task-file <path>` PRD-style seed prompt file (any extension; or `-` for stdin) to generate/update the task doc
+- Note: `--task-prompt` and `--task-file` are mutually exclusive.
 - `--progress <file>` progress file (default: `.loopy/progress.md`)
 - `--guardrails <file>` guardrails file (default: `.loopy/guardrails.md`)
 - `--activity-log <file>` activity log (default: `.loopy/activity.log`)
 - `--state <file>` state file (default: `.loopy/state.json`)
 - `--agent-cmd <command>` agent command (overrides task front matter)
+- `--auto-phase` enable auto-phase planning (default: true; disable with `--auto-phase=false`)
+- `--phase <id>` start/resume at phase id
+- `--phase-only` stop after current phase completes
+- `--skip-phase <ids>` comma-separated phase ids to skip
+- `--auto-apply` skip confirmation prompts (apply changes)
 - `--stream` mirror agent stdout/stderr to your terminal
 - `--max-iterations <n>` max iterations (default: 50)
 - `--max-minutes <n>` max wall time in minutes (default: 120)

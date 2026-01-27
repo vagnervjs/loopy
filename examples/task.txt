@@ -1,0 +1,2 @@
+Add file-based prompt support to Loopy (use --task-file).
+

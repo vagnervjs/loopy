@@ -33,6 +33,43 @@ function runNodeCli(args, { cwd, env } = {}) {
   });
 }
 
+function runNodeCliWithStdin(args, { cwd, env, stdin } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, ...(env || {}) },
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", reject);
+
+    try {
+      child.stdin.write(String(stdin || ""));
+    } catch (_) {
+      // ignore
+    }
+    try {
+      child.stdin.end();
+    } catch (_) {
+      // ignore
+    }
+
+    child.on("close", (code) => {
+      resolve({ code: code ?? 1, stdout, stderr });
+    });
+  });
+}
+
 function runCmd(command, args, { cwd, env } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args || [], {
@@ -344,4 +381,355 @@ test("`--stream` mirrors agent output to terminal", async () => {
   const combined = `${stdout}\n${stderr}`;
   assert.match(combined, /\bout\b/);
   assert.match(combined, /\berr\b/);
+});
+
+test("auto-phase task creation requires confirmation without `--auto-apply`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-auto-phase-confirm-"));
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-prompt",
+      "build a thing",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+
+  assert.equal(code, 1);
+  assert.match(stderr, /Aborted|not created|confirmation/i);
+  await assert.rejects(() => fs.readFile(path.join(tmp, "LOOPY_TASK.md"), "utf8"));
+});
+
+test("`--task-prompt` + `--auto-apply` generates phased `LOOPY_TASK.md` before looping", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-auto-phase-generate-"));
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-prompt",
+      "build a thing",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const task = await fs.readFile(path.join(tmp, "LOOPY_TASK.md"), "utf8");
+  assert.match(task, /phases:/);
+  assert.match(task, /## Phase:\s+build/);
+  assert.match(task, /- \[ \]\s+do build/);
+});
+
+test("`--task-file` + `--auto-apply` generates phased `LOOPY_TASK.md` before looping", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-auto-phase-generate-file-"));
+  await fs.writeFile(path.join(tmp, "task.txt"), "build a thing\n", "utf8");
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "task.txt",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const task = await fs.readFile(path.join(tmp, "LOOPY_TASK.md"), "utf8");
+  assert.match(task, /phases:/);
+  assert.match(task, /## Phase:\s+build/);
+  assert.match(task, /- \[ \]\s+do build/);
+});
+
+test("`--task-file` accepts markdown and includes it in `PROMPT.md`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-md-"));
+  await fs.writeFile(
+    path.join(tmp, "PRD.md"),
+    ["# PRD: Build a thing", "", "## Requirements", "- Must support X", "- Must support Y", "", "## Notes", "Use Z."].join(
+      "\n"
+    ) + "\n",
+    "utf8"
+  );
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "PRD.md",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
+  assert.match(prompt, /## Task file \(PRD\)/);
+  assert.match(prompt, /# PRD: Build a thing/);
+  assert.match(prompt, /## Requirements/);
+  assert.match(prompt, /- Must support X/);
+  assert.match(prompt, /## Task \(LOOPY_TASK\.md\)/);
+});
+
+test("`--task-file` accepts arbitrary extensions (.rst) and includes it in `PROMPT.md`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-rst-"));
+  await fs.writeFile(
+    path.join(tmp, "spec.rst"),
+    ["Loopy PRD", "========", "", "* requirement A", "* requirement B", ""].join("\n"),
+    "utf8"
+  );
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "spec.rst",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
+  assert.match(prompt, /## Task file \(PRD\)/);
+  assert.match(prompt, /Loopy PRD/);
+  assert.match(prompt, /\* requirement A/);
+});
+
+test("`--task-file -` reads prompt from stdin", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-auto-phase-generate-stdin-"));
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCliWithStdin(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "-",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp, stdin: "build a thing\n" }
+  );
+  assert.equal(code, 0, stderr);
+
+  const task = await fs.readFile(path.join(tmp, "LOOPY_TASK.md"), "utf8");
+  assert.match(task, /## Phase:\s+build/);
+});
+
+test("`--task-file` errors on missing file", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-missing-"));
+  const plannerCmd = 'node -e "process.exit(0)"';
+
+  const { code, stderr } = await runNodeCli(
+    [CLI_PATH, "run", "--dry-run", "--task-file", "nope.txt", "--auto-apply", "--agent-cmd", plannerCmd, "--max-minutes", "1"],
+    { cwd: tmp }
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /Task prompt file not found/i);
+});
+
+test("`--task-file` errors on empty file", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-empty-"));
+  await fs.writeFile(path.join(tmp, "empty.txt"), "   \n\n", "utf8");
+  const plannerCmd = 'node -e "process.exit(0)"';
+
+  const { code, stderr } = await runNodeCli(
+    [CLI_PATH, "run", "--dry-run", "--task-file", "empty.txt", "--auto-apply", "--agent-cmd", plannerCmd, "--max-minutes", "1"],
+    { cwd: tmp }
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /Task prompt file is empty/i);
+});
+
+test("`--task-file` errors on unreadable file", async () => {
+  if (process.platform === "win32") return;
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-unreadable-"));
+  const filePath = path.join(tmp, "secret.md");
+  await fs.writeFile(filePath, "# secret\n", "utf8");
+  await fs.chmod(filePath, 0o000);
+
+  const plannerCmd = 'node -e "process.exit(0)"';
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "secret.md",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /Permission denied reading task prompt file/i);
+
+  // Restore permissions so temp cleanup can proceed.
+  await fs.chmod(filePath, 0o644);
+});
+
+test("`--task-file` errors when path is a directory", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-dir-"));
+  await fs.mkdir(path.join(tmp, "seedDir"), { recursive: true });
+  const plannerCmd = 'node -e "process.exit(0)"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "seedDir",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /Task prompt path is a directory/i);
+});
+
+test("`--task-prompt` + `--task-file` errors (no precedence)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-both-"));
+  await fs.writeFile(path.join(tmp, "task.txt"), "build a thing\n", "utf8");
+  const plannerCmd = 'node -e "process.exit(0)"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-prompt",
+      "inline",
+      "--task-file",
+      "task.txt",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /Provide only one of --task-prompt or --task-file/i);
+});
+
+test("phase progression: `--phase-only` stops after phase completion and records phase history", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-phase-only-"));
+
+  await fs.writeFile(
+    path.join(tmp, "LOOPY_TASK.md"),
+    [
+      "---",
+      "max_iterations: 5",
+      "backoff_ms: 0",
+      "phases:",
+      "  - id: phase1",
+      "    title: Phase 1",
+      "  - id: phase2",
+      "    title: Phase 2",
+      "---",
+      "",
+      "# Task",
+      "",
+      "## Phase: phase1",
+      "<!-- loopy:phase phase1 -->",
+      "- [ ] do phase 1",
+      "",
+      "## Phase: phase2",
+      "<!-- loopy:phase phase2 -->",
+      "- [ ] do phase 2",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+
+  const agentCmd =
+    'node -e "const fs=require(\\\"fs\\\");let t=fs.readFileSync(\\\"LOOPY_TASK.md\\\",\\\"utf8\\\");t=t.replace(/(## Phase: phase1[\\\\s\\\\S]*?- \\\\[) \\\\]/,(m,g1)=>g1+\\\"x]\\\");fs.writeFileSync(\\\"LOOPY_TASK.md\\\",t);process.exit(0)"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "loop",
+      "--agent-cmd",
+      agentCmd,
+      "--phase-only",
+      "--max-iterations",
+      "5",
+      "--backoff-ms",
+      "0",
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const state = JSON.parse(await fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
+  assert.equal(state.lastStatus, "phase-complete");
+  assert.equal(state.currentPhase, "phase1");
+  assert.ok(Array.isArray(state.phaseHistory));
+  assert.match(state.phaseHistory.join("\n"), /phase phase1 complete/);
+
+  const progress = await fs.readFile(path.join(tmp, ".loopy", "progress.md"), "utf8");
+  assert.match(progress, /Current phase:\s+phase1/);
 });
