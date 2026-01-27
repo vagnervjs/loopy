@@ -872,6 +872,107 @@ test("unsupported legacy seed flag errors even when `--prompt` is provided", asy
   assert.match(stderr, /Unsupported legacy seed flag/i);
 });
 
+test("`hint --reset` clears hints and state", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-hint-reset-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+
+  // Create initial hints
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "hints.md"),
+    "# Loopy Hints\n\n- 2026-01-27T01:00:00.000Z First hint\n- 2026-01-27T02:00:00.000Z Second hint\n",
+    "utf8"
+  );
+
+  // Create initial state with hint info
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "state.json"),
+    JSON.stringify({
+      iteration: 5,
+      lastHint: "Second hint",
+      lastHintAt: "2026-01-27T02:00:00.000Z",
+      hintCount: 2,
+    }, null, 2) + "\n",
+    "utf8"
+  );
+
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "hint", "--reset"], { cwd: tmp });
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /Hints reset/);
+
+  // Verify hints file is reset to header only
+  const hints = await fs.readFile(path.join(tmp, ".loopy", "hints.md"), "utf8");
+  assert.equal(hints, "# Loopy Hints\n\n");
+
+  // Verify state is updated
+  const state = JSON.parse(await fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
+  assert.equal(state.hintCount, 0);
+  assert.equal(state.lastHint, null);
+  assert.equal(state.lastHintAt, null);
+  assert.equal(state.iteration, 5); // preserved
+});
+
+test("`hint --pop` removes last hint", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-hint-pop-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+
+  // Create initial hints
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "hints.md"),
+    "# Loopy Hints\n\n- 2026-01-27T01:00:00.000Z First hint\n- 2026-01-27T02:00:00.000Z Second hint\n",
+    "utf8"
+  );
+
+  // Create initial state with hint info
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "state.json"),
+    JSON.stringify({
+      iteration: 5,
+      lastHint: "Second hint",
+      lastHintAt: "2026-01-27T02:00:00.000Z",
+      hintCount: 2,
+    }, null, 2) + "\n",
+    "utf8"
+  );
+
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "hint", "--pop"], { cwd: tmp });
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /Last hint removed/);
+
+  // Verify the last hint was removed
+  const hints = await fs.readFile(path.join(tmp, ".loopy", "hints.md"), "utf8");
+  assert.match(hints, /First hint/);
+  assert.equal(hints.includes("Second hint"), false);
+
+  // Verify state is updated
+  const state = JSON.parse(await fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
+  assert.equal(state.hintCount, 1);
+  assert.equal(state.lastHint, "First hint");
+  assert.equal(state.lastHintAt, "2026-01-27T01:00:00.000Z");
+});
+
+test("`hint --pop` when no hints exist", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-hint-pop-empty-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+
+  // Create empty hints file (header only)
+  await fs.writeFile(path.join(tmp, ".loopy", "hints.md"), "# Loopy Hints\n\n", "utf8");
+
+  // Create initial state with no hints
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "state.json"),
+    JSON.stringify({ iteration: 1, hintCount: 0 }, null, 2) + "\n",
+    "utf8"
+  );
+
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "hint", "--pop"], { cwd: tmp });
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /No hints to pop/);
+
+  // Verify hints file is unchanged
+  const hints = await fs.readFile(path.join(tmp, ".loopy", "hints.md"), "utf8");
+  assert.equal(hints, "# Loopy Hints\n\n");
+});
+
 test("phase progression: `--phase-only` stops after phase completion and records phase history", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-phase-only-"));
 
