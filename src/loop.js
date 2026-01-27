@@ -307,7 +307,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     return { taskText: nextText, rewritten: true };
   }
 
-  // User-provided prompt explicitly requests an update.
+  // User-provided prompt explicitly requests an update (apply automatically).
   const loaded = loadedSeed || (await loadTaskSeed(config));
   if (loaded.seed) {
     const seed = loaded.seed;
@@ -343,14 +343,8 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     }
 
     if (nextText !== existing) {
-      const ok = await confirm(`Update ${prettyPath(cwd, taskPath)} from ${loaded.source}?`, {
-        autoApply: config.autoApply,
-        defaultYes: false,
-      });
-      if (ok) {
-        await writeText(taskPath, nextText);
-        return { taskText: nextText, rewritten: true };
-      }
+      await writeText(taskPath, nextText);
+      return { taskText: nextText, rewritten: true };
     }
     return { taskText: existing, rewritten: false };
   }

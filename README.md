@@ -187,7 +187,7 @@ The **seed prompt** is a PRD-style requirements/implementation notes document. L
 Where it’s used:
 
 - If the plan doc does not exist, Loopy uses the seed prompt to generate it.
-- If the plan doc exists and you provide a seed prompt, Loopy proposes an update and asks for confirmation (or applies with `--auto-apply`).
+- If the plan doc exists and you provide a seed prompt, Loopy updates it automatically.
 - If provided, Loopy includes the seed prompt in `.loopy/PROMPT.md` under `## Plan seed (PRD)` so the agent can reference the original requirements verbatim.
 
 How to provide it:
@@ -204,7 +204,7 @@ Validation / normalization (current behavior):
 - If the file path does not exist, Loopy errors (“Seed prompt file not found: ...”).
 - If the path is a directory, Loopy errors (“Seed prompt path is a directory: ...”).
 - If the file is unreadable due to permissions, Loopy errors (“Permission denied reading seed prompt file: ...”).
-- There is no explicit max size cap today; very large seed prompts can degrade planning quality and make confirmations noisy.
+- There is no explicit max size cap today; very large seed prompts can degrade planning quality and make updates noisy.
 
 ### Phase schema (auto-phase)
 

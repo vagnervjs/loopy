@@ -576,6 +576,39 @@ test("auto-phase task creation requires confirmation without `--auto-apply`", as
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
 });
 
+test("`--prompt` updates an existing plan without confirmation", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-prompt-update-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] old plan", ""].join("\n"),
+    "utf8"
+  );
+
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "loop",
+      "--dry-run",
+      "--prompt",
+      "new plan",
+      "--agent",
+      'node -e "process.exit(0)"',
+      "--auto-phase=false",
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+
+  assert.equal(code, 0, stderr);
+  assert.ok(stdout.includes("[loopy] Plan updated before loop:"), stdout);
+
+  const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
+  assert.match(task, /- \[ \]\s+new plan/);
+  assert.ok(!task.includes("old plan"), task);
+});
+
 test("`--prompt` + `--auto-apply` generates phased `LOOPY_PLAN.md` before looping", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-auto-phase-generate-"));
 
