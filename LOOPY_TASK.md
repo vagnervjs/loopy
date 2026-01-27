@@ -12,14 +12,14 @@ git:
 ---
 # Task
 
-- [ ] feat: Add CLI prompt input to generate/update `LOOPY_TASK.md` before looping.
-- [ ] feat: Enable auto-phase by default; use configured agent to propose phases from task text.
-- [ ] feat: Define and parse phase schema in front matter (`phases`, `phase_defaults`).
-- [ ] feat: Scope checklist evaluation to current phase sections.
-- [ ] feat: Support per-phase `stop_on` and optional `test_command`.
-- [ ] feat: Track `currentPhase` and phase history in `.loopy/state.json` and progress output.
-- [ ] feat: Add CLI flags `--phase`, `--phase-only`, `--skip-phase`, `--auto-phase`.
-- [ ] feat: Add confirmation step before rewriting `LOOPY_TASK.md`, with auto-apply mode.
-- [ ] feat: Ensure backward compatibility when phases are absent and auto-phase is disabled.
-- [ ] docs: Update README with auto-phase quickstart and phase schema reference.
-- [ ] test: Add coverage for auto-phase generation, confirmation flow, and phase progression.
+- [x] feat: Add CLI prompt input to generate/update `LOOPY_TASK.md` before looping.
+- [x] feat: Enable auto-phase by default; use configured agent to propose phases from task text.
+- [x] feat: Define and parse phase schema in front matter (`phases`, `phase_defaults`).
+- [x] feat: Scope checklist evaluation to current phase sections.
+- [x] feat: Support per-phase `stop_on` and optional `test_command`.
+- [x] feat: Track `currentPhase` and phase history in `.loopy/state.json` and progress output.
+- [x] feat: Add CLI flags `--phase`, `--phase-only`, `--skip-phase`, `--auto-phase`.
+- [x] feat: Add confirmation step before rewriting `LOOPY_TASK.md`, with auto-apply mode.
+- [x] feat: Ensure backward compatibility when phases are absent and auto-phase is disabled.
+- [x] docs: Update README with auto-phase quickstart and phase schema reference.
+- [x] test: Add coverage for auto-phase generation, confirmation flow, and phase progression.

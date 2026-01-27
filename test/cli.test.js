@@ -345,3 +345,119 @@ test("`--stream` mirrors agent output to terminal", async () => {
   assert.match(combined, /\bout\b/);
   assert.match(combined, /\berr\b/);
 });
+
+test("auto-phase task creation requires confirmation without `--auto-apply`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-auto-phase-confirm-"));
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-prompt",
+      "build a thing",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+
+  assert.equal(code, 1);
+  assert.match(stderr, /Aborted|not created|confirmation/i);
+  await assert.rejects(() => fs.readFile(path.join(tmp, "LOOPY_TASK.md"), "utf8"));
+});
+
+test("`--task-prompt` + `--auto-apply` generates phased `LOOPY_TASK.md` before looping", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-auto-phase-generate-"));
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-prompt",
+      "build a thing",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const task = await fs.readFile(path.join(tmp, "LOOPY_TASK.md"), "utf8");
+  assert.match(task, /phases:/);
+  assert.match(task, /## Phase:\s+build/);
+  assert.match(task, /- \[ \]\s+do build/);
+});
+
+test("phase progression: `--phase-only` stops after phase completion and records phase history", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-phase-only-"));
+
+  await fs.writeFile(
+    path.join(tmp, "LOOPY_TASK.md"),
+    [
+      "---",
+      "max_iterations: 5",
+      "backoff_ms: 0",
+      "phases:",
+      "  - id: phase1",
+      "    title: Phase 1",
+      "  - id: phase2",
+      "    title: Phase 2",
+      "---",
+      "",
+      "# Task",
+      "",
+      "## Phase: phase1",
+      "<!-- loopy:phase phase1 -->",
+      "- [ ] do phase 1",
+      "",
+      "## Phase: phase2",
+      "<!-- loopy:phase phase2 -->",
+      "- [ ] do phase 2",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+
+  const agentCmd =
+    'node -e "const fs=require(\\\"fs\\\");let t=fs.readFileSync(\\\"LOOPY_TASK.md\\\",\\\"utf8\\\");t=t.replace(/(## Phase: phase1[\\\\s\\\\S]*?- \\\\[) \\\\]/,(m,g1)=>g1+\\\"x]\\\");fs.writeFileSync(\\\"LOOPY_TASK.md\\\",t);process.exit(0)"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "loop",
+      "--agent-cmd",
+      agentCmd,
+      "--phase-only",
+      "--max-iterations",
+      "5",
+      "--backoff-ms",
+      "0",
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const state = JSON.parse(await fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
+  assert.equal(state.lastStatus, "phase-complete");
+  assert.equal(state.currentPhase, "phase1");
+  assert.ok(Array.isArray(state.phaseHistory));
+  assert.match(state.phaseHistory.join("\n"), /phase phase1 complete/);
+
+  const progress = await fs.readFile(path.join(tmp, ".loopy", "progress.md"), "utf8");
+  assert.match(progress, /Current phase:\s+phase1/);
+});

@@ -22,6 +22,21 @@ npm link
 
 ## Usage
 
+### Auto-phase quickstart (recommended)
+
+Generate or update `LOOPY_TASK.md` from a simple prompt, then start looping:
+
+```bash
+loopy loop --agent-cmd "cursor-agent" --task-prompt "Add OAuth login to the app" --auto-apply
+```
+
+By default, Loopy will try to auto-phase (create `phases` + per-phase checklists) when a task file has no phases.
+To disable auto-phase and use the legacy “single checklist” behavior:
+
+```bash
+loopy loop --auto-phase=false
+```
+
 Show help:
 
 ```bash
@@ -85,6 +100,50 @@ hooks:
 You can also pass `--agent-cmd` to override the task front matter.
 See `examples/LOOPY_TASK.md` for a starter template.
 
+### Phase schema (auto-phase)
+
+Loopy supports phased execution via front matter:
+
+```md
+---
+phase_defaults:
+  stop_on: all_checked
+  test_command: "npm test"
+phases:
+  - id: plan
+    title: Plan
+  - id: implement
+    title: Implement
+  - id: verify
+    title: Verify
+    stop_on: [all_checked, tests_pass]
+    test_command: "npm test"
+---
+```
+
+And a matching body structure:
+
+```md
+## Phase: plan
+<!-- loopy:phase plan -->
+- [ ] Clarify requirements and outline approach.
+
+## Phase: implement
+<!-- loopy:phase implement -->
+- [ ] Implement the requested changes.
+
+## Phase: verify
+<!-- loopy:phase verify -->
+- [ ] Run tests and validate behavior.
+```
+
+Notes:
+
+- `stop_on` supports `all_checked` and `tests_pass`.
+- `test_command` can be set per-phase; if present, Loopy runs it after a successful agent iteration.
+- `--phase-only` stops once the current phase meets its `stop_on` criteria.
+- If phases are absent and `--auto-phase=false`, Loopy behaves like the legacy single-checklist flow.
+
 ## Files created
 
 - `.loopy/activity.log` append-only activity log
@@ -101,11 +160,17 @@ See `examples/LOOPY_TASK.md` for a starter template.
 - `--version` print version and exit
 - `--task <file>` task file path (default: `LOOPY_TASK.md`)
 - `--prompt <file>` prompt output file (default: `PROMPT.md`)
+- `--task-prompt <text>` generate/update `LOOPY_TASK.md` from text before looping
 - `--progress <file>` progress file (default: `.loopy/progress.md`)
 - `--guardrails <file>` guardrails file (default: `.loopy/guardrails.md`)
 - `--activity-log <file>` activity log (default: `.loopy/activity.log`)
 - `--state <file>` state file (default: `.loopy/state.json`)
 - `--agent-cmd <command>` agent command (overrides task front matter)
+- `--auto-phase` enable auto-phase planning (default: true; disable with `--auto-phase=false`)
+- `--phase <id>` start/resume at phase id
+- `--phase-only` stop after current phase completes
+- `--skip-phase <ids>` comma-separated phase ids to skip
+- `--auto-apply` skip confirmation prompts (apply changes)
 - `--stream` mirror agent stdout/stderr to your terminal
 - `--max-iterations <n>` max iterations (default: 50)
 - `--max-minutes <n>` max wall time in minutes (default: 120)

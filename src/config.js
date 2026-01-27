@@ -15,6 +15,7 @@ const DEFAULTS = {
   rotateBytes: 150000,
   maxOutputBytes: 1024 * 1024,
   gitCommitMessage: "loopy: {change_type} {task_summary}",
+  autoPhase: true,
 };
 
 function resolveFrom(cwd, maybePath) {
@@ -92,6 +93,15 @@ function mergeConfig(flags, frontMatter) {
     stateFile: flags.state || DEFAULTS.stateFile,
     agentCommand: normalizeCommand(flags["agent-cmd"] || fm.agent_command || fm.agentCommand || ""),
     testCommand: normalizeCommand(fm.test_command || fm.testCommand || ""),
+    taskPrompt: String(flags["task-prompt"] || ""),
+    autoApply: coerceBoolean(flags["auto-apply"], false),
+    autoPhase: coerceBoolean(
+      flags["auto-phase"] ?? fm.auto_phase ?? fm.autoPhase,
+      DEFAULTS.autoPhase
+    ),
+    phase: normalizeCommand(flags.phase || fm.phase || ""),
+    phaseOnly: coerceBoolean(flags["phase-only"], false),
+    skipPhase: normalizeCommand(flags["skip-phase"] || ""),
     preIteration: normalizeCommand(fm.preIteration || fm.pre_iteration || hooks.preIteration || ""),
     postIteration: normalizeCommand(fm.postIteration || fm.post_iteration || hooks.postIteration || ""),
     onFailure: normalizeCommand(fm.onFailure || fm.on_failure || hooks.onFailure || ""),
