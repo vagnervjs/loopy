@@ -232,6 +232,65 @@ async function runHint(flags) {
     return;
   }
 
+  // Handle --pop flag: remove the last hint
+  if (flags.pop) {
+    const content = (await readText(hintsFile)) || "";
+    const lines = content.split(/\r?\n/);
+
+    // Find all hint lines (starting with "- ")
+    const hintIndices = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      if (lines[i].startsWith("- ")) {
+        hintIndices.push(i);
+      }
+    }
+
+    if (hintIndices.length === 0) {
+      console.log("No hints to pop.");
+      return;
+    }
+
+    // Remove the last hint line
+    const lastHintIdx = hintIndices[hintIndices.length - 1];
+    lines.splice(lastHintIdx, 1);
+
+    // Write back the file
+    await writeText(hintsFile, lines.join("\n"));
+
+    // Update state
+    const loaded = await loadState(stateFile);
+    const state = loaded.state || {};
+    const newHintCount = Math.max(0, (state.hintCount || 0) - 1);
+
+    // Determine the new lastHint/lastHintAt from the remaining hints
+    let newLastHint = null;
+    let newLastHintAt = null;
+    if (hintIndices.length > 1) {
+      // There's still at least one hint left
+      const prevHintIdx = hintIndices[hintIndices.length - 2];
+      const prevHintLine = lines[prevHintIdx] || "";
+      // Parse "- TIMESTAMP text" format
+      const match = prevHintLine.match(/^- (\d{4}-\d{2}-\d{2}T[\d:.Z+-]+)\s+(.*)$/);
+      if (match) {
+        newLastHintAt = match[1];
+        newLastHint = match[2];
+      }
+    }
+
+    const next = {
+      ...state,
+      lastHint: newLastHint,
+      lastHintAt: newLastHintAt,
+      hintCount: newHintCount,
+      updatedAt: new Date().toISOString(),
+      startedAt: state.startedAt || new Date().toISOString(),
+    };
+    await writeText(stateFile, JSON.stringify(next, null, 2) + "\n");
+
+    console.log(`Last hint removed (${path.relative(cwd, hintsFile) || hintsFile})`);
+    return;
+  }
+
   const text = (flags._ || []).join(" ").trim();
   if (!text) {
     console.error('Missing hint text. Usage: loopy hint "<text>"');
