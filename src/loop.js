@@ -1,4 +1,5 @@
 const fs = require("fs/promises");
+const nodeFs = require("fs");
 const path = require("path");
 const yaml = require("js-yaml");
 
@@ -41,14 +42,86 @@ function parseSkipPhaseList(value) {
 }
 
 async function readStdinText() {
-  // Read the whole stdin stream (fd 0). This is more reliable than checking
-  // `readableEnded` and attaching listeners, which can miss buffered data in
-  // fast pipe scenarios (e.g. tests).
+  // Prefer reading from the stdin stream to work reliably with `spawn(..., { stdio: ["pipe", ...] })`
+  // (which is how our tests provide stdin). Reading fd 0 synchronously can return empty on some
+  // platforms if the pipe is not ready yet.
+  const stdin = process.stdin;
+  if (!stdin) return "";
+  if (stdin.isTTY) return "";
+
+  let out = "";
+  const drain = () => {
+    try {
+      let chunk = null;
+      while ((chunk = stdin.read()) !== null) out += String(chunk || "");
+    } catch (_) {
+      // ignore
+    }
+  };
+
   try {
-    return await fs.readFile(0, "utf8");
+    stdin.setEncoding("utf8");
   } catch (_) {
-    return "";
+    // ignore
   }
+
+  // Attempt to drain any buffered data immediately (covers some "fast pipe" cases).
+  drain();
+
+  // If stdin already looks ended/destroyed, try fd0 as a final fallback.
+  if (stdin.readableEnded || stdin.destroyed) {
+    if (!String(out || "").trim()) {
+      try {
+        return nodeFs.readFileSync(0, "utf8");
+      } catch (_) {
+        // ignore
+      }
+    }
+    return out;
+  }
+
+  // Normal case: read from stream events until end/error.
+  const streamText = await new Promise((resolve) => {
+    const cleanupAndResolve = () => {
+      drain();
+      try {
+        stdin.off("data", onData);
+        stdin.off("end", onEnd);
+        stdin.off("error", onError);
+      } catch (_) {
+        // ignore
+      }
+      resolve(out);
+    };
+
+    const onData = (chunk) => {
+      out += String(chunk || "");
+    };
+    const onEnd = () => cleanupAndResolve();
+    const onError = () => cleanupAndResolve();
+
+    stdin.on("data", onData);
+    stdin.once("end", onEnd);
+    stdin.once("error", onError);
+    try {
+      stdin.resume();
+    } catch (_) {
+      // ignore
+    }
+
+    // In case it ended between our earlier check and listener attach.
+    if (stdin.readableEnded || stdin.destroyed) cleanupAndResolve();
+  });
+
+  if (!String(streamText || "").trim()) {
+    try {
+      return nodeFs.readFileSync(0, "utf8");
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  return streamText;
 }
 
 async function loadTaskSeed(config) {
