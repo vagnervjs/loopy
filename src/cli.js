@@ -20,7 +20,110 @@ function getLoopyVersion() {
   }
 }
 
+function maxStringLength(values) {
+  let max = 0;
+  for (const v of values || []) {
+    const len = String(v || "").length;
+    if (len > max) max = len;
+  }
+  return max;
+}
+
+function formatHelpRows(rows, { indent, labelWidth, gap } = {}) {
+  const ind = indent == null ? "" : String(indent);
+  const g = gap == null ? 2 : Number(gap);
+  const w = labelWidth == null ? maxStringLength((rows || []).map((r) => r.label)) : Number(labelWidth);
+
+  const lines = [];
+  for (const row of rows || []) {
+    if (!row) continue;
+    const label = String(row.label || "");
+    const descLines = String(row.desc || "").split(/\r?\n/);
+    if (!descLines.length) {
+      lines.push(`${ind}${label.padEnd(w + g)}`.trimEnd());
+      continue;
+    }
+    lines.push(`${ind}${label.padEnd(w + g)}${descLines[0]}`);
+    for (let i = 1; i < descLines.length; i += 1) {
+      lines.push(`${ind}${"".padEnd(w + g)}${descLines[i]}`);
+    }
+  }
+  return lines;
+}
+
 function printHelp() {
+  const commands = [
+    {
+      label: "loop [options]",
+      desc: "Run iterations: build prompt -> run agent -> update state (default)\nStops when phase criteria are met, limits hit, guardrails trigger, or signal received",
+    },
+    {
+      label: "status",
+      desc: "Show status summary from `.loopy/state.json`\nPrints iteration/phase + last test/error and last hint",
+    },
+    {
+      label: 'hint "<text>"',
+      desc: "Save a hint for the next prompt\nAppends to `.loopy/hints.md` (included in the next prompt under \"Hints\")",
+    },
+    { label: "init", desc: "Initialize `.loopy/` files if missing\nCreates `.loopy/LOOPY_PLAN.md` and `.loopy/hints.md`" },
+    { label: "help", desc: "Show help" },
+  ];
+
+  const commonOptions = [
+    { label: "--prompt <text>", desc: "Seed prompt (inline) to generate/update the plan before looping" },
+    { label: "--prompt @<file>", desc: "Seed prompt from a file to generate/update the plan before looping" },
+    { label: "--prompt -", desc: "Seed prompt from stdin to generate/update the plan before looping" },
+    {
+      label: "--continue",
+      desc: "Resume from saved state (requires existing `.loopy/state.json`); skips git switching",
+    },
+    { label: "--plan <file>", desc: `Plan doc (default: ${DEFAULTS.taskFile})` },
+    { label: "--agent <command>", desc: "Agent command (e.g. cursor-agent; overrides plan front matter)" },
+    { label: "--auto-apply", desc: "Skip confirmation prompts (apply changes)" },
+    { label: "--dry-run", desc: "Build prompt, skip agent execution" },
+    { label: "--help, -h", desc: "Show help" },
+    { label: "--version", desc: "Print version" },
+  ];
+
+  const advancedByGroup = {
+    Phases: [
+      {
+        label: "--auto-phase",
+        desc: "Enable auto-phase planning (default: true; disable with --auto-phase=false)",
+      },
+      { label: "--phase <id>", desc: "Start/resume at phase id" },
+      { label: "--phase-only", desc: "Stop after current phase completes" },
+      { label: "--skip-phase <ids>", desc: "Comma-separated phase ids to skip" },
+    ],
+    Output: [
+      { label: "--prompt-out <file>", desc: `Prompt output file (default: ${DEFAULTS.promptFile})` },
+      { label: "--stream", desc: "Mirror agent stdout/stderr to your terminal" },
+    ],
+    Files: [
+      { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },
+      { label: "--guardrails <file>", desc: "Guardrails file (default: .loopy/guardrails.md)" },
+      { label: "--activity-log <file>", desc: "Activity log (default: .loopy/activity.log)" },
+      { label: "--state <file>", desc: "State file (default: .loopy/state.json)" },
+      { label: "--hints <file>", desc: "Hints file (default: .loopy/hints.md)" },
+    ],
+    Git: [
+      { label: "--git-worktree <path>", desc: "Use/create git worktree at path (optional)" },
+      { label: "--git-worktree-branch <name>", desc: "Branch for worktree add/checkout (optional)" },
+      { label: "--git-branch <name>", desc: "Create/checkout branch before iteration (optional)" },
+      { label: "--git-commit", desc: "Commit changes after successful iteration (optional)" },
+      {
+        label: "--git-commit-message <template>",
+        desc: `Commit message template (default: ${DEFAULTS.gitCommitMessage})`,
+      },
+    ],
+    Limits: [
+      { label: "--max-iterations <n>", desc: "Max iterations (default: 50)" },
+      { label: "--max-minutes <n>", desc: "Max wall time in minutes (default: 120)" },
+      { label: "--backoff-ms <n>", desc: "Backoff between iterations (default: 5000)" },
+      { label: "--rotate-bytes <n>", desc: "Bytes threshold for rotation (default: 150000)" },
+    ],
+  };
+
   const lines = [
     "Loopy",
     "",
@@ -31,54 +134,22 @@ function printHelp() {
     "  loopy --version",
     "",
     "Commands:",
-    "  loop [options]           Run iterations: build prompt -> run agent -> update state (default)",
-    "                           Stops when phase criteria are met, limits hit, guardrails trigger, or signal received",
-    "  status                   Show status summary from `.loopy/state.json`",
-    "                           Prints iteration/phase + last test/error and last hint",
-    '  hint "<text>"            Save a hint for the next prompt',
-    '                           Appends to `.loopy/hints.md` (included in the next prompt under "Hints")',
-    "  init                     Initialize `.loopy/` files if missing",
-    "                           Creates `.loopy/LOOPY_PLAN.md` and `.loopy/hints.md`",
-    "  help                     Show help",
+    ...formatHelpRows(commands, { indent: "  ", gap: 2 }),
     "",
     "Common options:",
-    "  --prompt <text>          Seed prompt (inline) to generate/update the plan before looping",
-    "  --prompt @<file>         Seed prompt from a file to generate/update the plan before looping",
-    "  --prompt -               Seed prompt from stdin to generate/update the plan before looping",
-    "  --continue               Resume from saved state (requires existing `.loopy/state.json`); skips git switching",
-    `  --plan <file>            Plan doc (default: ${DEFAULTS.taskFile})`,
-    "  --agent <command>        Agent command (e.g. cursor-agent; overrides plan front matter)",
-    "  --auto-apply             Skip confirmation prompts (apply changes)",
-    "  --dry-run                Build prompt, skip agent execution",
-    "  --help, -h               Show help",
-    "  --version                Print version",
+    ...formatHelpRows(commonOptions, { indent: "  ", gap: 2 }),
     "",
     "Advanced options:",
-    "  Phases:",
-    "    --auto-phase             Enable auto-phase planning (default: true; disable with --auto-phase=false)",
-    "    --phase <id>             Start/resume at phase id",
-    "    --phase-only             Stop after current phase completes",
-    "    --skip-phase <ids>       Comma-separated phase ids to skip",
-    "  Output:",
-    `    --prompt-out <file>      Prompt output file (default: ${DEFAULTS.promptFile})`,
-    "    --stream               Mirror agent stdout/stderr to your terminal",
-    "  Files:",
-    "    --progress <file>        Progress file (default: .loopy/progress.md)",
-    "    --guardrails <file>      Guardrails file (default: .loopy/guardrails.md)",
-    "    --activity-log <file>    Activity log (default: .loopy/activity.log)",
-    "    --state <file>           State file (default: .loopy/state.json)",
-    "    --hints <file>           Hints file (default: .loopy/hints.md)",
-    "  Git:",
-    "    --git-worktree <path>    Use/create git worktree at path (optional)",
-    "    --git-worktree-branch <name>   Branch for worktree add/checkout (optional)",
-    "    --git-branch <name>      Create/checkout branch before iteration (optional)",
-    "    --git-commit             Commit changes after successful iteration (optional)",
-    `    --git-commit-message <template> Commit message template (default: ${DEFAULTS.gitCommitMessage})`,
-    "  Limits:",
-    "    --max-iterations <n>     Max iterations (default: 50)",
-    "    --max-minutes <n>        Max wall time in minutes (default: 120)",
-    "    --backoff-ms <n>         Backoff between iterations (default: 5000)",
-    "    --rotate-bytes <n>       Bytes threshold for rotation (default: 150000)",
+    ...(() => {
+      const all = Object.values(advancedByGroup).flat();
+      const labelWidth = maxStringLength(all.map((r) => r.label));
+      const out = [];
+      for (const [group, rows] of Object.entries(advancedByGroup)) {
+        out.push(`  ${group}:`);
+        out.push(...formatHelpRows(rows, { indent: "    ", labelWidth, gap: 2 }));
+      }
+      return out;
+    })(),
     "",
   ];
   console.log(lines.join("\n"));

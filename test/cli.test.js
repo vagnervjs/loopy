@@ -86,6 +86,28 @@ function runCmd(command, args, { cwd, env } = {}) {
   });
 }
 
+function extractHelpDescriptionColumns(helpText, indent) {
+  const lines = String(helpText || "").split(/\r?\n/);
+  const cols = [];
+  for (const line of lines) {
+    if (!line.startsWith(`${indent}--`)) continue;
+    const m = line.match(/^(\s*)(--.+?)(\s{2,})(\S)/);
+    if (!m) continue;
+    cols.push(m[1].length + m[2].length + m[3].length);
+  }
+  return cols;
+}
+
+function assertHelpAligned(helpText) {
+  const commonCols = extractHelpDescriptionColumns(helpText, "  ");
+  assert.ok(commonCols.length >= 2, "expected at least two common option rows");
+  assert.equal(new Set(commonCols).size, 1, `common option descriptions misaligned: ${commonCols.join(", ")}`);
+
+  const advancedCols = extractHelpDescriptionColumns(helpText, "    ");
+  assert.ok(advancedCols.length >= 2, "expected at least two advanced option rows");
+  assert.equal(new Set(advancedCols).size, 1, `advanced option descriptions misaligned: ${advancedCols.join(", ")}`);
+}
+
 async function initGitRepo(tmp, { withTask = true } = {}) {
   const gitEnv = {
     GIT_AUTHOR_NAME: "loopy-test",
@@ -132,9 +154,10 @@ test("`--help` prints usage and exits 0", async () => {
   assert.match(stdout, /Usage:/);
   assert.match(stdout, /\bloopy help\b/);
   assert.match(stdout, /--continue\b/);
+  assertHelpAligned(stdout);
   assert.match(
     stdout,
-    /--git-commit-message <template> Commit message template \(default: loopy: \{change_type\} \{task_summary\}\)/
+    /--git-commit-message <template>\s+Commit message template \(default: loopy: \{change_type\} \{task_summary\}\)/
   );
   assert.ok(!/Default commit template:/i.test(stdout));
   assert.ok(!/default shown below/i.test(stdout));
@@ -151,9 +174,10 @@ test("`help` command prints usage and exits 0", async () => {
   const { code, stdout } = await runNodeCli([CLI_PATH, "help"]);
   assert.equal(code, 0);
   assert.match(stdout, /Loopy/);
+  assertHelpAligned(stdout);
   assert.match(
     stdout,
-    /--git-commit-message <template> Commit message template \(default: loopy: \{change_type\} \{task_summary\}\)/
+    /--git-commit-message <template>\s+Commit message template \(default: loopy: \{change_type\} \{task_summary\}\)/
   );
   assert.ok(!/Default commit template:/i.test(stdout));
   assert.ok(!/default shown below/i.test(stdout));
