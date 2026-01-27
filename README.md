@@ -244,6 +244,19 @@ Output/utility:
 - `.loopy/last_test_output.txt` most recent test output (redacted)
 - `.loopy/PROMPT.md` generated prompt input for each iteration
 
+## Streaming progress
+Tail logs in a separate terminal for live progress:
+
+```bash
+tail -f .loopy/activity.log
+```
+
+For live agent output (stdout/stderr), tail the stream log:
+
+```bash
+tail -f .loopy/agent_stream.log
+```
+
 ## Git integration (optional)
 Loopy can optionally:
 
@@ -300,11 +313,6 @@ Safety notes:
 - If the resulting content is empty, Loopy errors with a helpful message.
 - If the path does not exist, is a directory, or is unreadable, Loopy errors.
 - There is no explicit max size cap today; very large prompts can degrade planning quality.
-
-### Migration notes
-- Default generated file locations are under `.loopy/` (plan: `.loopy/LOOPY_PLAN.md`, prompt: `.loopy/PROMPT.md`).
-- Legacy flags/commands are not accepted; use `loopy --help` to update any scripts.
-- `--auto-apply` is removed; plan updates apply automatically unless you pass `--confirm`.
 
 ## Troubleshooting
 - Missing plan doc: run `loopy init` or provide `--prompt` (or use `--plan <file>`).
