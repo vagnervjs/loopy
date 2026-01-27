@@ -36,6 +36,12 @@ Or read the prompt from a file (or stdin via `-`):
 loopy --agent "cursor-agent" --prompt @./task.txt --auto-apply
 ```
 
+Or via stdin:
+
+```bash
+cat ./task.txt | loopy --agent "cursor-agent" --prompt - --auto-apply
+```
+
 Migration note:
 
 - Default generated file locations are under `.loopy/` (plan: `.loopy/LOOPY_PLAN.md`, prompt: `.loopy/PROMPT.md`).
@@ -132,7 +138,7 @@ See `examples/LOOPY_PLAN.md` for a starter template.
 
 ### Seed prompt (`--prompt`)
 
-The **seed prompt** is a PRD-style requirements/implementation notes document. Loopy uses it to generate/update the plan doc (usually `.loopy/LOOPY_PLAN.md`) before looping, and also includes it in the per-iteration prompt for clarity.
+The **seed prompt** is a PRD-style requirements/implementation notes document. Loopy uses it to generate/update the plan doc (usually `.loopy/LOOPY_PLAN.md`) before looping, and also includes it in the per-iteration prompt for clarity. **Seed source does not change behavior**: inline text, `@file`, and stdin (`-`) all follow the same pre-loop plan generate/update step.
 
 Where it’s used:
 

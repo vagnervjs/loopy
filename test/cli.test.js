@@ -505,7 +505,7 @@ test("`--prompt` + `--auto-apply` generates phased `LOOPY_PLAN.md` before loopin
   const plannerCmd =
     'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
 
-  const { code, stderr } = await runNodeCli(
+  const { code, stdout, stderr } = await runNodeCli(
     [
       CLI_PATH,
       "loop",
@@ -521,6 +521,12 @@ test("`--prompt` + `--auto-apply` generates phased `LOOPY_PLAN.md` before loopin
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
+  assert.ok(stdout.includes("[loopy] Plan updated before loop:"), stdout);
+  assert.ok(stdout.includes("[loopy] iter 1: Iteration start"), stdout);
+  assert.ok(
+    stdout.indexOf("[loopy] Plan updated before loop:") < stdout.indexOf("[loopy] iter 1: Iteration start"),
+    stdout
+  );
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
@@ -535,7 +541,7 @@ test("`--prompt @file` + `--auto-apply` generates phased `LOOPY_PLAN.md` before 
   const plannerCmd =
     'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
 
-  const { code, stderr } = await runNodeCli(
+  const { code, stdout, stderr } = await runNodeCli(
     [
       CLI_PATH,
       "loop",
@@ -551,6 +557,12 @@ test("`--prompt @file` + `--auto-apply` generates phased `LOOPY_PLAN.md` before 
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
+  assert.ok(stdout.includes("[loopy] Plan updated before loop:"), stdout);
+  assert.ok(stdout.includes("[loopy] iter 1: Iteration start"), stdout);
+  assert.ok(
+    stdout.indexOf("[loopy] Plan updated before loop:") < stdout.indexOf("[loopy] iter 1: Iteration start"),
+    stdout
+  );
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
@@ -636,7 +648,7 @@ test("`--prompt -` reads prompt from stdin", async () => {
   const plannerCmd =
     'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
 
-  const { code, stderr } = await runNodeCliWithStdin(
+  const { code, stdout, stderr } = await runNodeCliWithStdin(
     [
       CLI_PATH,
       "loop",
@@ -652,6 +664,12 @@ test("`--prompt -` reads prompt from stdin", async () => {
     { cwd: tmp, stdin: "build a thing\n" }
   );
   assert.equal(code, 0, stderr);
+  assert.ok(stdout.includes("[loopy] Plan updated before loop:"), stdout);
+  assert.ok(stdout.includes("[loopy] iter 1: Iteration start"), stdout);
+  assert.ok(
+    stdout.indexOf("[loopy] Plan updated before loop:") < stdout.indexOf("[loopy] iter 1: Iteration start"),
+    stdout
+  );
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /## Phase:\s+build/);

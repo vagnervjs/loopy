@@ -1,4 +1,2 @@
 /node_modules
 /.loopy/*
-!/.loopy/LOOPY_PLAN.md
-/PROMPT.md
