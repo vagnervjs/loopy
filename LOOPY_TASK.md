@@ -56,5 +56,5 @@ phases:
 
 - [x] Add/adjust tests to cover file prompt success, missing file, empty file, and precedence behavior.
 - [x] Update `examples/` and CLI usage docs to show file-based prompt usage.
-- [ ] Run existing test suite and ensure no regressions in the inline prompt behavior.
-  - Note: Command execution is blocked in this agent session (I can’t run `npm test` here). Please run `npm test` locally and then check this box.
+- [x] Run existing test suite and ensure no regressions in the inline prompt behavior.
+  - Verified via `.loopy/last_test_output.txt` (pass @ 2026-01-27T01:43:26.643Z).
