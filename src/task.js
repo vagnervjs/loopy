@@ -124,8 +124,30 @@ function parseTask(text) {
 
   const checklist = [];
   const lines = text.split(/\r?\n/);
+  let inComment = false;
   for (const line of lines) {
-    const itemMatch = line.match(/^-\s*\[( |x|X)\]\s+(.*)$/);
+    const raw = String(line || "");
+
+    if (inComment) {
+      if (raw.includes("-->")) inComment = false;
+      continue;
+    }
+
+    let effective = raw;
+    const commentStart = raw.indexOf("<!--");
+    if (commentStart >= 0) {
+      const commentEnd = raw.indexOf("-->", commentStart + 4);
+      if (commentEnd >= 0) {
+        // Strip inline comment content.
+        effective = raw.slice(0, commentStart);
+      } else {
+        // Start of a multiline comment block; parse any prefix then ignore until closed.
+        effective = raw.slice(0, commentStart);
+        inComment = true;
+      }
+    }
+
+    const itemMatch = effective.match(/^-\s*\[( |x|X)\]\s+(.*)$/);
     if (itemMatch) {
       checklist.push({
         checked: itemMatch[1].toLowerCase() === "x",
@@ -144,6 +166,7 @@ function parseTask(text) {
     let currentPhase = "";
     let currentStart = -1;
     const sections = {};
+    let inSeedComment = false;
 
     const closeSection = (endLineExclusive) => {
       if (!currentPhase) return;
@@ -167,6 +190,19 @@ function parseTask(text) {
 
     for (let i = 0; i < bodyLines.length; i += 1) {
       const line = bodyLines[i];
+      const raw = String(line || "");
+
+      // Ignore multi-line seed blocks so PRD-style content can't affect phase parsing.
+      if (inSeedComment) {
+        if (raw.includes("-->")) inSeedComment = false;
+        continue;
+      }
+      const seedStart = raw.match(/<!--\s*loopy:seed\b/i);
+      if (seedStart) {
+        if (!raw.includes("-->")) inSeedComment = true;
+        continue;
+      }
+
       const nextPhase = extractPhaseIdFromLine(line, phaseIdSet);
       if (nextPhase) {
         if (currentPhase) closeSection(i);

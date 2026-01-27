@@ -20,7 +20,7 @@ const { runShellCommand } = require("./shell");
 const { loadState } = require("./state");
 const { printStep } = require("./steps");
 const { getTaskLine, parseTask, toSlug } = require("./task");
-const { redact, truncate } = require("./text");
+const { redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const {
   ensureGitRepo,
@@ -62,7 +62,8 @@ async function readStdinText() {
 }
 
 async function loadTaskSeed(config) {
-  const inline = String(config.taskPrompt || "").trim();
+  const inlineRaw = config.taskPrompt == null ? "" : String(config.taskPrompt);
+  const inline = normalizeTaskSeedText(inlineRaw);
   const fileArg = String(config.taskPromptFile || "").trim();
 
   if (inline && fileArg) {
@@ -72,7 +73,7 @@ async function loadTaskSeed(config) {
   if (fileArg) {
     if (fileArg === "-") {
       const raw = await readStdinText();
-      const seed = String(raw || "").trim();
+      const seed = normalizeTaskSeedText(raw);
       if (!seed) throw new Error("Task prompt from --task-file '-' (stdin) is empty.");
       return { seed, source: "--task-file" };
     }
@@ -85,6 +86,9 @@ async function loadTaskSeed(config) {
       if (err && err.code === "ENOENT") {
         throw new Error(`Task prompt file not found: ${prettyPath(config.cwd, abs)}`);
       }
+      if (err && err.code === "EISDIR") {
+        throw new Error(`Task prompt path is a directory: ${prettyPath(config.cwd, abs)}`);
+      }
       if (err && err.code === "EACCES") {
         throw new Error(`Permission denied reading task prompt file: ${prettyPath(config.cwd, abs)}`);
       }
@@ -92,7 +96,7 @@ async function loadTaskSeed(config) {
         `Failed to read task prompt file ${prettyPath(config.cwd, abs)}: ${err && err.message ? err.message : String(err)}`
       );
     }
-    const seed = String(raw || "").trim();
+    const seed = normalizeTaskSeedText(raw);
     if (!seed) throw new Error(`Task prompt file is empty: ${prettyPath(config.cwd, abs)}`);
     return { seed, source: "--task-file" };
   }
@@ -162,13 +166,13 @@ function computeNextPhaseId(parsedTask, currentPhaseId, config) {
   return "";
 }
 
-async function ensureTaskBeforeLoop(config) {
+async function ensureTaskBeforeLoop(config, loadedSeed) {
   const cwd = config.cwd;
   const taskPath = config.taskFile;
 
   let existing = await readText(taskPath);
   if (!existing) {
-    const loaded = await loadTaskSeed(config);
+    const loaded = loadedSeed || (await loadTaskSeed(config));
     let seed = loaded.seed;
     if (!seed) {
       seed = await promptLine("Enter a short task description for LOOPY_TASK.md: ");
@@ -240,7 +244,7 @@ async function ensureTaskBeforeLoop(config) {
   }
 
   // User-provided prompt explicitly requests an update.
-  const loaded = await loadTaskSeed(config);
+  const loaded = loadedSeed || (await loadTaskSeed(config));
   if (loaded.seed) {
     const seed = loaded.seed;
     const parsed = parseTask(existing);
@@ -373,6 +377,8 @@ async function runIteration(config) {
   const prompt = formatPrompt({
     iteration,
     taskText,
+    taskSeedText: config.taskSeedText || "",
+    taskSeedSource: config.taskSeedSource || "",
     guardrailsText,
     progressText: progressText || "(no progress recorded yet)",
     lastOutput,
@@ -709,8 +715,13 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   config = materializeConfigPaths(config, effectiveCwd);
   if (onActivityLog) onActivityLog(config.activityLog);
 
+  // Load the task seed once so stdin ('-') works and prompts can reuse the content.
+  const loadedSeed = await loadTaskSeed(config);
+  config.taskSeedText = loadedSeed.seed || "";
+  config.taskSeedSource = loadedSeed.source || "";
+
   // Task initialization / auto-phase planning happens once, before looping.
-  const ensured = await ensureTaskBeforeLoop(config);
+  const ensured = await ensureTaskBeforeLoop(config, loadedSeed);
   if (ensured.rewritten) {
     await appendActivity(config.activityLog, [
       `Task updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,

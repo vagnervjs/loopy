@@ -12,49 +12,49 @@ git:
 phase_defaults:
   stop_on: all_checked
 phases:
-  - id: discovery
-    title: Understand current prompt flow
+  - id: define-task-file-contract
+    title: Define task-file contract
     stop_on: all_checked
-  - id: cli-args
-    title: Add file-based prompt option
+  - id: support-markdown-and-any-file
+    title: Support markdown and any file
     stop_on: all_checked
-  - id: prompt-loading
-    title: Load task prompt from file
+  - id: update-cli-and-prompts
+    title: Update CLI and prompts
     stop_on: all_checked
-  - id: tests-docs
-    title: Validate, test, and document
-    stop_on: all_checked
+  - id: add-tests-and-examples
+    title: Add tests and examples
+    stop_on: tests_pass
+    test_command: npm test
 ---
 
 # Task
 
-<!-- loopy:seed Accept task-prompt from a file instead of inline string -->
+<!-- loopy:seed make the task-file accept any type of file, primarilly markdown, and it should be an initial prompt with requirements or idea for implementation, like a PRD.md file -->
 
-## Phase: discovery
-<!-- loopy:phase discovery -->
+## Phase: define-task-file-contract
+<!-- loopy:phase define-task-file-contract -->
 
-- [x] Identify where the task prompt is currently accepted (inline string) and how it flows into planning/execution.
-- [x] Locate existing argument parsing and config precedence rules (CLI vs config vs defaults).
-- [x] Decide expected behavior when both inline prompt and file prompt are provided (precedence + error/merge strategy).
+- [x] Specify what "task-file" means now (any extension, preferred .md) and how it differs from existing LOOPY_TASK.md usage.
+- [x] Define how the file content is used as an "initial prompt" (where it is injected, ordering vs other prompts, and how to combine with CLI flags).
+- [x] Document validation rules (file must exist, non-empty recommended, max size/trim behavior, encoding expectations).
 
-## Phase: cli-args
-<!-- loopy:phase cli-args -->
+## Phase: support-markdown-and-any-file
+<!-- loopy:phase support-markdown-and-any-file -->
 
-- [x] Add a CLI flag for file input (e.g., `--task-file <path>` or `--prompt-file <path>`) with clear help text.
-- [x] Support `-` (stdin) as an input option if consistent with the CLI’s style.
-- [x] Update validation so missing/empty values produce actionable error messages.
+- [x] Remove/relax any extension filtering so the task-file can be any file type while still reading it as text.
+- [x] Ensure markdown files are preserved verbatim (including headings/lists) when passed into the prompt.
+- [x] Add safe normalization (trim excessive leading/trailing whitespace, preserve intentional newlines) and clear error messages on read/parse failures.
 
-## Phase: prompt-loading
-<!-- loopy:phase prompt-loading -->
+## Phase: update-cli-and-prompts
+<!-- loopy:phase update-cli-and-prompts -->
 
-- [x] Implement reading the prompt from disk (encoding, trimming rules, empty-file handling).
-- [x] Resolve paths reliably (relative to cwd) and produce friendly errors for not-found/permission issues.
-- [x] Ensure downstream prompt consumers receive the exact same structure as the previous inline prompt path.
+- [x] Update CLI help/docs to describe task-file as a PRD-style requirements/implementation-idea input.
+- [x] Ensure the task-file content is clearly labeled in the final prompt (e.g., "Task file (PRD):") to reduce model confusion.
+- [x] Confirm examples/defaults still work (existing `examples/LOOPY_TASK.md`, `examples/task.txt`) and adjust naming/wording as needed.
 
-## Phase: tests-docs
-<!-- loopy:phase tests-docs -->
+## Phase: add-tests-and-examples
+<!-- loopy:phase add-tests-and-examples -->
 
-- [x] Add/adjust tests to cover file prompt success, missing file, empty file, and precedence behavior.
-- [x] Update `examples/` and CLI usage docs to show file-based prompt usage.
-- [x] Run existing test suite and ensure no regressions in the inline prompt behavior.
-  - Verified via `.loopy/last_test_output.txt` (pass @ 2026-01-27T01:43:26.643Z).
+- [x] Add tests covering .md and arbitrary extensions (e.g., .txt, .rst) being accepted and included in the composed prompt.
+- [x] Add tests for missing file, unreadable file, and empty content behavior.
+- [x] Add/update an example PRD-style markdown task-file demonstrating requirements and implementation ideas.

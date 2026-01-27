@@ -468,6 +468,78 @@ test("`--task-file` + `--auto-apply` generates phased `LOOPY_TASK.md` before loo
   assert.match(task, /- \[ \]\s+do build/);
 });
 
+test("`--task-file` accepts markdown and includes it in `PROMPT.md`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-md-"));
+  await fs.writeFile(
+    path.join(tmp, "PRD.md"),
+    ["# PRD: Build a thing", "", "## Requirements", "- Must support X", "- Must support Y", "", "## Notes", "Use Z."].join(
+      "\n"
+    ) + "\n",
+    "utf8"
+  );
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "PRD.md",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
+  assert.match(prompt, /## Task file \(PRD\)/);
+  assert.match(prompt, /# PRD: Build a thing/);
+  assert.match(prompt, /## Requirements/);
+  assert.match(prompt, /- Must support X/);
+  assert.match(prompt, /## Task \(LOOPY_TASK\.md\)/);
+});
+
+test("`--task-file` accepts arbitrary extensions (.rst) and includes it in `PROMPT.md`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-rst-"));
+  await fs.writeFile(
+    path.join(tmp, "spec.rst"),
+    ["Loopy PRD", "========", "", "* requirement A", "* requirement B", ""].join("\n"),
+    "utf8"
+  );
+
+  const plannerCmd =
+    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "spec.rst",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
+  assert.match(prompt, /## Task file \(PRD\)/);
+  assert.match(prompt, /Loopy PRD/);
+  assert.match(prompt, /\* requirement A/);
+});
+
 test("`--task-file -` reads prompt from stdin", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-auto-phase-generate-stdin-"));
 
@@ -518,6 +590,61 @@ test("`--task-file` errors on empty file", async () => {
   );
   assert.equal(code, 1);
   assert.match(stderr, /Task prompt file is empty/i);
+});
+
+test("`--task-file` errors on unreadable file", async () => {
+  if (process.platform === "win32") return;
+
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-unreadable-"));
+  const filePath = path.join(tmp, "secret.md");
+  await fs.writeFile(filePath, "# secret\n", "utf8");
+  await fs.chmod(filePath, 0o000);
+
+  const plannerCmd = 'node -e "process.exit(0)"';
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "secret.md",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /Permission denied reading task prompt file/i);
+
+  // Restore permissions so temp cleanup can proceed.
+  await fs.chmod(filePath, 0o644);
+});
+
+test("`--task-file` errors when path is a directory", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-dir-"));
+  await fs.mkdir(path.join(tmp, "seedDir"), { recursive: true });
+  const plannerCmd = 'node -e "process.exit(0)"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "run",
+      "--dry-run",
+      "--task-file",
+      "seedDir",
+      "--auto-apply",
+      "--agent-cmd",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /Task prompt path is a directory/i);
 });
 
 test("`--task-prompt` + `--task-file` errors (no precedence)", async () => {

@@ -46,7 +46,21 @@ function appendSign(guardrailsText, message) {
   return updated.trimEnd() + "\n" + line + "\n";
 }
 
-function formatPrompt({ iteration, taskText, guardrailsText, progressText, lastOutput, rotationPending, currentPhase }) {
+function formatPrompt({
+  iteration,
+  taskText,
+  taskSeedText,
+  taskSeedSource,
+  guardrailsText,
+  progressText,
+  lastOutput,
+  rotationPending,
+  currentPhase,
+}) {
+  const seedLabel = taskSeedText
+    ? `## Task file (PRD)${taskSeedSource ? ` (${taskSeedSource})` : ""}`
+    : "";
+
   const lines = [
     "# Loopy Loop Prompt",
     "",
@@ -55,6 +69,9 @@ function formatPrompt({ iteration, taskText, guardrailsText, progressText, lastO
     `Rotation: ${rotationPending ? "fresh" : "standard"}`,
     currentPhase ? `Phase: ${currentPhase}` : "",
     "",
+    seedLabel,
+    taskSeedText ? String(taskSeedText).trimEnd() : "",
+    taskSeedText ? "" : "",
     "## Task (LOOPY_TASK.md)",
     taskText.trimEnd(),
     "",
