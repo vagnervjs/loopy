@@ -34,14 +34,14 @@ node bin/loopy.js --help
 ### Run your first loop
 ```bash
 loopy init
-loopy loop --agent "cursor-agent" --prompt "Add OAuth login to the app" --auto-apply
+loopy loop --agent "cursor-agent" --prompt "Add OAuth login to the app"
 loopy status
 ```
 
 ### Prompt from a file or stdin
 ```bash
-loopy loop --agent "cursor-agent" --prompt @./task.txt --auto-apply
-cat ./task.txt | loopy loop --agent "cursor-agent" --prompt - --auto-apply
+loopy loop --agent "cursor-agent" --prompt @./task.txt
+cat ./task.txt | loopy loop --agent "cursor-agent" --prompt -
 ```
 
 Tip: `loop` is the default command, so `loopy [options]` is equivalent to `loopy loop [options]`.
@@ -50,7 +50,7 @@ Tip: `loop` is the default command, so `loopy [options]` is equivalent to `loopy
 
 Start a new loop:
 ```bash
-loopy loop --agent "cursor-agent" --prompt "Add OAuth login to the app" --auto-apply
+loopy loop --agent "cursor-agent" --prompt "Add OAuth login to the app"
 ```
 
 Resume a previous run (requires `.loopy/state.json`):
@@ -79,7 +79,7 @@ loopy hint --reset
 
 Stream agent output to your terminal:
 ```bash
-loopy loop --agent "cursor-agent" --prompt @examples/PRD.md --auto-apply --stream
+loopy loop --agent "cursor-agent" --prompt @examples/PRD.md --stream
 ```
 
 Help and version:
@@ -141,6 +141,7 @@ When it is used:
 - If the plan doc does not exist, Loopy uses the seed prompt to generate it.
 - If the plan doc exists and you provide a seed prompt, Loopy updates it automatically.
 - If provided, Loopy includes the seed prompt in `.loopy/PROMPT.md` under `## Plan seed (PRD)`.
+- Use `--confirm` to require confirmation before writing or applying plan updates.
 
 ### Phases (auto-phase)
 Loopy supports phased execution via front matter:
@@ -208,7 +209,7 @@ For the latest full list, run `loopy --help`.
 
 Core loop:
 - `--agent <command>` agent command (overrides plan front matter)
-- `--auto-apply` skip confirmation prompts (apply changes)
+- `--confirm` ask before writing or applying plan updates
 - `--auto-phase` enable auto-phase planning (default: true; disable with `--auto-phase=false`)
 - `--phase <id>` start/resume at phase id
 - `--phase-only` stop after current phase completes
@@ -305,6 +306,7 @@ Safety notes:
 ### Migration notes
 - Default generated file locations are under `.loopy/` (plan: `.loopy/LOOPY_PLAN.md`, prompt: `.loopy/PROMPT.md`).
 - Legacy flags/commands are not accepted; use `loopy --help` to update any scripts.
+- `--auto-apply` is removed; plan updates apply automatically unless you pass `--confirm`.
 
 ## Troubleshooting
 - Missing plan doc: run `loopy init` or provide `--prompt` (or use `--plan <file>`).

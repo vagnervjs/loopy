@@ -299,7 +299,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     }
 
     const ok = await confirm(`Write new ${prettyPath(cwd, taskPath)}?`, {
-      autoApply: config.autoApply,
+      confirm: config.confirm,
       defaultYes: true,
     });
     if (!ok) throw new Error(`Aborted: ${prettyPath(cwd, taskPath)} not created.`);
@@ -343,6 +343,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     }
 
     if (nextText !== existing) {
+      const ok = await confirm(`Update ${prettyPath(cwd, taskPath)}?`, {
+        confirm: config.confirm,
+        defaultYes: true,
+      });
+      if (!ok) throw new Error(`Aborted: ${prettyPath(cwd, taskPath)} not updated.`);
       await writeText(taskPath, nextText);
       return { taskText: nextText, rewritten: true };
     }
@@ -370,7 +375,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
         });
         if (nextText !== existing) {
           const ok = await confirm(`Apply auto-phase plan to ${prettyPath(cwd, taskPath)}?`, {
-            autoApply: config.autoApply,
+            confirm: config.confirm,
             defaultYes: false,
           });
           if (ok) {

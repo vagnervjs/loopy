@@ -79,7 +79,7 @@ function printHelp() {
     },
     { label: "--plan <file>", desc: `Plan doc (default: ${DEFAULTS.taskFile})` },
     { label: "--agent <command>", desc: "Agent command (e.g. cursor-agent; overrides plan front matter)" },
-    { label: "--auto-apply", desc: "Skip confirmation prompts (apply changes)" },
+    { label: "--confirm", desc: "Ask before writing or applying plan updates" },
     { label: "--dry-run", desc: "Build prompt, skip agent execution" },
     { label: "--help, -h", desc: "Show help" },
     { label: "--version", desc: "Print version" },

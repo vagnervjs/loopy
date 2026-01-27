@@ -1,7 +1,7 @@
 const readline = require("node:readline/promises");
 
-async function confirm(question, { autoApply = false, defaultYes = false } = {}) {
-  if (autoApply) return true;
+async function confirm(question, { confirm = false, defaultYes = false } = {}) {
+  if (!confirm) return true;
   if (!process.stdin.isTTY) return false;
 
   const suffix = defaultYes ? "[Y/n]" : "[y/N]";

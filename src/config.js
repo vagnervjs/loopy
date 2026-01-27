@@ -17,6 +17,7 @@ const DEFAULTS = {
   maxOutputBytes: 1024 * 1024,
   gitCommitMessage: "loopy: {change_type} {task_summary}",
   autoPhase: true,
+  confirm: false,
 };
 
 function resolveFrom(cwd, maybePath) {
@@ -92,6 +93,7 @@ function mergeConfig(flags, frontMatter) {
   return {
     cwd: process.cwd(),
     continue: coerceBoolean(flags.continue, false),
+    confirm: coerceBoolean(flags.confirm, DEFAULTS.confirm),
     // NOTE: `--plan` is the plan doc path. (Internally we still call it `taskFile`.)
     taskFile: flags.plan || DEFAULTS.taskFile,
     // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.
@@ -112,7 +114,6 @@ function mergeConfig(flags, frontMatter) {
     testCommand: normalizeCommand(
       fm.test_command || fm.testCommand || phaseDefaults.test_command || phaseDefaults.testCommand || ""
     ),
-    autoApply: coerceBoolean(flags["auto-apply"], false),
     autoPhase: coerceBoolean(
       flags["auto-phase"] ?? fm.auto_phase ?? fm.autoPhase,
       DEFAULTS.autoPhase
