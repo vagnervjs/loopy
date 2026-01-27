@@ -41,6 +41,185 @@ function parseSkipPhaseList(value) {
     .filter(Boolean);
 }
 
+function normalizeChecklistItems(items) {
+  if (!Array.isArray(items)) return [];
+  const normalized = [];
+  for (const item of items) {
+    if (!item) continue;
+    const text = String(item.text || "").trim();
+    if (!text) continue;
+    normalized.push({ checked: Boolean(item.checked), text });
+  }
+  return normalized;
+}
+
+function collectPlanSections(parsedTask) {
+  const phases = (parsedTask && parsedTask.phases) || [];
+  if (phases.length) {
+    return phases.map((phase) => {
+      const section = parsedTask.phaseSections && parsedTask.phaseSections[phase.id];
+      return {
+        scope: "phase",
+        id: phase.id,
+        title: String(phase.title || phase.id || "").trim(),
+        items: normalizeChecklistItems(section && section.checklist),
+      };
+    });
+  }
+  return [
+    {
+      scope: "plan",
+      id: "plan",
+      title: "Plan",
+      items: normalizeChecklistItems(parsedTask && parsedTask.checklist),
+    },
+  ];
+}
+
+function formatChecklistItem(item) {
+  return `[${item.checked ? "x" : " "}] ${item.text}`;
+}
+
+function formatSectionLabel(section) {
+  const title = String(section.title || "").trim();
+  const id = String(section.id || "").trim();
+  if (title && id && title !== id) return `${title} (${id})`;
+  return title || id || "phase";
+}
+
+function formatPlanOverviewLines(parsedTask) {
+  const sections = collectPlanSections(parsedTask);
+  if (!sections.length) return [];
+  const hasPhases = sections.some((section) => section.scope === "phase");
+  const lines = [hasPhases ? "plan: phases/tasks" : "plan: tasks"];
+  for (const section of sections) {
+    if (section.scope === "phase") {
+      lines.push(`  phase: ${formatSectionLabel(section)}`);
+      if (!section.items.length) {
+        lines.push("    - (no tasks)");
+        continue;
+      }
+      for (const item of section.items) {
+        lines.push(`    - ${formatChecklistItem(item)}`);
+      }
+      continue;
+    }
+    if (!section.items.length) {
+      lines.push("  (no tasks)");
+      continue;
+    }
+    for (const item of section.items) {
+      lines.push(`  - ${formatChecklistItem(item)}`);
+    }
+  }
+  return lines;
+}
+
+function countCheckedByText(items) {
+  const counts = new Map();
+  for (const item of items || []) {
+    if (!item || !item.checked) continue;
+    const text = String(item.text || "").trim();
+    if (!text) continue;
+    counts.set(text, (counts.get(text) || 0) + 1);
+  }
+  return counts;
+}
+
+function diffNewlyChecked(beforeItems, afterItems) {
+  const before = countCheckedByText(beforeItems);
+  const after = countCheckedByText(afterItems);
+  const newly = [];
+  for (const [text, afterCount] of after.entries()) {
+    const beforeCount = before.get(text) || 0;
+    const diff = afterCount - beforeCount;
+    if (diff > 0) {
+      for (let i = 0; i < diff; i += 1) {
+        newly.push(text);
+      }
+    }
+  }
+  return newly;
+}
+
+function findNewlyCompletedTasks(parsedBefore, parsedAfter) {
+  const beforeSections = collectPlanSections(parsedBefore);
+  const afterSections = collectPlanSections(parsedAfter);
+  const beforeByKey = new Map();
+  for (const section of beforeSections) {
+    const key = section.scope === "phase" ? `phase:${section.id}` : "plan";
+    beforeByKey.set(key, section.items);
+  }
+
+  const results = [];
+  for (const section of afterSections) {
+    const key = section.scope === "phase" ? `phase:${section.id}` : "plan";
+    const beforeItems = beforeByKey.get(key) || [];
+    const newly = diffNewlyChecked(beforeItems, section.items);
+    if (!newly.length) continue;
+    results.push({ ...section, items: newly });
+  }
+  return results;
+}
+
+function formatCompletedTaskLines(completedSections) {
+  if (!completedSections || !completedSections.length) return [];
+  const lines = ["tasks: completed"];
+  for (const section of completedSections) {
+    if (section.scope === "phase") {
+      lines.push(`  phase: ${formatSectionLabel(section)}`);
+      for (const text of section.items) {
+        lines.push(`    - [x] ${text}`);
+      }
+      continue;
+    }
+    for (const text of section.items) {
+      lines.push(`  - [x] ${text}`);
+    }
+  }
+  return lines;
+}
+
+function countChecklist(items) {
+  let total = 0;
+  let checked = 0;
+  for (const item of items || []) {
+    total += 1;
+    if (item.checked) checked += 1;
+  }
+  return { total, checked };
+}
+
+function summarizePlanProgress(parsedTask, currentPhaseId) {
+  const sections = collectPlanSections(parsedTask);
+  const totals = countChecklist(sections.flatMap((section) => section.items));
+  let phaseSummary = null;
+  if (currentPhaseId) {
+    const phase = sections.find((section) => section.scope === "phase" && section.id === currentPhaseId);
+    if (phase) {
+      phaseSummary = { id: phase.id, ...countChecklist(phase.items) };
+    }
+  }
+  return { ...totals, phase: phaseSummary };
+}
+
+function formatProgressLine(summary) {
+  if (!summary || !summary.total) return "progress: no tasks found";
+  let line = `progress: ${summary.checked}/${summary.total} tasks checked`;
+  if (summary.phase && summary.phase.total) {
+    line += `; phase ${summary.phase.id}: ${summary.phase.checked}/${summary.phase.total}`;
+  }
+  return line;
+}
+
+function printStepLines(lines, options) {
+  if (!Array.isArray(lines)) return;
+  for (const line of lines) {
+    if (!String(line || "").trim()) continue;
+    printStep(line, options);
+  }
+}
+
 async function readStdinText() {
   // Prefer reading from the stdin stream to work reliably with `spawn(..., { stdio: ["pipe", ...] })`
   // (which is how our tests provide stdin). Reading fd 0 synchronously can return empty on some
@@ -665,14 +844,22 @@ async function runIteration(config) {
 
   const taskAfter = await readText(config.taskFile);
   bytesRead += Buffer.byteLength(taskAfter);
-  const taskComplete = taskAfter ? parseTask(taskAfter).allChecked : false;
+  const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
+  const taskComplete = Boolean(parsedTaskAfter.allChecked);
+  const completedSections = findNewlyCompletedTasks(parsedTask, parsedTaskAfter);
+  printStepLines(formatCompletedTaskLines(completedSections), { iteration });
+  printStep(formatProgressLine(summarizePlanProgress(parsedTaskAfter, currentPhaseId)), { iteration });
   const taskLine = getTaskLine(taskAfter || taskText, { phaseId: currentPhaseId });
   const taskContext = extractChangeType(taskLine);
   const taskSummary = taskContext.summary;
   let changeType = taskContext.changeType;
   if (taskContext.changeType === "chore" && !/^[a-zA-Z]+\s*:/.test(taskLine || "")) {
-    const agentType = await inferChangeTypeFromAgent(config.agentCommand, taskLine);
-    changeType = agentType || inferChangeTypeHeuristic(taskLine);
+    if (config.gitCommit) {
+      const agentType = await inferChangeTypeFromAgent(config.agentCommand, taskLine);
+      changeType = agentType || inferChangeTypeHeuristic(taskLine);
+    } else {
+      changeType = inferChangeTypeHeuristic(taskLine);
+    }
   }
   await appendActivity(config.activityLog, [`change_type inferred: ${changeType} (task: ${taskLine})`]);
 
@@ -1060,6 +1247,9 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
         `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
       ]);
       printStep(`plan: updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
+      const planText = ensured.taskText || (await readText(config.taskFile));
+      const planLines = formatPlanOverviewLines(parseTask(planText));
+      printStepLines(planLines, {});
     }
   }
 
