@@ -1,3 +1,5 @@
+const path = require("path");
+
 function formatProgress(state) {
   const lines = [
     "# Loopy Progress",
@@ -56,10 +58,25 @@ function formatPrompt({
   lastOutput,
   rotationPending,
   currentPhase,
+  taskFilePath,
+  hintsText,
 }) {
+  const planLabel = taskFilePath ? path.basename(String(taskFilePath)) : "plan doc";
+
   const seedLabel = taskSeedText
-    ? `## Task file (PRD)${taskSeedSource ? ` (${taskSeedSource})` : ""}`
+    ? `## Plan seed (PRD)${taskSeedSource ? ` (${taskSeedSource})` : ""}`
     : "";
+
+  const rawHints = String(hintsText || "").trimEnd();
+  let normalizedHints = rawHints;
+  if (normalizedHints) {
+    const lines = normalizedHints.split(/\r?\n/);
+    if (lines[0] && lines[0].trim().toLowerCase() === "# loopy hints") {
+      let i = 1;
+      while (i < lines.length && lines[i].trim() === "") i += 1;
+      normalizedHints = lines.slice(i).join("\n").trimEnd();
+    }
+  }
 
   const lines = [
     "# Loopy Loop Prompt",
@@ -72,7 +89,10 @@ function formatPrompt({
     seedLabel,
     taskSeedText ? String(taskSeedText).trimEnd() : "",
     taskSeedText ? "" : "",
-    "## Task (LOOPY_TASK.md)",
+    normalizedHints ? "## Hints" : "",
+    normalizedHints ? normalizedHints : "",
+    normalizedHints ? "" : "",
+    `## Plan (${planLabel})`,
     taskText.trimEnd(),
     "",
     "## Guardrails",
@@ -89,8 +109,8 @@ function formatPrompt({
   lines.push(
     "",
     "## Instructions",
-    "- Follow the task checklist in LOOPY_TASK.md.",
-    "- Update task checkboxes as you complete items.",
+    `- Follow the plan checklist in ${planLabel}.`,
+    "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",
     ""

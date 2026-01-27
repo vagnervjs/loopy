@@ -1,14 +1,15 @@
 const path = require("path");
 
 const DEFAULTS = {
-  taskFile: "LOOPY_TASK.md",
-  promptFile: "PROMPT.md",
+  taskFile: ".loopy/LOOPY_PLAN.md",
+  promptFile: ".loopy/PROMPT.md",
   loopyDir: ".loopy",
   progressFile: ".loopy/progress.md",
   guardrailsFile: ".loopy/guardrails.md",
   activityLog: ".loopy/activity.log",
   agentStreamLog: ".loopy/agent_stream.log",
   stateFile: ".loopy/state.json",
+  hintsFile: ".loopy/hints.md",
   maxIterations: 50,
   maxMinutes: 120,
   backoffMs: 5000,
@@ -16,6 +17,7 @@ const DEFAULTS = {
   maxOutputBytes: 1024 * 1024,
   gitCommitMessage: "loopy: {change_type} {task_summary}",
   autoPhase: true,
+  confirm: false,
 };
 
 function resolveFrom(cwd, maybePath) {
@@ -43,6 +45,7 @@ function materializeConfigPaths(config, cwd) {
     guardrailsFile: resolveFrom(nextCwd, config.guardrailsFile),
     activityLog: resolveFrom(nextCwd, config.activityLog),
     stateFile: resolveFrom(nextCwd, config.stateFile),
+    hintsFile: resolveFrom(nextCwd, config.hintsFile || DEFAULTS.hintsFile),
   };
 }
 
@@ -81,23 +84,36 @@ function mergeConfig(flags, frontMatter) {
   const fm = frontMatter || {};
   const hooks = fm.hooks || {};
   const git = fm.git || {};
-  const taskPromptFlag = flags["task-prompt"];
-  const taskFileFlag = flags["task-file"] ?? flags["task-prompt-file"];
+  const phaseDefaults = fm.phase_defaults || fm.phaseDefaults || {};
+  const hasPromptSeed = Object.prototype.hasOwnProperty.call(flags, "prompt");
+  const promptSeedFlag = hasPromptSeed ? flags.prompt : undefined;
+  const promptOutFlag = flags["prompt-out"];
+  const gitWorktreeFlag = flags["git-worktree"];
+  const gitWorktreeBranchFlag = flags["git-worktree-branch"];
   return {
     cwd: process.cwd(),
-    taskFile: flags.task || DEFAULTS.taskFile,
-    promptFile: flags.prompt || DEFAULTS.promptFile,
+    continue: coerceBoolean(flags.continue, false),
+    confirm: coerceBoolean(flags.confirm, DEFAULTS.confirm),
+    // NOTE: `--plan` is the plan doc path. (Internally we still call it `taskFile`.)
+    taskFile: flags.plan || DEFAULTS.taskFile,
+    // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.
+    promptFile: (promptOutFlag === true ? "" : String(promptOutFlag || "")) || DEFAULTS.promptFile,
     loopyDir: DEFAULTS.loopyDir,
     progressFile: flags.progress || DEFAULTS.progressFile,
     guardrailsFile: flags.guardrails || DEFAULTS.guardrailsFile,
     activityLog: flags["activity-log"] || DEFAULTS.activityLog,
     agentStreamLog: DEFAULTS.agentStreamLog,
     stateFile: flags.state || DEFAULTS.stateFile,
-    agentCommand: normalizeCommand(flags["agent-cmd"] || fm.agent_command || fm.agentCommand || ""),
-    testCommand: normalizeCommand(fm.test_command || fm.testCommand || ""),
-    taskPrompt: taskPromptFlag === true ? "" : String(taskPromptFlag || ""),
-    taskPromptFile: taskFileFlag === true ? "" : String(taskFileFlag || ""),
-    autoApply: coerceBoolean(flags["auto-apply"], false),
+    hintsFile: flags.hints || DEFAULTS.hintsFile,
+    // New seed prompt entrypoint (preferred):
+    // - `--prompt "<inline text>"`
+    // - `--prompt @path/to/file`
+    // - `--prompt -` (stdin)
+    promptSeed: promptSeedFlag === true ? "" : String(promptSeedFlag || ""),
+    agentCommand: normalizeCommand(flags.agent || fm.agent_command || fm.agentCommand || ""),
+    testCommand: normalizeCommand(
+      fm.test_command || fm.testCommand || phaseDefaults.test_command || phaseDefaults.testCommand || ""
+    ),
     autoPhase: coerceBoolean(
       flags["auto-phase"] ?? fm.auto_phase ?? fm.autoPhase,
       DEFAULTS.autoPhase
@@ -124,20 +140,22 @@ function mergeConfig(flags, frontMatter) {
       git.commit_message ||
       git.commitMessage ||
       DEFAULTS.gitCommitMessage,
-    gitWorktree:
-      flags["git-worktree"] ||
-      fm.git_worktree ||
-      fm.gitWorktree ||
-      git.worktree ||
-      git.git_worktree ||
-      "",
-    gitWorktreeBranch:
-      flags["git-worktree-branch"] ||
-      fm.git_worktree_branch ||
-      fm.gitWorktreeBranch ||
-      git.worktree_branch ||
-      git.worktreeBranch ||
-      "",
+    gitWorktree: normalizeCommand(
+      (gitWorktreeFlag === true ? "" : gitWorktreeFlag) ||
+        fm.git_worktree ||
+        fm.gitWorktree ||
+        git.worktree ||
+        git.git_worktree ||
+        ""
+    ),
+    gitWorktreeBranch: normalizeCommand(
+      (gitWorktreeBranchFlag === true ? "" : gitWorktreeBranchFlag) ||
+        fm.git_worktree_branch ||
+        fm.gitWorktreeBranch ||
+        git.worktree_branch ||
+        git.worktreeBranch ||
+        ""
+    ),
     maxIterations: clampMin(
       coerceNumber(flags["max-iterations"] || fm.max_iterations, DEFAULTS.maxIterations),
       1

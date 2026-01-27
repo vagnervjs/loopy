@@ -1,4 +1,5 @@
 const fs = require("fs/promises");
+const nodeFs = require("fs");
 const path = require("path");
 const yaml = require("js-yaml");
 
@@ -41,67 +42,130 @@ function parseSkipPhaseList(value) {
 }
 
 async function readStdinText() {
-  try {
-    if (process.stdin.readableEnded) return "";
-  } catch (_) {
-    // ignore
-  }
-  return await new Promise((resolve, reject) => {
-    let data = "";
+  // Prefer reading from the stdin stream to work reliably with `spawn(..., { stdio: ["pipe", ...] })`
+  // (which is how our tests provide stdin). Reading fd 0 synchronously can return empty on some
+  // platforms if the pipe is not ready yet.
+  const stdin = process.stdin;
+  if (!stdin) return "";
+  if (stdin.isTTY) return "";
+
+  let out = "";
+  const drain = () => {
     try {
-      process.stdin.setEncoding("utf8");
+      let chunk = null;
+      while ((chunk = stdin.read()) !== null) out += String(chunk || "");
     } catch (_) {
       // ignore
     }
-    process.stdin.on("data", (chunk) => {
-      data += chunk;
-    });
-    process.stdin.on("error", reject);
-    process.stdin.on("end", () => resolve(data));
+  };
+
+  try {
+    stdin.setEncoding("utf8");
+  } catch (_) {
+    // ignore
+  }
+
+  // Attempt to drain any buffered data immediately (covers some "fast pipe" cases).
+  drain();
+
+  // If stdin already looks ended/destroyed, try fd0 as a final fallback.
+  if (stdin.readableEnded || stdin.destroyed) {
+    if (!String(out || "").trim()) {
+      try {
+        return nodeFs.readFileSync(0, "utf8");
+      } catch (_) {
+        // ignore
+      }
+    }
+    return out;
+  }
+
+  // Normal case: read from stream events until end/error.
+  const streamText = await new Promise((resolve) => {
+    const cleanupAndResolve = () => {
+      drain();
+      try {
+        stdin.off("data", onData);
+        stdin.off("end", onEnd);
+        stdin.off("error", onError);
+      } catch (_) {
+        // ignore
+      }
+      resolve(out);
+    };
+
+    const onData = (chunk) => {
+      out += String(chunk || "");
+    };
+    const onEnd = () => cleanupAndResolve();
+    const onError = () => cleanupAndResolve();
+
+    stdin.on("data", onData);
+    stdin.once("end", onEnd);
+    stdin.once("error", onError);
+    try {
+      stdin.resume();
+    } catch (_) {
+      // ignore
+    }
+
+    // In case it ended between our earlier check and listener attach.
+    if (stdin.readableEnded || stdin.destroyed) cleanupAndResolve();
   });
+
+  if (!String(streamText || "").trim()) {
+    try {
+      return nodeFs.readFileSync(0, "utf8");
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  return streamText;
 }
 
 async function loadTaskSeed(config) {
-  const inlineRaw = config.taskPrompt == null ? "" : String(config.taskPrompt);
-  const inline = normalizeTaskSeedText(inlineRaw);
-  const fileArg = String(config.taskPromptFile || "").trim();
+  const promptSeedRaw = config.promptSeed == null ? "" : String(config.promptSeed).trim();
 
-  if (inline && fileArg) {
-    throw new Error("Provide only one of --task-prompt or --task-file.");
-  }
-
-  if (fileArg) {
-    if (fileArg === "-") {
+  // Seed path: `--prompt`
+  if (promptSeedRaw) {
+    if (promptSeedRaw === "-") {
       const raw = await readStdinText();
       const seed = normalizeTaskSeedText(raw);
-      if (!seed) throw new Error("Task prompt from --task-file '-' (stdin) is empty.");
-      return { seed, source: "--task-file" };
+      if (!seed) throw new Error("Seed prompt from --prompt '-' (stdin) is empty.");
+      return { seed, source: "--prompt" };
     }
 
-    const abs = resolveFrom(config.cwd, fileArg);
-    let raw = "";
-    try {
-      raw = await fs.readFile(abs, "utf8");
-    } catch (err) {
-      if (err && err.code === "ENOENT") {
-        throw new Error(`Task prompt file not found: ${prettyPath(config.cwd, abs)}`);
+    if (promptSeedRaw.startsWith("@")) {
+      const rawPath = promptSeedRaw.slice(1).trim();
+      if (!rawPath) throw new Error("Missing file path after --prompt @<file>.");
+      const abs = resolveFrom(config.cwd, rawPath);
+      let raw = "";
+      try {
+        raw = await fs.readFile(abs, "utf8");
+      } catch (err) {
+        if (err && err.code === "ENOENT") {
+          throw new Error(`Seed prompt file not found: ${prettyPath(config.cwd, abs)}`);
+        }
+        if (err && err.code === "EISDIR") {
+          throw new Error(`Seed prompt path is a directory: ${prettyPath(config.cwd, abs)}`);
+        }
+        if (err && (err.code === "EACCES" || err.code === "EPERM")) {
+          throw new Error(`Permission denied reading seed prompt file: ${prettyPath(config.cwd, abs)}`);
+        }
+        throw new Error(
+          `Failed to read seed prompt file ${prettyPath(config.cwd, abs)}: ${err && err.message ? err.message : String(err)}`
+        );
       }
-      if (err && err.code === "EISDIR") {
-        throw new Error(`Task prompt path is a directory: ${prettyPath(config.cwd, abs)}`);
-      }
-      if (err && err.code === "EACCES") {
-        throw new Error(`Permission denied reading task prompt file: ${prettyPath(config.cwd, abs)}`);
-      }
-      throw new Error(
-        `Failed to read task prompt file ${prettyPath(config.cwd, abs)}: ${err && err.message ? err.message : String(err)}`
-      );
+      const seed = normalizeTaskSeedText(raw);
+      if (!seed) throw new Error(`Seed prompt file is empty: ${prettyPath(config.cwd, abs)}`);
+      return { seed, source: "--prompt" };
     }
-    const seed = normalizeTaskSeedText(raw);
-    if (!seed) throw new Error(`Task prompt file is empty: ${prettyPath(config.cwd, abs)}`);
-    return { seed, source: "--task-file" };
+
+    const seed = normalizeTaskSeedText(promptSeedRaw);
+    if (!seed) throw new Error("Seed prompt from --prompt is empty.");
+    return { seed, source: "--prompt" };
   }
-
-  if (inline) return { seed: inline, source: "--task-prompt" };
   return { seed: "", source: "" };
 }
 
@@ -175,11 +239,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     const loaded = loadedSeed || (await loadTaskSeed(config));
     let seed = loaded.seed;
     if (!seed) {
-      seed = await promptLine("Enter a short task description for LOOPY_TASK.md: ");
+      seed = await promptLine(`Enter a short plan description for ${prettyPath(cwd, taskPath)}: `);
     }
     if (!seed) {
       throw new Error(
-        `Missing ${prettyPath(cwd, taskPath)} and no task prompt provided (use --task-prompt/--task-file or run in a TTY).`
+        `Missing ${prettyPath(cwd, taskPath)} and no seed prompt provided (use --prompt, or run in a TTY).`
       );
     }
 
@@ -227,7 +291,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
         ).trimEnd(),
         "---",
         "",
-        "# Task",
+        "# Plan",
         "",
         `- [ ] ${seed}`,
         "",
@@ -235,15 +299,15 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     }
 
     const ok = await confirm(`Write new ${prettyPath(cwd, taskPath)}?`, {
-      autoApply: config.autoApply,
+      confirm: config.confirm,
       defaultYes: true,
     });
-    if (!ok) throw new Error("Aborted: LOOPY_TASK.md not created.");
+    if (!ok) throw new Error(`Aborted: ${prettyPath(cwd, taskPath)} not created.`);
     await writeText(taskPath, nextText);
     return { taskText: nextText, rewritten: true };
   }
 
-  // User-provided prompt explicitly requests an update.
+  // User-provided prompt explicitly requests an update (apply automatically).
   const loaded = loadedSeed || (await loadTaskSeed(config));
   if (loaded.seed) {
     const seed = loaded.seed;
@@ -265,13 +329,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
         seedText: seed,
       });
     } else {
-      // Legacy update: overwrite checklist with a single new item.
+      // Non-phased update: overwrite checklist with a single new item.
       nextText = [
         "---",
         yaml.dump(fm, { lineWidth: 120 }).trimEnd(),
         "---",
         "",
-        "# Task",
+        "# Plan",
         "",
         `- [ ] ${seed}`,
         "",
@@ -279,14 +343,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     }
 
     if (nextText !== existing) {
-      const ok = await confirm(`Update ${prettyPath(cwd, taskPath)} from ${loaded.source}?`, {
-        autoApply: config.autoApply,
-        defaultYes: false,
+      const ok = await confirm(`Update ${prettyPath(cwd, taskPath)}?`, {
+        confirm: config.confirm,
+        defaultYes: true,
       });
-      if (ok) {
-        await writeText(taskPath, nextText);
-        return { taskText: nextText, rewritten: true };
-      }
+      if (!ok) throw new Error(`Aborted: ${prettyPath(cwd, taskPath)} not updated.`);
+      await writeText(taskPath, nextText);
+      return { taskText: nextText, rewritten: true };
     }
     return { taskText: existing, rewritten: false };
   }
@@ -312,7 +375,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
         });
         if (nextText !== existing) {
           const ok = await confirm(`Apply auto-phase plan to ${prettyPath(cwd, taskPath)}?`, {
-            autoApply: config.autoApply,
+            confirm: config.confirm,
             defaultYes: false,
           });
           if (ok) {
@@ -341,8 +404,8 @@ async function runIteration(config) {
   const parsedTask = parseTask(taskText);
 
   if (parsedTask.allChecked) {
-    await appendActivity(config.activityLog, ["Task complete. Stopping loop."]);
-    printStep("Task complete. Stopping loop.");
+    await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
+    printStep("Plan complete. Stopping loop.");
     return { status: "complete", bytes: 0 };
   }
 
@@ -374,6 +437,10 @@ async function runIteration(config) {
   bytesRead += Buffer.byteLength(lastOutputRaw);
   const lastOutput = truncate(lastOutputRaw, 4000);
 
+  const hintsTextRaw = await readText(config.hintsFile);
+  bytesRead += Buffer.byteLength(hintsTextRaw);
+  const hintsText = truncate(hintsTextRaw, 8000);
+
   const prompt = formatPrompt({
     iteration,
     taskText,
@@ -384,6 +451,8 @@ async function runIteration(config) {
     lastOutput,
     rotationPending,
     currentPhase: currentPhaseId,
+    taskFilePath: config.taskFile,
+    hintsText,
   });
 
   await writeText(config.promptFile, prompt);
@@ -402,7 +471,9 @@ async function runIteration(config) {
   }
 
   if (!config.agentCommand) {
-    throw new Error("Missing agent_command. Set it in LOOPY_TASK.md front matter or use --agent-cmd.");
+    throw new Error(
+      `Missing agent_command. Set it in ${prettyPath(config.cwd, config.taskFile)} front matter or use --agent.`
+    );
   }
 
   if (config.preIteration) {
@@ -489,7 +560,6 @@ async function runIteration(config) {
     changeType = agentType || inferChangeTypeHeuristic(taskLine);
   }
   await appendActivity(config.activityLog, [`change_type inferred: ${changeType} (task: ${taskLine})`]);
-  console.log(`change_type: ${changeType} (task: ${taskLine})`);
 
   let postIterationRan = false;
   if (status === "success" && config.postIteration) {
@@ -649,8 +719,8 @@ async function runIteration(config) {
   ]);
 
   if (taskComplete) {
-    await appendActivity(config.activityLog, ["Task complete detected after iteration."]);
-    printStep("Task complete detected after iteration.", { iteration });
+    await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
+    printStep("Plan complete detected after iteration.", { iteration });
     return { status: "complete", bytes: bytesRead + bytesWritten };
   }
 
@@ -667,27 +737,82 @@ async function runIteration(config) {
 async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const stop = stopSignal || { stopRequested: false };
   const baseCwd = process.cwd();
-  const initialTaskPath = resolveFrom(baseCwd, flags.task || DEFAULTS.taskFile);
-  const taskText = await readText(initialTaskPath);
-  const parsedTask = taskText ? parseTask(taskText) : { frontMatter: {} };
+  const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+  if (command === "run") {
+    throw new Error("Unsupported command. For a single iteration, use `loopy loop --max-iterations 1`.");
+  }
+
+  // No legacy flag compatibility: fail fast with a clear message.
+  if (hasOwn(flags, "task")) throw new Error("Unsupported legacy flag provided. Use `--plan <file>` instead.");
+  if (hasOwn(flags, "agent-cmd"))
+    throw new Error("Unsupported legacy flag provided. Use `--agent <command>` instead.");
+  if (hasOwn(flags, "task-prompt"))
+    throw new Error("Unsupported legacy seed flag provided. Use `--prompt \"<text>\"` instead.");
+  if (hasOwn(flags, "task-file") || hasOwn(flags, "task-prompt-file"))
+    throw new Error("Unsupported legacy seed flag provided. Use `--prompt @<file>` (or `--prompt -`) instead.");
+  if (hasOwn(flags, "prompt-file")) throw new Error("Unsupported legacy flag provided. Use `--prompt-out <file>` instead.");
+
+  const defaultPlanPath = resolveFrom(baseCwd, flags.plan || DEFAULTS.taskFile);
+  const planText = await readText(defaultPlanPath);
+
+  const parsedTask = planText ? parseTask(planText) : { frontMatter: {} };
   let config = mergeConfig(flags, parsedTask.frontMatter);
 
-  if (Object.prototype.hasOwnProperty.call(flags, "task-prompt") && flags["task-prompt"] !== true) {
-    const v = String(flags["task-prompt"] || "").trim();
-    if (!v) throw new Error("Missing value for --task-prompt (expected text).");
+  // `--continue` is a "resume only" mode: don't accept seed prompt updates here.
+  if (config.continue && hasOwn(flags, "prompt")) {
+    throw new Error("`--continue` cannot be used with `--prompt`. Omit `--prompt` to resume, or run without `--continue`.");
   }
-  if (flags["task-prompt"] === true) {
-    throw new Error("Missing value for --task-prompt (expected text).");
+
+  // Validate seed prompt flag early.
+  if (hasOwn(flags, "prompt")) {
+    if (flags.prompt === true) {
+      throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
+    }
+    const v = String(flags.prompt || "").trim();
+    if (!v) throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
+    if (v.startsWith("@") && !v.slice(1).trim()) {
+      throw new Error("Missing file path after --prompt @<file>.");
+    }
   }
-  if (
-    (Object.prototype.hasOwnProperty.call(flags, "task-file") && flags["task-file"] !== true) ||
-    (Object.prototype.hasOwnProperty.call(flags, "task-prompt-file") && flags["task-prompt-file"] !== true)
-  ) {
-    const raw = String((flags["task-file"] ?? flags["task-prompt-file"]) || "").trim();
-    if (!raw) throw new Error("Missing value for --task-file (expected a file path or '-').");
+
+  // Validate prompt output flag.
+  if (flags["prompt-out"] === true) {
+    throw new Error("Missing value for --prompt-out (expected a file path).");
   }
-  if (flags["task-file"] === true || flags["task-prompt-file"] === true) {
-    throw new Error("Missing value for --task-file (expected a file path or '-').");
+
+  // Ensure agent command is defined before any planning/execution.
+  if (!config.agentCommand) {
+    const entered = await promptLine('Enter agent command (e.g. "cursor-agent"): ');
+    if (!entered) {
+      throw new Error(
+        `Missing agent_command. Set it in ${prettyPath(baseCwd, resolveFrom(baseCwd, config.taskFile))} front matter or use --agent.`
+      );
+    }
+    config.agentCommand = entered;
+  }
+
+  // Default git branch when missing (only when running inside a git repo).
+  if (!config.continue && !config.gitBranch) {
+    let isGitRepo = false;
+    try {
+      await fs.stat(path.join(baseCwd, ".git"));
+      isGitRepo = true;
+    } catch (_) {
+      isGitRepo = false;
+    }
+    // If the user is explicitly running in a worktree branch, don't auto-switch
+    // away from it by synthesizing a default branch.
+    const hasWorktreeBranch = Boolean(String(config.gitWorktreeBranch || "").trim());
+    if (isGitRepo && !hasWorktreeBranch) {
+      const rawPrompt =
+        hasOwn(flags, "prompt") && flags.prompt !== true ? String(flags.prompt || "").trim() : "";
+      let base = rawPrompt;
+      if (base.startsWith("@")) base = path.basename(base.slice(1).trim() || "seed");
+      if (base === "-") base = "stdin";
+      base = base.replace(/\.[a-z0-9]+$/i, "");
+      const slug = toSlug(base) || toSlug(path.basename(baseCwd)) || "work";
+      config.gitBranch = `loopy/${slug}`.slice(0, 80);
+    }
   }
 
   printStep(
@@ -697,37 +822,153 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   // Optional git workspace setup (worktree / branch). This is done once, before the loop.
   let effectiveCwd = baseCwd;
   if (config.gitWorktree) {
-    printStep(
-      `git worktree: ensure ${prettyPath(baseCwd, resolveFrom(baseCwd, config.gitWorktree))}` +
-        (config.gitWorktreeBranch ? ` (branch: ${config.gitWorktreeBranch})` : " (detached)"),
-      {}
-    );
-    effectiveCwd = await ensureGitWorktree(baseCwd, config.gitWorktree, config.gitWorktreeBranch);
-    printStep(`git worktree: using ${prettyPath(baseCwd, effectiveCwd)}`, {});
+    const worktreeAbs = resolveFrom(baseCwd, config.gitWorktree);
+    if (config.continue) {
+      // Resume mode: use existing worktree path only (don't create/switch).
+      try {
+        const stat = await fs.stat(worktreeAbs);
+        if (!stat.isDirectory()) {
+          throw new Error(`Worktree path exists but is not a directory: ${worktreeAbs}`);
+        }
+      } catch (err) {
+        if (err && err.code === "ENOENT") {
+          throw new Error(
+            `Cannot continue: git worktree path not found: ${prettyPath(baseCwd, worktreeAbs)} (run without --continue to create it)`
+          );
+        }
+        throw err;
+      }
+      effectiveCwd = worktreeAbs;
+      await ensureGitRepo(effectiveCwd);
+      printStep(`git worktree: using existing ${prettyPath(baseCwd, effectiveCwd)} (--continue)`, {});
+    } else {
+      printStep(
+        `git worktree: ensure ${prettyPath(baseCwd, worktreeAbs)}` +
+          (config.gitWorktreeBranch ? ` (branch: ${config.gitWorktreeBranch})` : " (detached)"),
+        {}
+      );
+      effectiveCwd = await ensureGitWorktree(baseCwd, config.gitWorktree, config.gitWorktreeBranch);
+      printStep(`git worktree: using ${prettyPath(baseCwd, effectiveCwd)}`, {});
+    }
+  }
+  // If a worktree branch was specified, don't switch away from it via any default/implicit `gitBranch`.
+  // Only honor `gitBranch` when the user explicitly provided it (flag or plan front matter).
+  const fm0 = (parsedTask && parsedTask.frontMatter) || {};
+  const fmGit = fm0.git && typeof fm0.git === "object" ? fm0.git : {};
+  const gitBranchExplicit = Boolean(
+    String(flags["git-branch"] || "").trim() ||
+      String(fm0.git_branch || fm0.gitBranch || "").trim() ||
+      String(fmGit.branch || fmGit.git_branch || fmGit.gitBranch || "").trim()
+  );
+  if (config.gitWorktree && config.gitWorktreeBranch && !gitBranchExplicit) {
+    config.gitBranch = "";
   }
   if (config.gitBranch) {
-    printStep(`git branch: switch to ${config.gitBranch}`, {});
-    await ensureGitRepo(effectiveCwd);
-    await gitSwitchBranch(effectiveCwd, config.gitBranch);
-    printStep(`git branch: now on ${config.gitBranch}`, {});
+    if (config.continue) {
+      printStep(`git branch: skipping switch to ${config.gitBranch} (--continue)`, {});
+    } else {
+      printStep(`git branch: switch to ${config.gitBranch}`, {});
+      await ensureGitRepo(effectiveCwd);
+      await gitSwitchBranch(effectiveCwd, config.gitBranch);
+      printStep(`git branch: now on ${config.gitBranch}`, {});
+    }
   }
 
   config = materializeConfigPaths(config, effectiveCwd);
   if (onActivityLog) onActivityLog(config.activityLog);
 
-  // Load the task seed once so stdin ('-') works and prompts can reuse the content.
-  const loadedSeed = await loadTaskSeed(config);
-  config.taskSeedText = loadedSeed.seed || "";
-  config.taskSeedSource = loadedSeed.source || "";
+  if (config.continue) {
+    // Resume mode: require existing plan + state, but do not create/update the plan doc.
+    const taskTextNow = await readText(config.taskFile);
+    if (!taskTextNow) {
+      throw new Error(
+        `Cannot continue: missing ${prettyPath(config.cwd, config.taskFile)}. Run \`loopy init\` or run without --continue and provide --prompt.`
+      );
+    }
 
-  // Task initialization / auto-phase planning happens once, before looping.
-  const ensured = await ensureTaskBeforeLoop(config, loadedSeed);
-  if (ensured.rewritten) {
-    await appendActivity(config.activityLog, [
-      `Task updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
-    ]);
-    printStep(`Task updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
+    let stateText = "";
+    try {
+      stateText = await fs.readFile(config.stateFile, "utf8");
+    } catch (err) {
+      if (err && err.code === "ENOENT") {
+        throw new Error(
+          `No Loopy state found at ${prettyPath(config.cwd, config.stateFile)}.\nRun \`loopy loop\` first (without --continue).`
+        );
+      }
+      throw err;
+    }
+
+    let resumeState = null;
+    try {
+      resumeState = JSON.parse(stateText);
+    } catch (err) {
+      throw new Error(
+        `Failed to parse Loopy state at ${prettyPath(config.cwd, config.stateFile)}: ${
+          err && err.message ? err.message : String(err)
+        }`
+      );
+    }
+
+    const phase = resumeState && resumeState.currentPhase ? `, phase: ${resumeState.currentPhase}` : "";
+    const iter = resumeState && resumeState.iteration != null ? resumeState.iteration : 0;
+    const last = (resumeState && resumeState.lastStatus) || "n/a";
+    printStep(`Continuing from saved state (iter ${iter}${phase}; last status: ${last})`, {});
+    config.taskSeedText = "";
+    config.taskSeedSource = "";
+  } else {
+    // Load the plan seed once so stdin ('-') works and prompts can reuse the content.
+    const loadedSeed = await loadTaskSeed(config);
+    config.taskSeedText = loadedSeed.seed || "";
+    config.taskSeedSource = loadedSeed.source || "";
+
+    // Plan initialization / auto-phase planning happens once, before looping.
+    const ensured = await ensureTaskBeforeLoop(config, loadedSeed);
+    if (ensured.rewritten) {
+      await appendActivity(config.activityLog, [
+        `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
+      ]);
+      printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
+    }
   }
+
+  // Persist key defaults into the plan front matter when missing (agent/test/branch).
+  const applyFrontMatterPatch = async (patchFn) => {
+    const text = await readText(config.taskFile);
+    if (!text) return;
+    const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+    let fm = {};
+    let body = text;
+    if (m) {
+      try {
+        fm = yaml.load(m[1]) || {};
+      } catch (_) {
+        fm = {};
+      }
+      body = text.slice(m[0].length);
+    }
+    const nextFm = (patchFn && patchFn(fm)) || fm;
+    const yamlText = yaml.dump(nextFm, { lineWidth: 120 }).trimEnd();
+    const normalizedBody = String(body || "").replace(/^\n+/, "");
+    const next = ["---", yamlText, "---", "", normalizedBody].join("\n");
+    if (next !== text) await writeText(config.taskFile, next);
+  };
+
+  await applyFrontMatterPatch((fm) => {
+    const next = { ...(fm || {}) };
+    if (!String(next.agent_command || next.agentCommand || "").trim()) {
+      next.agent_command = config.agentCommand || "";
+    }
+    // Only persist a test command if one is already configured (we don't require it).
+    if (String(config.testCommand || "").trim() && !String(next.test_command || next.testCommand || "").trim()) {
+      next.test_command = String(config.testCommand || "").trim();
+    }
+    const git = next.git && typeof next.git === "object" ? { ...next.git } : {};
+    if (config.gitBranch && !String(git.branch || git.git_branch || git.gitBranch || "").trim()) {
+      git.branch = config.gitBranch;
+    }
+    if (Object.keys(git).length) next.git = git;
+    return next;
+  });
 
   const start = Date.now();
   let iteration = 0;
@@ -754,6 +995,15 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       break;
     }
 
+    // `--dry-run` builds the prompt and skips agent execution. Since dry runs don't
+    // advance state iterations, stop after the first iteration to avoid looping
+    // forever (and to keep CLI/test behavior fast and predictable).
+    if (config.dryRun) {
+      await appendActivity(config.activityLog, ["Dry run complete. Stopping."]);
+      printStep("Dry run complete. Stopping.");
+      break;
+    }
+
     if (result.guardrailStopReason) {
       await appendActivity(config.activityLog, [`Guardrail stop triggered: ${result.guardrailStopReason}`]);
       printStep(`Guardrail stop triggered: ${result.guardrailStopReason}`);
@@ -763,10 +1013,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     if (stop.stopRequested) {
       await appendActivity(config.activityLog, ["Stop requested. Exiting loop."]);
       printStep("Stop requested. Exiting loop.");
-      break;
-    }
-
-    if (command === "run") {
       break;
     }
 
