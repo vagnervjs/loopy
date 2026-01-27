@@ -79,6 +79,17 @@ function formatDuration(minutes) {
   return `${minutes}m`;
 }
 
+function looksLikeFilePath(value) {
+  const v = String(value || "").trim();
+  if (!v) return false;
+  // These are reserved for seed prompt semantics.
+  if (v === "-" || v.startsWith("@")) return false;
+  // If there is whitespace, it's far more likely to be an inline seed.
+  if (/\s/.test(v)) return false;
+  // Heuristic: treat paths and filenames with extensions as file-like.
+  return Boolean(path.extname(v) || v.includes("/") || v.includes("\\"));
+}
+
 function mergeConfig(flags, frontMatter) {
   const fm = frontMatter || {};
   const hooks = fm.hooks || {};
@@ -101,7 +112,7 @@ function mergeConfig(flags, frontMatter) {
     !Object.prototype.hasOwnProperty.call(flags, "prompt-file") &&
     Object.prototype.hasOwnProperty.call(flags, "prompt") &&
     promptSeedFlag !== true &&
-    String(promptSeedFlag || "").trim() !== "";
+    looksLikeFilePath(promptSeedFlag);
   return {
     cwd: process.cwd(),
     taskFile: flags.task || DEFAULTS.taskFile,

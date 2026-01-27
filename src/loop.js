@@ -40,6 +40,16 @@ function parseSkipPhaseList(value) {
     .filter(Boolean);
 }
 
+function looksLikeLegacyPromptOutFile(value) {
+  const v = String(value || "").trim();
+  if (!v) return false;
+  // These are reserved for seed prompt semantics.
+  if (v === "-" || v.startsWith("@")) return false;
+  // If there is whitespace, it's far more likely to be an inline seed.
+  if (/\s/.test(v)) return false;
+  return Boolean(path.extname(v) || v.includes("/") || v.includes("\\"));
+}
+
 async function readStdinText() {
   try {
     if (process.stdin.readableEnded) return "";
@@ -767,7 +777,9 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     legacySeedProvided &&
     !Object.prototype.hasOwnProperty.call(flags, "prompt-out") &&
     !Object.prototype.hasOwnProperty.call(flags, "prompt-file") &&
-    Object.prototype.hasOwnProperty.call(flags, "prompt");
+    Object.prototype.hasOwnProperty.call(flags, "prompt") &&
+    flags.prompt !== true &&
+    looksLikeLegacyPromptOutFile(flags.prompt);
 
   if (promptIsLegacyOutAlias) {
     console.error("Warning: `--prompt <file>` is deprecated. Use `--prompt-out <file>` instead.");
