@@ -24,7 +24,7 @@ Build a Node.js CLI that runs a coding agent loop reliably, preserving state in 
 
 ## Requirements
 ### Functional
-- [F1] CLI supports `loop` (repeat) command; single iteration via `--max-iterations 1`.
+- [F1] CLI runs iterations by default (no subcommand); single iteration via `--max-iterations 1`.
 - [F2] Reads plan definition from `.loopy/LOOPY_PLAN.md` (front matter + checklist).
 - [F3] Generates/uses a single prompt source (e.g., `.loopy/PROMPT.md`) each iteration.
 - [F4] Executes a configured agent command (e.g., `cursor-agent`, `claude`, `amp`) with stdin from prompt.
@@ -49,7 +49,7 @@ Build a Node.js CLI that runs a coding agent loop reliably, preserving state in 
 - [N5] Observability: logs are human-readable and append-only.
 
 ## User Stories (MVP)
-- As a developer, I want to run `loopy loop` overnight and wake up to a progress log.
+- As a developer, I want to run `loopy` overnight and wake up to a progress log.
 - As a developer, I want to run a single iteration to validate the prompt.
 - As a developer, I want the loop to stop when success criteria are met.
 
