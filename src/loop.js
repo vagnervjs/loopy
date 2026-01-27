@@ -62,23 +62,70 @@ async function readStdinText() {
 }
 
 async function loadTaskSeed(config) {
-  const inlineRaw = config.taskPrompt == null ? "" : String(config.taskPrompt);
-  const inline = normalizeTaskSeedText(inlineRaw);
-  const fileArg = String(config.taskPromptFile || "").trim();
+  const promptSeedRaw = config.promptSeed == null ? "" : String(config.promptSeed).trim();
 
-  if (inline && fileArg) {
+  const legacyInlineRaw = config.taskPrompt == null ? "" : String(config.taskPrompt);
+  const legacyInline = normalizeTaskSeedText(legacyInlineRaw);
+  const legacyFileArg = String(config.taskPromptFile || "").trim();
+
+  if (promptSeedRaw && (legacyInline || legacyFileArg)) {
+    throw new Error("Provide only one of --prompt or (--task-prompt / --task-file).");
+  }
+
+  // Preferred seed path: `--prompt`
+  if (promptSeedRaw) {
+    if (promptSeedRaw === "-") {
+      const raw = await readStdinText();
+      const seed = normalizeTaskSeedText(raw);
+      if (!seed) throw new Error("Seed prompt from --prompt '-' (stdin) is empty.");
+      return { seed, source: "--prompt" };
+    }
+
+    if (promptSeedRaw.startsWith("@")) {
+      const rawPath = promptSeedRaw.slice(1).trim();
+      if (!rawPath) throw new Error("Missing file path after --prompt @<file>.");
+      const abs = resolveFrom(config.cwd, rawPath);
+      let raw = "";
+      try {
+        raw = await fs.readFile(abs, "utf8");
+      } catch (err) {
+        if (err && err.code === "ENOENT") {
+          throw new Error(`Seed prompt file not found: ${prettyPath(config.cwd, abs)}`);
+        }
+        if (err && err.code === "EISDIR") {
+          throw new Error(`Seed prompt path is a directory: ${prettyPath(config.cwd, abs)}`);
+        }
+        if (err && (err.code === "EACCES" || err.code === "EPERM")) {
+          throw new Error(`Permission denied reading seed prompt file: ${prettyPath(config.cwd, abs)}`);
+        }
+        throw new Error(
+          `Failed to read seed prompt file ${prettyPath(config.cwd, abs)}: ${err && err.message ? err.message : String(err)}`
+        );
+      }
+      const seed = normalizeTaskSeedText(raw);
+      if (!seed) throw new Error(`Seed prompt file is empty: ${prettyPath(config.cwd, abs)}`);
+      return { seed, source: "--prompt" };
+    }
+
+    const seed = normalizeTaskSeedText(promptSeedRaw);
+    if (!seed) throw new Error("Seed prompt from --prompt is empty.");
+    return { seed, source: "--prompt" };
+  }
+
+  // Legacy seed path: `--task-prompt` / `--task-file`
+  if (legacyInline && legacyFileArg) {
     throw new Error("Provide only one of --task-prompt or --task-file.");
   }
 
-  if (fileArg) {
-    if (fileArg === "-") {
+  if (legacyFileArg) {
+    if (legacyFileArg === "-") {
       const raw = await readStdinText();
       const seed = normalizeTaskSeedText(raw);
       if (!seed) throw new Error("Task prompt from --task-file '-' (stdin) is empty.");
       return { seed, source: "--task-file" };
     }
 
-    const abs = resolveFrom(config.cwd, fileArg);
+    const abs = resolveFrom(config.cwd, legacyFileArg);
     let raw = "";
     try {
       raw = await fs.readFile(abs, "utf8");
@@ -89,7 +136,7 @@ async function loadTaskSeed(config) {
       if (err && err.code === "EISDIR") {
         throw new Error(`Task prompt path is a directory: ${prettyPath(config.cwd, abs)}`);
       }
-      if (err && err.code === "EACCES") {
+      if (err && (err.code === "EACCES" || err.code === "EPERM")) {
         throw new Error(`Permission denied reading task prompt file: ${prettyPath(config.cwd, abs)}`);
       }
       throw new Error(
@@ -101,7 +148,7 @@ async function loadTaskSeed(config) {
     return { seed, source: "--task-file" };
   }
 
-  if (inline) return { seed: inline, source: "--task-prompt" };
+  if (legacyInline) return { seed: legacyInline, source: "--task-prompt" };
   return { seed: "", source: "" };
 }
 
@@ -175,11 +222,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     const loaded = loadedSeed || (await loadTaskSeed(config));
     let seed = loaded.seed;
     if (!seed) {
-      seed = await promptLine("Enter a short task description for LOOPY_TASK.md: ");
+      seed = await promptLine(`Enter a short task description for ${prettyPath(cwd, taskPath)}: `);
     }
     if (!seed) {
       throw new Error(
-        `Missing ${prettyPath(cwd, taskPath)} and no task prompt provided (use --task-prompt/--task-file or run in a TTY).`
+        `Missing ${prettyPath(cwd, taskPath)} and no seed prompt provided (use --prompt, or legacy --task-prompt/--task-file, or run in a TTY).`
       );
     }
 
@@ -238,7 +285,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
       autoApply: config.autoApply,
       defaultYes: true,
     });
-    if (!ok) throw new Error("Aborted: LOOPY_TASK.md not created.");
+    if (!ok) throw new Error(`Aborted: ${prettyPath(cwd, taskPath)} not created.`);
     await writeText(taskPath, nextText);
     return { taskText: nextText, rewritten: true };
   }
@@ -374,6 +421,10 @@ async function runIteration(config) {
   bytesRead += Buffer.byteLength(lastOutputRaw);
   const lastOutput = truncate(lastOutputRaw, 4000);
 
+  const hintsTextRaw = await readText(config.hintsFile);
+  bytesRead += Buffer.byteLength(hintsTextRaw);
+  const hintsText = truncate(hintsTextRaw, 8000);
+
   const prompt = formatPrompt({
     iteration,
     taskText,
@@ -384,6 +435,8 @@ async function runIteration(config) {
     lastOutput,
     rotationPending,
     currentPhase: currentPhaseId,
+    taskFilePath: config.taskFile,
+    hintsText,
   });
 
   await writeText(config.promptFile, prompt);
@@ -402,7 +455,9 @@ async function runIteration(config) {
   }
 
   if (!config.agentCommand) {
-    throw new Error("Missing agent_command. Set it in LOOPY_TASK.md front matter or use --agent-cmd.");
+    throw new Error(
+      `Missing agent_command. Set it in ${prettyPath(config.cwd, config.taskFile)} front matter or use --agent-cmd.`
+    );
   }
 
   if (config.preIteration) {
@@ -667,10 +722,81 @@ async function runIteration(config) {
 async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const stop = stopSignal || { stopRequested: false };
   const baseCwd = process.cwd();
-  const initialTaskPath = resolveFrom(baseCwd, flags.task || DEFAULTS.taskFile);
-  const taskText = await readText(initialTaskPath);
+  const explicitTask = Object.prototype.hasOwnProperty.call(flags, "task");
+  const defaultTaskPath = resolveFrom(baseCwd, flags.task || DEFAULTS.taskFile);
+  let initialTaskPath = defaultTaskPath;
+  let taskText = await readText(initialTaskPath);
+
+  // Back-compat: if LOOPY_PLAN.md is missing and LOOPY_TASK.md exists, use it and warn.
+  if (!explicitTask && !taskText) {
+    const legacyPath = resolveFrom(baseCwd, "LOOPY_TASK.md");
+    const legacyText = await readText(legacyPath);
+    if (legacyText) {
+      initialTaskPath = legacyPath;
+      taskText = legacyText;
+      console.error(
+        "Warning: `LOOPY_TASK.md` is deprecated. Rename it to `LOOPY_PLAN.md` (or run with `--task LOOPY_TASK.md`)."
+      );
+    }
+  }
+
   const parsedTask = taskText ? parseTask(taskText) : { frontMatter: {} };
   let config = mergeConfig(flags, parsedTask.frontMatter);
+
+  // Ensure config points at the same file we used for front matter.
+  if (!explicitTask && initialTaskPath !== defaultTaskPath) {
+    config.taskFile = path.relative(baseCwd, initialTaskPath) || initialTaskPath;
+  }
+
+  // Deprecation warnings.
+  if (Object.prototype.hasOwnProperty.call(flags, "task-prompt")) {
+    console.error("Warning: `--task-prompt` is deprecated. Use `--prompt` instead.");
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "task-file") || Object.prototype.hasOwnProperty.call(flags, "task-prompt-file")) {
+    console.error("Warning: `--task-file` is deprecated. Use `--prompt @<file>` (or `--prompt -`) instead.");
+  }
+  if (Object.prototype.hasOwnProperty.call(flags, "prompt-file")) {
+    console.error("Warning: `--prompt-file` is deprecated. Use `--prompt-out` instead.");
+  }
+
+  const legacySeedProvided =
+    Object.prototype.hasOwnProperty.call(flags, "task-prompt") ||
+    Object.prototype.hasOwnProperty.call(flags, "task-file") ||
+    Object.prototype.hasOwnProperty.call(flags, "task-prompt-file");
+  const promptIsLegacyOutAlias =
+    legacySeedProvided &&
+    !Object.prototype.hasOwnProperty.call(flags, "prompt-out") &&
+    !Object.prototype.hasOwnProperty.call(flags, "prompt-file") &&
+    Object.prototype.hasOwnProperty.call(flags, "prompt");
+
+  if (promptIsLegacyOutAlias) {
+    console.error("Warning: `--prompt <file>` is deprecated. Use `--prompt-out <file>` instead.");
+    if (flags.prompt === true) {
+      throw new Error("Missing value for --prompt (expected a prompt output file path).");
+    }
+    const v = String(flags.prompt || "").trim();
+    if (!v) throw new Error("Missing value for --prompt (expected a prompt output file path).");
+  } else {
+    // Validate new seed prompt flag early.
+    if (Object.prototype.hasOwnProperty.call(flags, "prompt")) {
+      if (flags.prompt === true) {
+        throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
+      }
+      const v = String(flags.prompt || "").trim();
+      if (!v) throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
+      if (v.startsWith("@") && !v.slice(1).trim()) {
+        throw new Error("Missing file path after --prompt @<file>.");
+      }
+    }
+  }
+
+  // Validate prompt output alias flags.
+  if (flags["prompt-out"] === true) {
+    throw new Error("Missing value for --prompt-out (expected a file path).");
+  }
+  if (flags["prompt-file"] === true) {
+    throw new Error("Missing value for --prompt-file (expected a file path).");
+  }
 
   if (Object.prototype.hasOwnProperty.call(flags, "task-prompt") && flags["task-prompt"] !== true) {
     const v = String(flags["task-prompt"] || "").trim();

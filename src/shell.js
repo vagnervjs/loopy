@@ -44,7 +44,9 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
   const agentStreamLogPath =
     options && options.agentStreamLogPath ? String(options.agentStreamLogPath) : "";
   const streamToTerminal = Boolean(options && options.streamToTerminal);
-  const usePty = Boolean(agentStreamLogPath || streamToTerminal);
+  // Only require a PTY when explicitly streaming to the terminal.
+  // Logging output to a file should work reliably with normal pipes.
+  const usePty = Boolean(streamToTerminal);
 
   let appendQueue = Promise.resolve();
   const appendToLog = (payload) => {

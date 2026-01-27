@@ -16,7 +16,13 @@ async function writeText(filePath, content) {
   await fs.writeFile(filePath, content, "utf8");
 }
 
+async function appendText(filePath, content) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.appendFile(filePath, content, "utf8");
+}
+
 module.exports = {
   readText,
   writeText,
+  appendText,
 };

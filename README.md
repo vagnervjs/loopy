@@ -24,16 +24,16 @@ npm link
 
 ### Auto-phase quickstart (recommended)
 
-Generate or update `LOOPY_TASK.md` from a simple prompt, then start looping:
+Generate or update `LOOPY_PLAN.md` from a simple prompt, then start looping:
 
 ```bash
-loopy loop --agent-cmd "cursor-agent" --task-prompt "Add OAuth login to the app" --auto-apply
+loopy --agent-cmd "cursor-agent" --prompt "Add OAuth login to the app" --auto-apply
 ```
 
-Or read the task prompt from a file (or stdin via `-`):
+Or read the prompt from a file (or stdin via `-`):
 
 ```bash
-loopy loop --agent-cmd "cursor-agent" --task-file ./task.txt --auto-apply
+loopy --agent-cmd "cursor-agent" --prompt @./task.txt --auto-apply
 ```
 
 By default, Loopy will try to auto-phase (create `phases` + per-phase checklists) when a task file has no phases.
@@ -41,6 +41,18 @@ To disable auto-phase and use the legacy “single checklist” behavior:
 
 ```bash
 loopy loop --auto-phase=false
+```
+
+Initialize a new workspace (scaffolds `.loopy/`, `.loopy/hints.md`, and `LOOPY_PLAN.md`):
+
+```bash
+loopy init
+```
+
+Add a mid-loop hint (included in the next generated `PROMPT.md`):
+
+```bash
+loopy hint "Focus on fixing the failing test first."
 ```
 
 Show help:
@@ -78,14 +90,18 @@ loopy loop --agent-cmd "cursor-agent"
 # or: node bin/loopy.js loop --agent-cmd "cursor-agent"
 ```
 
-### Task doc (`--task`, default `LOOPY_TASK.md`)
+### Task doc (`--task`, default `LOOPY_PLAN.md`)
 
 Loopy’s **task doc** is the durable source of truth the loop reads on every iteration. It contains:
 
 - YAML front matter (agent command, test command, loop limits, git settings, phases)
 - The checklist(s) that represent progress and completion
 
-By default this file is `LOOPY_TASK.md`, but you can point Loopy at any path via `--task <file>`.
+By default this file is `LOOPY_PLAN.md`, but you can point Loopy at any path via `--task <file>`.
+
+Migration note:
+
+- If `LOOPY_PLAN.md` is missing and `LOOPY_TASK.md` exists, Loopy will use `LOOPY_TASK.md` and print a warning.
 
 Example:
 
@@ -111,11 +127,11 @@ hooks:
 ```
 
 You can also pass `--agent-cmd` to override the task front matter.
-See `examples/LOOPY_TASK.md` for a starter template.
+See `examples/LOOPY_TASK.md` for a starter template (legacy name).
 
-### Task seed prompt (`--task-prompt` / `--task-file`)
+### Seed prompt (`--prompt`)
 
-The **task seed prompt** is a PRD-style requirements/implementation notes document. Loopy uses it to generate/update the task doc (usually `LOOPY_TASK.md`) before looping, and also includes it in the per-iteration prompt for clarity.
+The **seed prompt** is a PRD-style requirements/implementation notes document. Loopy uses it to generate/update the task doc (usually `LOOPY_PLAN.md`) before looping, and also includes it in the per-iteration prompt for clarity.
 
 Where it’s used:
 
@@ -125,10 +141,10 @@ Where it’s used:
 
 How to provide it:
 
-- `--task-prompt "<text>"`: inline text.
-- `--task-file <path>`: read text from a file (any extension; `.md` recommended).
-- `--task-file -`: read text from stdin.
-- `--task-prompt` and `--task-file` are mutually exclusive.
+- `--prompt "<text>"`: inline text.
+- `--prompt @<path>`: read text from a file (any extension; `.md` recommended).
+- `--prompt -`: read text from stdin.
+- `--prompt` is mutually exclusive with the legacy `--task-prompt` / `--task-file` flags.
 
 Validation / normalization (current behavior):
 
@@ -191,6 +207,7 @@ Notes:
 - `.loopy/progress.md` iteration status and test results
 - `.loopy/guardrails.md` guardrails and failure signs
 - `.loopy/state.json` internal state for gutter detection
+- `.loopy/hints.md` append-only hints included in prompts
 - `.loopy/last_agent_output.txt` most recent agent output (redacted)
 - `.loopy/agent_stream.log` live agent stdout/stderr stream (redacted)
 - `.loopy/last_test_output.txt` most recent test output (redacted)
@@ -199,15 +216,15 @@ Notes:
 ## Options
 
 - `--version` print version and exit
-- `--task <file>` task file path (default: `LOOPY_TASK.md`)
-- `--prompt <file>` prompt output file (default: `PROMPT.md`)
-- `--task-prompt <text>` PRD-style seed prompt (inline) to generate/update the task doc before looping
-- `--task-file <path>` PRD-style seed prompt file (any extension; or `-` for stdin) to generate/update the task doc
-- Note: `--task-prompt` and `--task-file` are mutually exclusive.
+- `--task <file>` task doc path (default: `LOOPY_PLAN.md`)
+- `--prompt <text|@file|->` seed prompt to generate/update the task doc before looping
+- `--prompt-out <file>` prompt output file (default: `PROMPT.md`)
+- Legacy (deprecated): `--task-prompt <text>`, `--task-file <path>`, `--prompt-file <file>`
 - `--progress <file>` progress file (default: `.loopy/progress.md`)
 - `--guardrails <file>` guardrails file (default: `.loopy/guardrails.md`)
 - `--activity-log <file>` activity log (default: `.loopy/activity.log`)
 - `--state <file>` state file (default: `.loopy/state.json`)
+- `--hints <file>` hints file (default: `.loopy/hints.md`)
 - `--agent-cmd <command>` agent command (overrides task front matter)
 - `--auto-phase` enable auto-phase planning (default: true; disable with `--auto-phase=false`)
 - `--phase <id>` start/resume at phase id
@@ -238,9 +255,11 @@ loopy loop --agent-cmd "cursor-agent" --stream
 `loopy status` reads `.loopy/state.json` and prints a short summary:
 
 - iteration
+- current phase
 - last status
 - last test
 - last error
+- last hint + hint count
 - last bytes
 - updated at
 
@@ -287,7 +306,7 @@ Supported commit template variables:
 
 ### Task front matter
 
-You can also configure git via `LOOPY_TASK.md` front matter:
+You can also configure git via the task doc front matter (default: `LOOPY_PLAN.md`):
 
 ```md
 ---
@@ -312,7 +331,7 @@ git:
 
 ## Troubleshooting
 
-- Missing `LOOPY_TASK.md`: create the file and include at least one checklist item.
+- Missing `LOOPY_PLAN.md`: run `loopy init` or provide `--prompt` (or use `--task <file>` to point Loopy at your task doc).
 - Agent exits immediately: verify `agent_command` is correct and accepts stdin.
 - Loop stops early: check `.loopy/progress.md` and `.loopy/activity.log` for caps or completion.
 - Guardrails growing: repeated failures or file thrashing were detected.
@@ -320,5 +339,5 @@ git:
 ## Notes
 
 - Logs redact common secret patterns, but avoid writing secrets to stdout/stderr.
-- The loop stops when all checkboxes in `LOOPY_TASK.md` are checked.
+- The loop stops when all checkboxes in the task doc (default: `LOOPY_PLAN.md`) are checked.
 - The loop also stops on “gutter” guardrails (repeated identical failures or file thrashing); see `.loopy/guardrails.md` and `.loopy/progress.md`.

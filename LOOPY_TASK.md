@@ -164,7 +164,7 @@ phases:
 ## Phase: implement
 <!-- loopy:phase implement -->
 
-- [ ] Implement: Plan: CLI Simplification + Refactor
+- [x] Implement: Plan: CLI Simplification + Refactor
 
   1. Define the target UX (minimal commands first)
       - loopy loop --prompt "..." (default auto‑phase + generate/update LOOPY_PLAN.md)
