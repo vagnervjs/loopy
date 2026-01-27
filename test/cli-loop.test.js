@@ -22,7 +22,7 @@ test("no subcommand runs the default loop", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /Starting loop/);
+  assert.match(stdout, /loop: start/);
   const prompt = await fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8");
   assert.match(prompt, /Loopy Loop Prompt/);
 });
@@ -113,9 +113,9 @@ test("prints step status lines to terminal during loop", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /\[loopy\] iter 1: Iteration start/);
-  assert.match(stdout, /\[loopy\] iter 1: Running agent:/);
-  assert.match(stdout, /\[loopy\] iter 1: State updated:/);
+  assert.match(stdout, /\[loopy\] \[info\] iter 1: start \(rotation: /);
+  assert.match(stdout, /\[loopy\] \[info\] iter 1: agent: run/);
+  assert.match(stdout, /\[loopy\] \[info\] iter 1: state: updated/);
 });
 
 test("`--stream` mirrors agent output to terminal", async () => {
@@ -166,10 +166,10 @@ test("`--dry-run` stops after the first iteration (no backoff loop)", async () =
   );
 
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /\[loopy\] iter 1: Iteration start/);
-  assert.equal(stdout.includes("[loopy] iter 2: Iteration start"), false, stdout);
-  assert.equal(stdout.includes("Sleeping "), false, stdout);
-  assert.match(stdout, /Dry run complete\. Stopping\./);
+  assert.match(stdout, /\[loopy\] \[info\] iter 1: start \(rotation: /);
+  assert.equal(stdout.includes("[loopy] [info] iter 2: start"), false, stdout);
+  assert.equal(stdout.includes("sleeping"), false, stdout);
+  assert.match(stdout, /dry run: complete; stopping/i);
 });
 
 test("phase progression: `--phase-only` stops after phase completion and records phase history", async () => {

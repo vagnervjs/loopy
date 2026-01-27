@@ -57,7 +57,7 @@ test("`--prompt` updates an existing plan without confirmation", async () => {
   );
 
   assert.equal(code, 0, stderr);
-  assert.ok(stdout.includes("[loopy] Plan updated before loop:"), stdout);
+  assert.ok(stdout.includes("[loopy] [info] plan: updated before loop:"), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /- \[ \]\s+new plan/);
@@ -117,10 +117,10 @@ test("`--prompt` generates phased `LOOPY_PLAN.md` before looping", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
-  assert.ok(stdout.includes("[loopy] Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("[loopy] iter 1: Iteration start"), stdout);
+  assert.ok(stdout.includes("[loopy] [info] plan: updated before loop:"), stdout);
+  assert.ok(stdout.includes("[loopy] [info] iter 1: start"), stdout);
   assert.ok(
-    stdout.indexOf("[loopy] Plan updated before loop:") < stdout.indexOf("[loopy] iter 1: Iteration start"),
+    stdout.indexOf("[loopy] [info] plan: updated before loop:") < stdout.indexOf("[loopy] [info] iter 1: start"),
     stdout
   );
 
@@ -151,10 +151,10 @@ test("`--prompt @file` generates phased `LOOPY_PLAN.md` before looping", async (
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
-  assert.ok(stdout.includes("[loopy] Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("[loopy] iter 1: Iteration start"), stdout);
+  assert.ok(stdout.includes("[loopy] [info] plan: updated before loop:"), stdout);
+  assert.ok(stdout.includes("[loopy] [info] iter 1: start"), stdout);
   assert.ok(
-    stdout.indexOf("[loopy] Plan updated before loop:") < stdout.indexOf("[loopy] iter 1: Iteration start"),
+    stdout.indexOf("[loopy] [info] plan: updated before loop:") < stdout.indexOf("[loopy] [info] iter 1: start"),
     stdout
   );
 
@@ -252,10 +252,10 @@ test("`--prompt -` reads prompt from stdin", async () => {
     { cwd: tmp, stdin: "build a thing\n" }
   );
   assert.equal(code, 0, stderr);
-  assert.ok(stdout.includes("[loopy] Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("[loopy] iter 1: Iteration start"), stdout);
+  assert.ok(stdout.includes("[loopy] [info] plan: updated before loop:"), stdout);
+  assert.ok(stdout.includes("[loopy] [info] iter 1: start"), stdout);
   assert.ok(
-    stdout.indexOf("[loopy] Plan updated before loop:") < stdout.indexOf("[loopy] iter 1: Iteration start"),
+    stdout.indexOf("[loopy] [info] plan: updated before loop:") < stdout.indexOf("[loopy] [info] iter 1: start"),
     stdout
   );
 

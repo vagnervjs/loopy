@@ -448,7 +448,7 @@ async function runCli(argv) {
 
   process.on("SIGINT", async () => {
     stopSignal.stopRequested = true;
-    printStep("SIGINT received. Stopping.");
+    printStep("signal: SIGINT received; stopping", { level: "warn" });
     try {
       await appendActivity(currentActivityLog, ["SIGINT received. Stopping."]);
     } catch (_) {
@@ -458,7 +458,7 @@ async function runCli(argv) {
 
   process.on("SIGTERM", async () => {
     stopSignal.stopRequested = true;
-    printStep("SIGTERM received. Stopping.");
+    printStep("signal: SIGTERM received; stopping", { level: "warn" });
     try {
       await appendActivity(currentActivityLog, ["SIGTERM received. Stopping."]);
     } catch (_) {

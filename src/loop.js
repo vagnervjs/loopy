@@ -464,7 +464,7 @@ async function runIteration(config) {
 
   if (parsedTask.allChecked) {
     await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
-    printStep("Plan complete. Stopping loop.");
+    printStep("plan: complete; stopping loop");
     return { status: "complete", bytes: 0 };
   }
 
@@ -490,7 +490,7 @@ async function runIteration(config) {
 
   const currentPhaseId = pickCurrentPhaseId(parsedTask, state || {}, config);
   const phaseLabel = currentPhaseId ? `, phase: ${currentPhaseId}` : "";
-  printStep(`Iteration start (rotation: ${rotationPending ? "fresh" : "standard"}${phaseLabel})`, { iteration });
+  printStep(`start (rotation: ${rotationPending ? "fresh" : "standard"}${phaseLabel})`, { iteration });
 
   const lastOutputRaw = rotationPending ? "" : await readText(path.join(config.loopyDir, "last_agent_output.txt"));
   bytesRead += Buffer.byteLength(lastOutputRaw);
@@ -516,7 +516,7 @@ async function runIteration(config) {
 
   await writeText(config.promptFile, prompt);
   bytesWritten += Buffer.byteLength(prompt);
-  printStep(`Prompt written to ${prettyPath(config.cwd, config.promptFile)}`, { iteration });
+  printStep(`prompt: saved to ${prettyPath(config.cwd, config.promptFile)}`, { iteration });
 
   await appendActivity(config.activityLog, [
     `Iteration ${iteration} start`,
@@ -525,7 +525,7 @@ async function runIteration(config) {
 
   if (config.dryRun) {
     await appendActivity(config.activityLog, ["Dry run enabled. Skipping agent execution."]);
-    printStep("Dry run enabled. Skipping agent execution.", { iteration });
+    printStep("dry run: enabled; skipping agent execution", { iteration });
     return { status: "dry-run", bytes: bytesRead + bytesWritten };
   }
 
@@ -536,17 +536,19 @@ async function runIteration(config) {
   }
 
   if (config.preIteration) {
-    printStep(`Running preIteration hook: ${redact(config.preIteration)}`, { iteration });
+    printStep(`hook preIteration: run ${redact(config.preIteration)}`, { iteration });
     const hookResult = await runShellCommand(config.preIteration, "", DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
     });
     await appendActivity(config.activityLog, [`preIteration hook exit ${hookResult.code}`]);
-    printStep(`preIteration hook exit ${hookResult.code}`, { iteration });
+    printStep(`hook preIteration: exit ${hookResult.code}`, { iteration });
   }
 
   const agentStreamLogPath = config.agentStreamLog
     ? resolveFrom(config.cwd, config.agentStreamLog)
     : path.join(config.loopyDir, "agent_stream.log");
+  const lastAgentOutputPath = path.join(config.loopyDir, "last_agent_output.txt");
+  const lastTestOutputPath = path.join(config.loopyDir, "last_test_output.txt");
 
   // Write a small header so runs are easy to separate.
   await fs.mkdir(path.dirname(agentStreamLogPath), { recursive: true });
@@ -559,7 +561,7 @@ async function runIteration(config) {
   );
 
   printStep(
-    `Running agent: ${redact(config.agentCommand)} (stream log: ${prettyPath(config.cwd, agentStreamLogPath)})`,
+    `agent: run ${redact(config.agentCommand)} (stream log: ${prettyPath(config.cwd, agentStreamLogPath)})`,
     { iteration }
   );
   const agentResult = await runShellCommand(config.agentCommand, prompt, DEFAULTS.maxOutputBytes, {
@@ -571,7 +573,7 @@ async function runIteration(config) {
   const redactedStderr = redact(agentResult.stderr);
   const combinedOutput = truncate(`${redactedStdout}\n${redactedStderr}`, DEFAULTS.maxOutputBytes);
 
-  await writeText(path.join(config.loopyDir, "last_agent_output.txt"), combinedOutput);
+  await writeText(lastAgentOutputPath, combinedOutput);
   bytesWritten += Buffer.byteLength(combinedOutput);
 
   let status = agentResult.code === 0 ? "success" : "failure";
@@ -582,24 +584,37 @@ async function runIteration(config) {
     const firstErrorLine = (redactedStderr || redactedStdout).split(/\r?\n/).find(Boolean) || "unknown";
     lastError = firstErrorLine;
     errorSignature = `${config.agentCommand}::${firstErrorLine}`;
-    printStep(`Agent exit ${agentResult.code} (error: ${lastError})`, { iteration });
+    printStep(
+      `agent: exit ${agentResult.code}; error: ${lastError} (see ${prettyPath(
+        config.cwd,
+        lastAgentOutputPath
+      )})`,
+      { iteration, level: "error" }
+    );
   } else {
-    printStep(`Agent exit ${agentResult.code}`, { iteration });
+    printStep(`agent: exit ${agentResult.code}`, { iteration });
   }
 
   let testStatus = "n/a";
   const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTask, currentPhaseId) : config.testCommand;
   if (status === "success" && effectiveTestCommand) {
-    printStep(`Running tests: ${redact(effectiveTestCommand)}`, { iteration });
+    printStep(`tests: run ${redact(effectiveTestCommand)}`, { iteration });
     const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
     });
     const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
-    await writeText(path.join(config.loopyDir, "last_test_output.txt"), testOutput);
+    await writeText(lastTestOutputPath, testOutput);
     bytesWritten += Buffer.byteLength(testOutput);
     const testOutcome = testResult.code === 0 ? "pass" : "fail";
     testStatus = `${testOutcome} @ ${new Date().toISOString()}`;
-    printStep(`Test result: ${testOutcome}`, { iteration });
+    if (testOutcome === "fail") {
+      printStep(
+        `tests: result fail (see ${prettyPath(config.cwd, lastTestOutputPath)})`,
+        { iteration, level: "error" }
+      );
+    } else {
+      printStep(`tests: result pass`, { iteration });
+    }
     if (testOutcome === "fail") {
       status = "failure";
       lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
@@ -622,19 +637,19 @@ async function runIteration(config) {
 
   let postIterationRan = false;
   if (status === "success" && config.postIteration) {
-    printStep(`Running postIteration hook: ${redact(config.postIteration)}`, { iteration });
+    printStep(`hook postIteration: run ${redact(config.postIteration)}`, { iteration });
     const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
     });
     postIterationRan = true;
     await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
-    printStep(`postIteration hook exit ${hookResult.code}`, { iteration });
+    printStep(`hook postIteration: exit ${hookResult.code}`, { iteration });
   }
 
   if (status === "success") {
     try {
       if (config.gitCommit) {
-        printStep("Git commit enabled; checking for changes.", { iteration });
+        printStep("git: commit enabled; checking changes", { iteration });
       }
       const commitResult = await gitCommitIfNeeded(config, {
         iteration,
@@ -648,34 +663,34 @@ async function runIteration(config) {
         await appendActivity(config.activityLog, [
           `git commit: ${commitResult.hash || "(unknown hash)"} ${commitResult.message}`,
         ]);
-        printStep(`Git commit created: ${commitResult.hash || "(unknown hash)"}`, { iteration });
+        printStep(`git: commit created ${commitResult.hash || "(unknown hash)"}`, { iteration });
       } else if (config.gitCommit) {
-        printStep(`Git commit skipped: ${commitResult.reason}`, { iteration });
+        printStep(`git: commit skipped: ${commitResult.reason}`, { iteration });
       }
     } catch (err) {
       status = "failure";
       lastError = err && err.message ? err.message : String(err);
       errorSignature = `git commit::${lastError}`;
-      printStep(`Git commit failed: ${lastError}`, { iteration });
+      printStep(`git: commit failed: ${lastError}`, { iteration, level: "error" });
     }
   }
 
   if (status === "failure" && config.onFailure) {
-    printStep(`Running onFailure hook: ${redact(config.onFailure)}`, { iteration });
+    printStep(`hook onFailure: run ${redact(config.onFailure)}`, { iteration });
     const hookResult = await runShellCommand(config.onFailure, "", DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
     });
     await appendActivity(config.activityLog, [`onFailure hook exit ${hookResult.code}`]);
-    printStep(`onFailure hook exit ${hookResult.code}`, { iteration });
+    printStep(`hook onFailure: exit ${hookResult.code}`, { iteration });
   }
 
   if (!postIterationRan && config.postIteration) {
-    printStep(`Running postIteration hook: ${redact(config.postIteration)}`, { iteration });
+    printStep(`hook postIteration: run ${redact(config.postIteration)}`, { iteration });
     const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
     });
     await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
-    printStep(`postIteration hook exit ${hookResult.code}`, { iteration });
+    printStep(`hook postIteration: exit ${hookResult.code}`, { iteration });
   }
 
   const modifiedFiles = await getGitModifiedFiles(config.cwd);
@@ -753,7 +768,10 @@ async function runIteration(config) {
   if (guardrailStopReason) {
     nextState.lastStatus = "guardrail-stop";
     nextState.lastError = guardrailStopReason;
-    printStep(`Guardrail stop: ${guardrailStopReason}`, { iteration });
+    printStep(
+      `guardrail: stop (${guardrailStopReason}) (see ${prettyPath(config.cwd, config.guardrailsFile)})`,
+      { iteration, level: "warn" }
+    );
   }
 
   if (bytesRead + bytesWritten >= config.rotateBytes) {
@@ -768,7 +786,7 @@ async function runIteration(config) {
   await writeText(config.stateFile, statePayload);
   bytesWritten += Buffer.byteLength(statePayload);
   printStep(
-    `State updated: ${prettyPath(config.cwd, config.stateFile)} (status: ${nextState.lastStatus}, test: ${nextState.lastTest})`,
+    `state: updated ${prettyPath(config.cwd, config.stateFile)} (status: ${nextState.lastStatus}, test: ${nextState.lastTest})`,
     { iteration }
   );
 
@@ -779,17 +797,17 @@ async function runIteration(config) {
 
   if (taskComplete) {
     await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
-    printStep("Plan complete detected after iteration.", { iteration });
+    printStep("plan: complete after iteration", { iteration });
     return { status: "complete", bytes: bytesRead + bytesWritten };
   }
 
   if (nextState.lastStatus === "phase-complete") {
     await appendActivity(config.activityLog, [`Phase complete (${currentPhaseId}); --phase-only stopping.`]);
-    printStep(`Phase complete (${currentPhaseId}); --phase-only stopping.`, { iteration });
+    printStep(`phase: ${currentPhaseId} complete; --phase-only stopping`, { iteration });
     return { status: "complete", bytes: bytesRead + bytesWritten };
   }
 
-  printStep(`Iteration result: ${status} (test: ${testStatus})`, { iteration });
+  printStep(`result: ${status} (test: ${testStatus})`, { iteration });
   return { status, bytes: bytesRead + bytesWritten, guardrailStopReason };
 }
 
@@ -891,7 +909,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   printStep(
-    `Starting ${command} (max iterations: ${config.maxIterations}, max minutes: ${config.maxMinutes}, backoff ms: ${config.backoffMs})`
+    `loop: start (max iterations: ${config.maxIterations}, max minutes: ${config.maxMinutes}, backoff: ${config.backoffMs}ms)`
   );
 
   // Optional git workspace setup (worktree / branch). This is done once, before the loop.
@@ -985,7 +1003,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     const phase = resumeState && resumeState.currentPhase ? `, phase: ${resumeState.currentPhase}` : "";
     const iter = resumeState && resumeState.iteration != null ? resumeState.iteration : 0;
     const last = (resumeState && resumeState.lastStatus) || "n/a";
-    printStep(`Continuing from saved state (iter ${iter}${phase}; last status: ${last})`, {});
+    printStep(`resume: iter ${iter}${phase}; last status: ${last}`, {});
     config.taskSeedText = "";
     config.taskSeedSource = "";
   } else {
@@ -1000,7 +1018,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       await appendActivity(config.activityLog, [
         `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
       ]);
-      printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
+      printStep(`plan: updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
     }
   }
 
@@ -1057,14 +1075,14 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     const elapsedMinutes = (Date.now() - start) / 60000;
     if (iteration >= config.maxIterations) {
       await appendActivity(config.activityLog, ["Max iterations reached. Stopping."]);
-      printStep("Max iterations reached. Stopping.");
+      printStep("loop: max iterations reached; stopping");
       break;
     }
     if (elapsedMinutes >= config.maxMinutes) {
       await appendActivity(config.activityLog, [
         `Max wall time reached (${formatDuration(config.maxMinutes)}). Stopping.`,
       ]);
-      printStep(`Max wall time reached (${formatDuration(config.maxMinutes)}). Stopping.`);
+      printStep(`loop: max wall time reached (${formatDuration(config.maxMinutes)}); stopping`);
       break;
     }
 
@@ -1080,24 +1098,23 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     // forever (and to keep CLI/test behavior fast and predictable).
     if (config.dryRun) {
       await appendActivity(config.activityLog, ["Dry run complete. Stopping."]);
-      printStep("Dry run complete. Stopping.");
+      printStep("dry run: complete; stopping");
       break;
     }
 
     if (result.guardrailStopReason) {
       await appendActivity(config.activityLog, [`Guardrail stop triggered: ${result.guardrailStopReason}`]);
-      printStep(`Guardrail stop triggered: ${result.guardrailStopReason}`);
       break;
     }
 
     if (stop.stopRequested) {
       await appendActivity(config.activityLog, ["Stop requested. Exiting loop."]);
-      printStep("Stop requested. Exiting loop.");
+      printStep("loop: stop requested; exiting");
       break;
     }
 
     if (config.backoffMs > 0) {
-      printStep(`Sleeping ${config.backoffMs}ms before next iteration...`);
+      printStep(`loop: sleeping ${config.backoffMs}ms before next iteration`);
     }
     await new Promise((resolve) => setTimeout(resolve, config.backoffMs));
   }
@@ -1116,14 +1133,14 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     await writeText(config.progressFile, progressPayload);
     await writeText(config.stateFile, JSON.stringify(stoppedState, null, 2) + "\n");
     await appendActivity(config.activityLog, ["Final status: stopped."]);
-    printStep("Final status: stopped.");
+    printStep("loop: final status stopped");
   }
 
   const archiveResult = await archiveCompletedPlan(config);
   if (archiveResult.archived) {
     const prettyArchive = prettyPath(config.cwd, archiveResult.archivePath);
     await appendActivity(config.activityLog, [`Plan archived: ${prettyArchive}`]);
-    printStep(`Plan archived: ${prettyArchive}`);
+    printStep(`plan: archived to ${prettyArchive}`);
   }
 }
 

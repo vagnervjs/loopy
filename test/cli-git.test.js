@@ -120,8 +120,8 @@ test("`--continue` resumes even with staged changes", async () => {
     { cwd: tmp, env: gitEnv }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /Continuing from saved state/);
-  assert.match(stdout, /\[loopy\] iter \d+: Iteration start/);
+  assert.match(stdout, /resume: iter/);
+  assert.match(stdout, /\[loopy\] \[info\] iter \d+: start/);
 });
 
 test("`--continue` rejects `--prompt`", async () => {
