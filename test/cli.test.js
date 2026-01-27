@@ -675,6 +675,33 @@ test("`--prompt -` reads prompt from stdin", async () => {
   assert.match(task, /## Phase:\s+build/);
 });
 
+test("`--dry-run` stops after the first iteration (no backoff loop)", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-dry-run-single-"));
+
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "loop",
+      "--dry-run",
+      "--prompt",
+      "seed",
+      "--auto-apply",
+      "--auto-phase=false",
+      "--agent",
+      'node -e "process.exit(0)"',
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /\[loopy\] iter 1: Iteration start/);
+  assert.equal(stdout.includes("[loopy] iter 2: Iteration start"), false, stdout);
+  assert.equal(stdout.includes("Sleeping "), false, stdout);
+  assert.match(stdout, /Dry run complete\. Stopping\./);
+});
+
 test("`--prompt @file` errors on missing file", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-missing-"));
   const plannerCmd = 'node -e "process.exit(0)"';

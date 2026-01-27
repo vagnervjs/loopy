@@ -872,6 +872,15 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       break;
     }
 
+    // `--dry-run` builds the prompt and skips agent execution. Since dry runs don't
+    // advance state iterations, stop after the first iteration to avoid looping
+    // forever (and to keep CLI/test behavior fast and predictable).
+    if (config.dryRun) {
+      await appendActivity(config.activityLog, ["Dry run complete. Stopping."]);
+      printStep("Dry run complete. Stopping.");
+      break;
+    }
+
     if (result.guardrailStopReason) {
       await appendActivity(config.activityLog, [`Guardrail stop triggered: ${result.guardrailStopReason}`]);
       printStep(`Guardrail stop triggered: ${result.guardrailStopReason}`);
