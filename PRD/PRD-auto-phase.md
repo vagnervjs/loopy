@@ -41,7 +41,7 @@ Loopy currently requires users to manually structure tasks. We need a default, l
 - [N3] Observability: activity log includes phase transitions and auto-phase decisions.
 
 ## User Stories
-- As a developer, I can run `loopy loop --prompt "<task>"` and get a phased plan automatically.
+- As a developer, I can run `loopy --prompt "<task>"` and get a phased plan automatically.
 - As a developer, I can opt into a confirmation prompt before the task file is rewritten.
 - As a developer, I can resume a loop and Loopy continues from the current phase.
 

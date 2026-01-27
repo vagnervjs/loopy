@@ -34,34 +34,32 @@ node bin/loopy.js --help
 ### Run your first loop
 ```bash
 loopy init
-loopy loop --agent "cursor-agent" --prompt "Add OAuth login to the app"
+loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 loopy status
 ```
 
 ### Prompt from a file or stdin
 ```bash
-loopy loop --agent "cursor-agent" --prompt @./task.txt
-cat ./task.txt | loopy loop --agent "cursor-agent" --prompt -
+loopy --agent "cursor-agent" --prompt @./task.txt
+cat ./task.txt | loopy --agent "cursor-agent" --prompt -
 ```
-
-Tip: `loop` is the default command, so `loopy [options]` is equivalent to `loopy loop [options]`.
 
 ## Common workflows
 
 Start a new loop:
 ```bash
-loopy loop --agent "cursor-agent" --prompt "Add OAuth login to the app"
+loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 ```
 
 Resume a previous run (requires `.loopy/state.json`):
 ```bash
-loopy loop --continue
+loopy --continue
 ```
 Note: `--continue` is resume-only and cannot be combined with `--prompt`.
 
 Run a single iteration:
 ```bash
-loopy loop --max-iterations 1 --agent "cursor-agent"
+loopy --max-iterations 1 --agent "cursor-agent"
 ```
 
 Check status:
@@ -79,7 +77,7 @@ loopy hint --reset
 
 Stream agent output to your terminal:
 ```bash
-loopy loop --agent "cursor-agent" --prompt @examples/PRD.md --stream
+loopy --agent "cursor-agent" --prompt @examples/PRD.md --stream
 ```
 
 Help and version:
@@ -189,13 +187,13 @@ Notes:
 Disable auto-phase and use the legacy single-checklist behavior:
 
 ```bash
-loopy loop --auto-phase=false
+loopy --auto-phase=false
 ```
 
 ### Configuration and precedence
 Loopy resolves settings from highest priority to lowest:
 
-1. CLI flags (`loopy loop --...`)
+1. CLI flags (`loopy --...`)
 2. Plan doc front matter (YAML in `--plan`, default `.loopy/LOOPY_PLAN.md`)
 3. Built-in defaults
 
@@ -246,6 +244,19 @@ Output/utility:
 - `.loopy/last_test_output.txt` most recent test output (redacted)
 - `.loopy/PROMPT.md` generated prompt input for each iteration
 
+## Streaming progress
+Tail logs in a separate terminal for live progress:
+
+```bash
+tail -f .loopy/activity.log
+```
+
+For live agent output (stdout/stderr), tail the stream log:
+
+```bash
+tail -f .loopy/agent_stream.log
+```
+
 ## Git integration (optional)
 Loopy can optionally:
 
@@ -255,9 +266,9 @@ Loopy can optionally:
 
 CLI flags:
 ```bash
-loopy loop --git-branch "loopy/my-task"
-loopy loop --git-worktree "../wt/loopy-my-task" --git-worktree-branch "loopy/my-task"
-loopy loop --git-commit --git-commit-message "loopy: {change_type} {task_summary}"
+loopy --git-branch "loopy/my-task"
+loopy --git-worktree "../wt/loopy-my-task" --git-worktree-branch "loopy/my-task"
+loopy --git-commit --git-commit-message "loopy: {change_type} {task_summary}"
 ```
 
 Supported commit template variables:
@@ -302,11 +313,6 @@ Safety notes:
 - If the resulting content is empty, Loopy errors with a helpful message.
 - If the path does not exist, is a directory, or is unreadable, Loopy errors.
 - There is no explicit max size cap today; very large prompts can degrade planning quality.
-
-### Migration notes
-- Default generated file locations are under `.loopy/` (plan: `.loopy/LOOPY_PLAN.md`, prompt: `.loopy/PROMPT.md`).
-- Legacy flags/commands are not accepted; use `loopy --help` to update any scripts.
-- `--auto-apply` is removed; plan updates apply automatically unless you pass `--confirm`.
 
 ## Troubleshooting
 - Missing plan doc: run `loopy init` or provide `--prompt` (or use `--plan <file>`).

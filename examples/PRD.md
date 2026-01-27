@@ -14,5 +14,5 @@ Add support for a “plan seed prompt file” (usually a markdown PRD) that can 
 - Include the seed prompt in `.loopy/PROMPT.md` under a clearly labeled section so the agent can reference requirements.
 
 ## Acceptance criteria
-- Running `loopy loop --dry-run --prompt @examples/PRD.md --agent "cursor-agent"` produces a `.loopy/PROMPT.md` that contains this file’s contents under a “Plan seed (PRD)” section.
+- Running `loopy --dry-run --prompt @examples/PRD.md --agent "cursor-agent"` produces a `.loopy/PROMPT.md` that contains this file’s contents under a “Plan seed (PRD)” section.
 - Adding `--confirm` prompts before writing or applying plan updates.

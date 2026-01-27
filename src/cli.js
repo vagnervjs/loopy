@@ -54,10 +54,6 @@ function formatHelpRows(rows, { indent, labelWidth, gap } = {}) {
 function printHelp() {
   const commands = [
     {
-      label: "loop [options]",
-      desc: "Run iterations: build prompt -> run agent -> update state (default)\nStops when phase criteria are met, limits hit, guardrails trigger, or signal received",
-    },
-    {
       label: "status",
       desc: "Show status summary from `.loopy/state.json`\nPrints iteration/phase + last test/error and last hint",
     },
@@ -128,10 +124,17 @@ function printHelp() {
     "Loopy",
     "",
     "Usage:",
-    "  loopy [command] [options]",
+    "  loopy [options]",
+    "  loopy status",
+    '  loopy hint "<text>"',
+    "  loopy init",
     "  loopy help",
     "  loopy --help, -h",
     "  loopy --version",
+    "",
+    "Default behavior:",
+    "  Run iterations: build prompt -> run agent -> update state",
+    "  Stops when phase criteria are met, limits hit, guardrails trigger, or signal received",
     "",
     "Commands:",
     ...formatHelpRows(commands, { indent: "  ", gap: 2 }),
@@ -167,7 +170,7 @@ async function runStatus(flags) {
     if (err && err.code === "ENOENT") {
       console.error(
         `No Loopy state found at ${path.relative(cwd, stateFile) || stateFile}.\n` +
-          "Run `loopy loop` first."
+          "Run `loopy` first."
       );
       process.exitCode = 1;
       return;
@@ -397,8 +400,14 @@ async function runCli(argv) {
     return;
   }
 
-  // Default to `loop` when no subcommand is provided.
-  if (!command) command = "loop";
+  const isDefault = !command;
+
+  if (command === "loop") {
+    console.error("The `loop` subcommand has been removed. Run `loopy` without a command instead.");
+    printHelp();
+    process.exitCode = 1;
+    return;
+  }
 
   if (command === "status") {
     await runStatus(flags);
@@ -416,12 +425,12 @@ async function runCli(argv) {
   }
 
   if (command === "run") {
-    console.error("Unsupported command. For a single iteration, use `loopy loop --max-iterations 1`.");
+    console.error("Unsupported command. For a single iteration, use `loopy --max-iterations 1`.");
     process.exitCode = 1;
     return;
   }
 
-  if (command !== "loop") {
+  if (!isDefault) {
     console.error(`Unknown command: ${command}`);
     printHelp();
     process.exitCode = 1;
@@ -451,7 +460,7 @@ async function runCli(argv) {
     }
   });
 
-  await runLoop(command, flags, {
+  await runLoop("loop", flags, {
     stopSignal,
     onActivityLog: (logPath) => {
       currentActivityLog = logPath || currentActivityLog;

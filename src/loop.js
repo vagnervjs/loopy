@@ -739,7 +739,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const baseCwd = process.cwd();
   const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
   if (command === "run") {
-    throw new Error("Unsupported command. For a single iteration, use `loopy loop --max-iterations 1`.");
+    throw new Error("Unsupported command. For a single iteration, use `loopy --max-iterations 1`.");
   }
 
   // No legacy flag compatibility: fail fast with a clear message.
@@ -892,7 +892,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     } catch (err) {
       if (err && err.code === "ENOENT") {
         throw new Error(
-          `No Loopy state found at ${prettyPath(config.cwd, config.stateFile)}.\nRun \`loopy loop\` first (without --continue).`
+          `No Loopy state found at ${prettyPath(config.cwd, config.stateFile)}.\nRun \`loopy\` first (without --continue).`
         );
       }
       throw err;
