@@ -41,24 +41,14 @@ function parseSkipPhaseList(value) {
 }
 
 async function readStdinText() {
+  // Read the whole stdin stream (fd 0). This is more reliable than checking
+  // `readableEnded` and attaching listeners, which can miss buffered data in
+  // fast pipe scenarios (e.g. tests).
   try {
-    if (process.stdin.readableEnded) return "";
+    return await fs.readFile(0, "utf8");
   } catch (_) {
-    // ignore
+    return "";
   }
-  return await new Promise((resolve, reject) => {
-    let data = "";
-    try {
-      process.stdin.setEncoding("utf8");
-    } catch (_) {
-      // ignore
-    }
-    process.stdin.on("data", (chunk) => {
-      data += chunk;
-    });
-    process.stdin.on("error", reject);
-    process.stdin.on("end", () => resolve(data));
-  });
 }
 
 async function loadTaskSeed(config) {
@@ -498,7 +488,6 @@ async function runIteration(config) {
     changeType = agentType || inferChangeTypeHeuristic(taskLine);
   }
   await appendActivity(config.activityLog, [`change_type inferred: ${changeType} (task: ${taskLine})`]);
-  console.log(`change_type: ${changeType} (task: ${taskLine})`);
 
   let postIterationRan = false;
   if (status === "success" && config.postIteration) {
@@ -734,7 +723,10 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     } catch (_) {
       isGitRepo = false;
     }
-    if (isGitRepo) {
+    // If the user is explicitly running in a worktree branch, don't auto-switch
+    // away from it by synthesizing a default branch.
+    const hasWorktreeBranch = Boolean(String(config.gitWorktreeBranch || "").trim());
+    if (isGitRepo && !hasWorktreeBranch) {
       const rawPrompt =
         hasOwn(flags, "prompt") && flags.prompt !== true ? String(flags.prompt || "").trim() : "";
       let base = rawPrompt;
@@ -761,6 +753,18 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     effectiveCwd = await ensureGitWorktree(baseCwd, config.gitWorktree, config.gitWorktreeBranch);
     printStep(`git worktree: using ${prettyPath(baseCwd, effectiveCwd)}`, {});
   }
+  // If a worktree branch was specified, don't switch away from it via any default/implicit `gitBranch`.
+  // Only honor `gitBranch` when the user explicitly provided it (flag or plan front matter).
+  const fm0 = (parsedTask && parsedTask.frontMatter) || {};
+  const fmGit = fm0.git && typeof fm0.git === "object" ? fm0.git : {};
+  const gitBranchExplicit = Boolean(
+    String(flags["git-branch"] || "").trim() ||
+      String(fm0.git_branch || fm0.gitBranch || "").trim() ||
+      String(fmGit.branch || fmGit.git_branch || fmGit.gitBranch || "").trim()
+  );
+  if (config.gitWorktree && config.gitWorktreeBranch && !gitBranchExplicit) {
+    config.gitBranch = "";
+  }
   if (config.gitBranch) {
     printStep(`git branch: switch to ${config.gitBranch}`, {});
     await ensureGitRepo(effectiveCwd);
@@ -783,30 +787,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
     ]);
     printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
-  }
-
-  // Ensure test command is defined (via plan front matter, phase defaults, or per-phase test commands).
-  // If not, prompt once before we run any agent/tests.
-  const planNow = await readText(config.taskFile);
-  const parsedNow = planNow ? parseTask(planNow) : { frontMatter: {}, phases: [], phaseDefaults: {} };
-  const fmNow = parsedNow.frontMatter || {};
-  const pdNow = parsedNow.phaseDefaults || {};
-  const hasAnyTestCommand = Boolean(
-    String(fmNow.test_command || fmNow.testCommand || "").trim() ||
-      String(pdNow.test_command || pdNow.testCommand || "").trim() ||
-      (parsedNow.phases || []).some((p) => String((p && p.testCommand) || "").trim())
-  );
-
-  let promptedTest = false;
-  if (!hasAnyTestCommand && !config.dryRun) {
-    const entered = await promptLine('Enter test command (e.g. "npm test"; leave blank to disable tests): ');
-    if (!entered && !process.stdin.isTTY) {
-      throw new Error(
-        `Missing test_command. Set it in ${prettyPath(config.cwd, config.taskFile)} front matter (test_command or phase_defaults.test_command) before running.`
-      );
-    }
-    config.testCommand = String(entered || "").trim();
-    promptedTest = true;
   }
 
   // Persist key defaults into the plan front matter when missing (agent/test/branch).
@@ -836,8 +816,9 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     if (!String(next.agent_command || next.agentCommand || "").trim()) {
       next.agent_command = config.agentCommand || "";
     }
-    if (promptedTest && !String(next.test_command || next.testCommand || "").trim()) {
-      next.test_command = config.testCommand || "";
+    // Only persist a test command if one is already configured (we don't require it).
+    if (String(config.testCommand || "").trim() && !String(next.test_command || next.testCommand || "").trim()) {
+      next.test_command = String(config.testCommand || "").trim();
     }
     const git = next.git && typeof next.git === "object" ? { ...next.git } : {};
     if (config.gitBranch && !String(git.branch || git.git_branch || git.gitBranch || "").trim()) {

@@ -83,9 +83,12 @@ function mergeConfig(flags, frontMatter) {
   const fm = frontMatter || {};
   const hooks = fm.hooks || {};
   const git = fm.git || {};
+  const phaseDefaults = fm.phase_defaults || fm.phaseDefaults || {};
   const hasPromptSeed = Object.prototype.hasOwnProperty.call(flags, "prompt");
   const promptSeedFlag = hasPromptSeed ? flags.prompt : undefined;
   const promptOutFlag = flags["prompt-out"];
+  const gitWorktreeFlag = flags["git-worktree"];
+  const gitWorktreeBranchFlag = flags["git-worktree-branch"];
   return {
     cwd: process.cwd(),
     // NOTE: `--plan` is the plan doc path. (Internally we still call it `taskFile`.)
@@ -105,7 +108,9 @@ function mergeConfig(flags, frontMatter) {
     // - `--prompt -` (stdin)
     promptSeed: promptSeedFlag === true ? "" : String(promptSeedFlag || ""),
     agentCommand: normalizeCommand(flags.agent || fm.agent_command || fm.agentCommand || ""),
-    testCommand: normalizeCommand(fm.test_command || fm.testCommand || ""),
+    testCommand: normalizeCommand(
+      fm.test_command || fm.testCommand || phaseDefaults.test_command || phaseDefaults.testCommand || ""
+    ),
     autoApply: coerceBoolean(flags["auto-apply"], false),
     autoPhase: coerceBoolean(
       flags["auto-phase"] ?? fm.auto_phase ?? fm.autoPhase,
@@ -133,20 +138,22 @@ function mergeConfig(flags, frontMatter) {
       git.commit_message ||
       git.commitMessage ||
       DEFAULTS.gitCommitMessage,
-    gitWorktree:
-      flags["git-worktree"] ||
-      fm.git_worktree ||
-      fm.gitWorktree ||
-      git.worktree ||
-      git.git_worktree ||
-      "",
-    gitWorktreeBranch:
-      flags["git-worktree-branch"] ||
-      fm.git_worktree_branch ||
-      fm.gitWorktreeBranch ||
-      git.worktree_branch ||
-      git.worktreeBranch ||
-      "",
+    gitWorktree: normalizeCommand(
+      (gitWorktreeFlag === true ? "" : gitWorktreeFlag) ||
+        fm.git_worktree ||
+        fm.gitWorktree ||
+        git.worktree ||
+        git.git_worktree ||
+        ""
+    ),
+    gitWorktreeBranch: normalizeCommand(
+      (gitWorktreeBranchFlag === true ? "" : gitWorktreeBranchFlag) ||
+        fm.git_worktree_branch ||
+        fm.gitWorktreeBranch ||
+        git.worktree_branch ||
+        git.worktreeBranch ||
+        ""
+    ),
     maxIterations: clampMin(
       coerceNumber(flags["max-iterations"] || fm.max_iterations, DEFAULTS.maxIterations),
       1
