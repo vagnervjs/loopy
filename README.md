@@ -20,6 +20,12 @@ Optional: install the `loopy` binary on your PATH:
 npm link
 ```
 
+Or run from the repo without linking:
+
+```bash
+node bin/loopy.js --help
+```
+
 ## Usage
 
 ### Auto-phase quickstart (recommended)
@@ -27,20 +33,22 @@ npm link
 Generate or update `.loopy/LOOPY_PLAN.md` from a simple prompt, then start looping:
 
 ```bash
-loopy --agent "cursor-agent" --prompt "Add OAuth login to the app" --auto-apply
+loopy loop --agent "cursor-agent" --prompt "Add OAuth login to the app" --auto-apply
 ```
 
 Or read the prompt from a file (or stdin via `-`):
 
 ```bash
-loopy --agent "cursor-agent" --prompt @./task.txt --auto-apply
+loopy loop --agent "cursor-agent" --prompt @./task.txt --auto-apply
 ```
 
 Or via stdin:
 
 ```bash
-cat ./task.txt | loopy --agent "cursor-agent" --prompt - --auto-apply
+cat ./task.txt | loopy loop --agent "cursor-agent" --prompt - --auto-apply
 ```
+
+Tip: `loop` is the default command, so `loopy [options]` is equivalent to `loopy loop [options]`.
 
 Migration note:
 
@@ -99,6 +107,30 @@ Loop until completion/caps:
 ```bash
 loopy loop --agent "cursor-agent"
 # or: node bin/loopy.js loop --agent "cursor-agent"
+```
+
+Resume a previous run (requires an existing plan + `.loopy/state.json`; works even with staged files):
+
+```bash
+loopy loop --continue
+```
+
+Note: `--continue` is resume-only and **cannot** be combined with `--prompt`.
+
+### End-to-end example (PRD → plan → loop)
+
+```bash
+# One-time setup (creates `.loopy/LOOPY_PLAN.md` + `.loopy/hints.md` if missing)
+loopy init
+
+# Start looping (reads the PRD, proposes/updates the plan, then runs iterations)
+loopy loop --agent "cursor-agent" --prompt @examples/PRD.md --auto-apply --stream
+
+# Inspect status any time
+loopy status
+
+# If interrupted, resume later
+loopy loop --continue
 ```
 
 ### Plan doc (`--plan`, default `.loopy/LOOPY_PLAN.md`)
@@ -204,6 +236,7 @@ Notes:
 - `stop_on` supports `all_checked` and `tests_pass`.
 - `test_command` can be set per-phase; if present, Loopy runs it after a successful agent iteration.
 - `--phase-only` stops once the current phase meets its `stop_on` criteria.
+- Phase sections are detected via `<!-- loopy:phase <id> -->` (preferred) or `## Phase: <id>` headings; checklists are evaluated **within** each phase section.
 - If phases are absent and `--auto-phase=false`, Loopy behaves like the legacy single-checklist flow.
 
 ## Files created
@@ -223,7 +256,7 @@ Notes:
 - `--version` print version and exit
 - `--plan <file>` plan doc path (default: `.loopy/LOOPY_PLAN.md`)
 - `--prompt <text|@file|->` seed prompt to generate/update the plan doc before looping
-- `--continue` resume from existing `.loopy/state.json` (requires an existing plan + state; skips git switching so staged files don't block)
+- `--continue` resume from existing `.loopy/state.json` (requires an existing plan + state; skips git switching so staged files don't block; cannot be used with `--prompt`)
 - `--prompt-out <file>` prompt output file (default: `.loopy/PROMPT.md`)
 - `--progress <file>` progress file (default: `.loopy/progress.md`)
 - `--guardrails <file>` guardrails file (default: `.loopy/guardrails.md`)
@@ -241,7 +274,21 @@ Notes:
 - `--max-minutes <n>` max wall time in minutes (default: 120)
 - `--backoff-ms <n>` delay between iterations (default: 5000)
 - `--rotate-bytes <n>` byte threshold to force prompt rotation (default: 150000)
-- `--dry-run` build prompt only, skip agent execution
+- `--dry-run` build prompt only, skip agent execution (stops after the first prompt build)
+
+## Configuration and precedence
+
+Loopy resolves settings from (highest priority first):
+
+1. CLI flags (`loopy loop --...`)
+2. Plan doc front matter (YAML in `--plan`, default `.loopy/LOOPY_PLAN.md`)
+3. Built-in defaults
+
+Notes:
+
+- `--agent` overrides `agent_command` in the plan front matter.
+- If `agent_command` is missing and Loopy is running in a TTY, it will prompt you to enter it; otherwise it errors.
+- `test_command` can be set globally in front matter, via `phase_defaults.test_command`, and/or per phase via `phases[].test_command` (phase-specific wins).
 
 ## Streaming agent output
 
@@ -330,6 +377,7 @@ git:
 
 - Loopy **never pushes** to remotes.
 - If `--git-worktree` is set without a branch, Loopy creates a **detached HEAD** worktree (`git worktree add --detach ...`).
+- If you don’t set `--git-branch` (or `git.branch` in the plan) and you’re in a git repo, Loopy will synthesize a default `loopy/<slug>` branch (based on the seed prompt or the current directory) unless you explicitly set `--git-worktree-branch`.
 - If `--git-branch` is set, Loopy refuses to switch branches when there are **uncommitted changes**.
 - With `--continue`, Loopy **does not** switch branches/worktrees (resume-only), so staged/dirty files won't block resuming.
 - Auto-commit runs `git add -A` and then `git commit -m "<rendered message>"`.
@@ -341,6 +389,9 @@ git:
 - Agent exits immediately: verify `agent_command` is correct and accepts stdin.
 - Loop stops early: check `.loopy/progress.md` and `.loopy/activity.log` for caps or completion.
 - Guardrails growing: repeated failures or file thrashing were detected.
+- Resume errors: `--continue` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt`.
+- Flag errors: `--prompt` requires a value (`"<text>"`, `@<file>`, or `-`); `--prompt-out` requires a file path value.
+- Resetting state: delete `.loopy/state.json` (and optionally `.loopy/progress.md`) to force a fresh run; delete the whole `.loopy/` directory for a full reset.
 
 ## Notes
 
