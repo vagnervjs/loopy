@@ -6,7 +6,7 @@ max_minutes: 60
 backoff_ms: 5000
 rotate_bytes: 150000
 git:
-  branch: loopy/auto-phase
+  branch: loopy/cli-refactor
   commit: true
   commit_message: 'loopy: {change_type} {task_summary}'
 phase_defaults:
