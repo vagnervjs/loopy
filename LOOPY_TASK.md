@@ -6,12 +6,11 @@ max_minutes: 60
 backoff_ms: 5000
 rotate_bytes: 150000
 git:
-  branch: "ralph/refactor-2"
+  branch: "loopy/refactor"
   commit: true
 ---
 # Task
 
-- [x] refactor: Rename `.ralph/` to `.loopy/` and update defaults.
-- [x] refactor: Rename `RALPH_TASK.md` to `LOOPY_TASK.md` and update references.
+- [x] refactor: Finalize `.loopy/` defaults and paths.
+- [x] refactor: Use `LOOPY_TASK.md` for task definitions.
 - [x] refactor: Update docs, examples, and tests to use Loopy naming.
-
