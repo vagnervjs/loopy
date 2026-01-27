@@ -32,17 +32,31 @@ hooks:
 
 > Intended location: `.loopy/LOOPY_PLAN.md`
 >
-> Tip: if the loop is interrupted, resume with `loopy loop --continue` (works even with staged files).
+> Quickstart: to autogenerate this file, run:
+>   loopy --prompt "Short description of the change"
+>
+> If you don't pass --prompt, you can create/edit this plan file manually and run:
+>   loopy
+>
+> Tip: if the loop is interrupted, resume with:
+>   loopy --continue
+
+<!-- loopy:seed -->
+<!-- The initial prompt seed is stored here when you use --prompt. Loopy auto-generates this plan from that seed. -->
 
 ## Phase: plan
 <!-- loopy:phase plan -->
-- [ ] Describe the goal, constraints, and approach.
+- [ ] Write a short problem statement and non-goals.
+- [ ] Identify dependencies, env vars, and risky areas.
+- [ ] Decide on a rollback plan if tests fail.
 
 ## Phase: implement
 <!-- loopy:phase implement -->
-- [ ] Implement the requested changes.
+- [ ] Implement the core feature behind a flag (if needed).
+- [ ] Add coverage for edge cases and error paths.
+- [ ] Ensure logging/redaction stays intact.
 
 ## Phase: verify
 <!-- loopy:phase verify -->
-- [ ] Run tests and validate behavior.
-
+- [ ] Run the test suite and record results.
+- [ ] Validate with a manual smoke test.
