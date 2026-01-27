@@ -209,15 +209,35 @@ async function runStatus(flags) {
 
 async function runHint(flags) {
   const cwd = process.cwd();
+  const hintsFile = resolveFrom(cwd, flags.hints || DEFAULTS.hintsFile);
+  const stateFile = resolveFrom(cwd, flags.state || DEFAULTS.stateFile);
+
+  // Handle --reset flag: clear hints and reset state
+  if (flags.reset) {
+    await writeText(hintsFile, "# Loopy Hints\n\n");
+
+    const loaded = await loadState(stateFile);
+    const state = loaded.state || {};
+    const next = {
+      ...state,
+      lastHint: null,
+      lastHintAt: null,
+      hintCount: 0,
+      updatedAt: new Date().toISOString(),
+      startedAt: state.startedAt || new Date().toISOString(),
+    };
+    await writeText(stateFile, JSON.stringify(next, null, 2) + "\n");
+
+    console.log(`Hints reset (${path.relative(cwd, hintsFile) || hintsFile})`);
+    return;
+  }
+
   const text = (flags._ || []).join(" ").trim();
   if (!text) {
     console.error('Missing hint text. Usage: loopy hint "<text>"');
     process.exitCode = 1;
     return;
   }
-
-  const hintsFile = resolveFrom(cwd, flags.hints || DEFAULTS.hintsFile);
-  const stateFile = resolveFrom(cwd, flags.state || DEFAULTS.stateFile);
 
   const entry = `- ${new Date().toISOString()} ${text.replace(/\r?\n/g, " ").trim()}\n`;
   await appendText(hintsFile, entry);
