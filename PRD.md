@@ -25,21 +25,21 @@ Build a Node.js CLI that runs a Ralph-style coding agent loop reliably, preservi
 ## Requirements
 ### Functional
 - [F1] CLI supports `run` (single iteration) and `loop` (repeat) commands.
-- [F2] Reads task definition from `RALPH_TASK.md` (front matter + checklist).
+- [F2] Reads task definition from `LOOPY_TASK.md` (front matter + checklist).
 - [F3] Generates/uses a single prompt source (e.g., `PROMPT.md`) each iteration.
 - [F4] Executes a configured agent command (e.g., `cursor-agent`, `claude`, `amp`) with stdin from prompt.
-- [F5] Writes `.ralph/activity.log` with per-iteration events and outcomes.
-- [F6] Tracks progress in `.ralph/progress.md` (iteration count, last status, last test run).
-- [F7] Maintains `.ralph/guardrails.md` and appends “Signs” after failure patterns.
+- [F5] Writes `.loopy/activity.log` with per-iteration events and outcomes.
+- [F6] Tracks progress in `.loopy/progress.md` (iteration count, last status, last test run).
+- [F7] Maintains `.loopy/guardrails.md` and appends “Signs” after failure patterns.
 - [F8] Token/size tracking: approximate by counting bytes read/written per iteration.
 - [F9] Context rotation: when token/size threshold breached, start next iteration with a “fresh” prompt and only persisted state (task, guardrails, progress).
 - [F10] Gutter detection: detect repeated failures (same command error ≥3 times) or file thrashing and record in guardrails.
-- [F11] Task completion detection: stop when all checkboxes in `RALPH_TASK.md` are checked.
+- [F11] Task completion detection: stop when all checkboxes in `LOOPY_TASK.md` are checked.
 - [F12] Safety caps: max iterations, max wall time, and backoff between iterations.
 - [F13] Optional hooks: `preIteration`, `postIteration`, `onFailure` shell hooks.
 - [F14] Optional test hook: run `test_command` from task front matter; record pass/fail.
 - [F15] Graceful stop: SIGINT/SIGTERM writes final status and exits cleanly.
-- [F16] Documentation: includes a `README.md` with setup, example `RALPH_TASK.md`, command usage, flags, and troubleshooting.
+- [F16] Documentation: includes a `README.md` with setup, example `LOOPY_TASK.md`, command usage, flags, and troubleshooting.
 
 ### Non-Functional
 - [N1] Performance: loop overhead < 500ms per iteration excluding agent runtime.
@@ -66,10 +66,10 @@ Build a Node.js CLI that runs a Ralph-style coding agent loop reliably, preservi
 ## Open Questions
 - Which agent CLI(s) must be supported out of the box?
 - Should the tool create commits automatically or just suggest them?
-- Exact format of `RALPH_TASK.md` front matter and required fields?
+- Exact format of `LOOPY_TASK.md` front matter and required fields?
 - Default thresholds for warning/rotate based on byte count?
 
 ## Assumptions
 - The user provides an agent command that can read prompt from stdin.
 - The repo is a git workspace and users are comfortable with frequent commits.
-- Task success is represented as checkbox completion in `RALPH_TASK.md`.
+- Task success is represented as checkbox completion in `LOOPY_TASK.md`.

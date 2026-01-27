@@ -68,7 +68,7 @@ async function runIteration(config) {
 
   printStep(`Iteration start (rotation: ${rotationPending ? "fresh" : "standard"})`, { iteration });
 
-  const lastOutputRaw = rotationPending ? "" : await readText(path.join(config.ralphDir, "last_agent_output.txt"));
+  const lastOutputRaw = rotationPending ? "" : await readText(path.join(config.loopyDir, "last_agent_output.txt"));
   bytesRead += Buffer.byteLength(lastOutputRaw);
   const lastOutput = truncate(lastOutputRaw, 4000);
 
@@ -97,7 +97,7 @@ async function runIteration(config) {
   }
 
   if (!config.agentCommand) {
-    throw new Error("Missing agent_command. Set it in RALPH_TASK.md front matter or use --agent-cmd.");
+    throw new Error("Missing agent_command. Set it in LOOPY_TASK.md front matter or use --agent-cmd.");
   }
 
   if (config.preIteration) {
@@ -111,7 +111,7 @@ async function runIteration(config) {
 
   const agentStreamLogPath = config.agentStreamLog
     ? resolveFrom(config.cwd, config.agentStreamLog)
-    : path.join(config.ralphDir, "agent_stream.log");
+    : path.join(config.loopyDir, "agent_stream.log");
 
   // Write a small header so runs are easy to separate.
   await fs.mkdir(path.dirname(agentStreamLogPath), { recursive: true });
@@ -136,7 +136,7 @@ async function runIteration(config) {
   const redactedStderr = redact(agentResult.stderr);
   const combinedOutput = truncate(`${redactedStdout}\n${redactedStderr}`, DEFAULTS.maxOutputBytes);
 
-  await writeText(path.join(config.ralphDir, "last_agent_output.txt"), combinedOutput);
+  await writeText(path.join(config.loopyDir, "last_agent_output.txt"), combinedOutput);
   bytesWritten += Buffer.byteLength(combinedOutput);
 
   let status = agentResult.code === 0 ? "success" : "failure";
@@ -159,7 +159,7 @@ async function runIteration(config) {
       cwd: config.cwd,
     });
     const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
-    await writeText(path.join(config.ralphDir, "last_test_output.txt"), testOutput);
+    await writeText(path.join(config.loopyDir, "last_test_output.txt"), testOutput);
     bytesWritten += Buffer.byteLength(testOutput);
     const testOutcome = testResult.code === 0 ? "pass" : "fail";
     testStatus = `${testOutcome} @ ${new Date().toISOString()}`;
@@ -425,4 +425,3 @@ module.exports = {
   runIteration,
   runLoop,
 };
-
