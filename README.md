@@ -24,32 +24,37 @@ npm link
 
 ### Auto-phase quickstart (recommended)
 
-Generate or update `LOOPY_PLAN.md` from a simple prompt, then start looping:
+Generate or update `.loopy/LOOPY_PLAN.md` from a simple prompt, then start looping:
 
 ```bash
-loopy --agent-cmd "cursor-agent" --prompt "Add OAuth login to the app" --auto-apply
+loopy --agent "cursor-agent" --prompt "Add OAuth login to the app" --auto-apply
 ```
 
 Or read the prompt from a file (or stdin via `-`):
 
 ```bash
-loopy --agent-cmd "cursor-agent" --prompt @./task.txt --auto-apply
+loopy --agent "cursor-agent" --prompt @./task.txt --auto-apply
 ```
 
-By default, Loopy will try to auto-phase (create `phases` + per-phase checklists) when a task file has no phases.
+Migration note:
+
+- Default generated file locations are under `.loopy/` (plan: `.loopy/LOOPY_PLAN.md`, prompt: `.loopy/PROMPT.md`).
+- Legacy flags/commands are not accepted; use `loopy --help` to update any scripts.
+
+By default, Loopy will try to auto-phase (create `phases` + per-phase checklists) when a plan file has no phases.
 To disable auto-phase and use the legacy “single checklist” behavior:
 
 ```bash
 loopy loop --auto-phase=false
 ```
 
-Initialize a new workspace (scaffolds `.loopy/`, `.loopy/hints.md`, and `LOOPY_PLAN.md`):
+Initialize a new workspace (scaffolds `.loopy/`, `.loopy/hints.md`, and `.loopy/LOOPY_PLAN.md`):
 
 ```bash
 loopy init
 ```
 
-Add a mid-loop hint (included in the next generated `PROMPT.md`):
+Add a mid-loop hint (included in the next generated `.loopy/PROMPT.md`):
 
 ```bash
 loopy hint "Focus on fixing the failing test first."
@@ -79,29 +84,25 @@ loopy status
 Single iteration:
 
 ```bash
-loopy run --agent-cmd "cursor-agent"
-# or: node bin/loopy.js run --agent-cmd "cursor-agent"
+loopy loop --max-iterations 1 --agent "cursor-agent"
+# or: node bin/loopy.js loop --max-iterations 1 --agent "cursor-agent"
 ```
 
 Loop until completion/caps:
 
 ```bash
-loopy loop --agent-cmd "cursor-agent"
-# or: node bin/loopy.js loop --agent-cmd "cursor-agent"
+loopy loop --agent "cursor-agent"
+# or: node bin/loopy.js loop --agent "cursor-agent"
 ```
 
-### Task doc (`--task`, default `LOOPY_PLAN.md`)
+### Plan doc (`--plan`, default `.loopy/LOOPY_PLAN.md`)
 
-Loopy’s **task doc** is the durable source of truth the loop reads on every iteration. It contains:
+Loopy’s **plan doc** is the durable source of truth the loop reads on every iteration. It contains:
 
 - YAML front matter (agent command, test command, loop limits, git settings, phases)
 - The checklist(s) that represent progress and completion
 
-By default this file is `LOOPY_PLAN.md`, but you can point Loopy at any path via `--task <file>`.
-
-Migration note:
-
-- If `LOOPY_PLAN.md` is missing and `LOOPY_TASK.md` exists, Loopy will use `LOOPY_TASK.md` and print a warning.
+By default this file is `.loopy/LOOPY_PLAN.md`, but you can point Loopy at any path via `--plan <file>`.
 
 Example:
 
@@ -119,42 +120,40 @@ hooks:
   onFailure: "echo failed"
 ---
 
-# Task
+# Plan
 
 - [ ] Add a CLI help command.
 - [ ] Implement loop guardrails.
 - [ ] Update README with usage instructions.
 ```
 
-You can also pass `--agent-cmd` to override the task front matter.
-See `examples/LOOPY_TASK.md` for a starter template (legacy name).
+You can also pass `--agent` to override the plan front matter.
+See `examples/LOOPY_PLAN.md` for a starter template.
 
 ### Seed prompt (`--prompt`)
 
-The **seed prompt** is a PRD-style requirements/implementation notes document. Loopy uses it to generate/update the task doc (usually `LOOPY_PLAN.md`) before looping, and also includes it in the per-iteration prompt for clarity.
+The **seed prompt** is a PRD-style requirements/implementation notes document. Loopy uses it to generate/update the plan doc (usually `.loopy/LOOPY_PLAN.md`) before looping, and also includes it in the per-iteration prompt for clarity.
 
 Where it’s used:
 
-- If the task doc (`--task`) does not exist, Loopy uses the seed prompt to generate it.
-- If the task doc exists and you provide a seed prompt, Loopy proposes a rewrite/update and asks for confirmation (or applies with `--auto-apply`).
-- If provided, Loopy includes the seed prompt in `PROMPT.md` under `## Task file (PRD)` so the agent can reference the original requirements verbatim.
+- If the plan doc does not exist, Loopy uses the seed prompt to generate it.
+- If the plan doc exists and you provide a seed prompt, Loopy proposes an update and asks for confirmation (or applies with `--auto-apply`).
+- If provided, Loopy includes the seed prompt in `.loopy/PROMPT.md` under `## Plan seed (PRD)` so the agent can reference the original requirements verbatim.
 
 How to provide it:
 
 - `--prompt "<text>"`: inline text.
 - `--prompt @<path>`: read text from a file (any extension; `.md` recommended).
 - `--prompt -`: read text from stdin.
-- `--prompt` is mutually exclusive with the legacy `--task-prompt` / `--task-file` flags.
-
 Validation / normalization (current behavior):
 
 - The seed prompt is read as **UTF-8 text** (BOM stripped if present).
 - Line endings are normalized (CRLF/CR → LF).
 - Loopy trims only leading/trailing *empty lines* (internal whitespace/newlines are preserved).
-- If the resulting content is empty, Loopy errors (stdin: “Task prompt from --task-file '-' (stdin) is empty.”; file: “Task prompt file is empty: ...”).
-- If the file path does not exist, Loopy errors (“Task prompt file not found: ...”).
-- If the path is a directory, Loopy errors (“Task prompt path is a directory: ...”).
-- If the file is unreadable due to permissions, Loopy errors (“Permission denied reading task prompt file: ...”).
+- If the resulting content is empty, Loopy errors (stdin: “Seed prompt from --prompt '-' (stdin) is empty.”; file: “Seed prompt file is empty: ...”).
+- If the file path does not exist, Loopy errors (“Seed prompt file not found: ...”).
+- If the path is a directory, Loopy errors (“Seed prompt path is a directory: ...”).
+- If the file is unreadable due to permissions, Loopy errors (“Permission denied reading seed prompt file: ...”).
 - There is no explicit max size cap today; very large seed prompts can degrade planning quality and make confirmations noisy.
 
 ### Phase schema (auto-phase)
@@ -211,21 +210,20 @@ Notes:
 - `.loopy/last_agent_output.txt` most recent agent output (redacted)
 - `.loopy/agent_stream.log` live agent stdout/stderr stream (redacted)
 - `.loopy/last_test_output.txt` most recent test output (redacted)
-- `PROMPT.md` generated prompt input for each iteration
+- `.loopy/PROMPT.md` generated prompt input for each iteration
 
 ## Options
 
 - `--version` print version and exit
-- `--task <file>` task doc path (default: `LOOPY_PLAN.md`)
-- `--prompt <text|@file|->` seed prompt to generate/update the task doc before looping
-- `--prompt-out <file>` prompt output file (default: `PROMPT.md`)
-- Legacy (deprecated): `--task-prompt <text>`, `--task-file <path>`, `--prompt-file <file>`
+- `--plan <file>` plan doc path (default: `.loopy/LOOPY_PLAN.md`)
+- `--prompt <text|@file|->` seed prompt to generate/update the plan doc before looping
+- `--prompt-out <file>` prompt output file (default: `.loopy/PROMPT.md`)
 - `--progress <file>` progress file (default: `.loopy/progress.md`)
 - `--guardrails <file>` guardrails file (default: `.loopy/guardrails.md`)
 - `--activity-log <file>` activity log (default: `.loopy/activity.log`)
 - `--state <file>` state file (default: `.loopy/state.json`)
 - `--hints <file>` hints file (default: `.loopy/hints.md`)
-- `--agent-cmd <command>` agent command (overrides task front matter)
+- `--agent <command>` agent command (overrides plan front matter)
 - `--auto-phase` enable auto-phase planning (default: true; disable with `--auto-phase=false`)
 - `--phase <id>` start/resume at phase id
 - `--phase-only` stop after current phase completes
@@ -247,7 +245,7 @@ Loopy also prints short **step status** lines to the terminal (iteration start, 
 To also mirror the agent output to your terminal, pass `--stream`:
 
 ```bash
-loopy loop --agent-cmd "cursor-agent" --stream
+loopy loop --agent "cursor-agent" --stream
 ```
 
 ## Status command
@@ -304,9 +302,9 @@ Supported commit template variables:
 - `{taskComplete}`: `true` / `false`
 - `{branch}`: current branch name (best-effort)
 
-### Task front matter
+### Plan front matter
 
-You can also configure git via the task doc front matter (default: `LOOPY_PLAN.md`):
+You can also configure git via the plan doc front matter (default: `.loopy/LOOPY_PLAN.md`):
 
 ```md
 ---
@@ -331,7 +329,7 @@ git:
 
 ## Troubleshooting
 
-- Missing `LOOPY_PLAN.md`: run `loopy init` or provide `--prompt` (or use `--task <file>` to point Loopy at your task doc).
+- Missing plan doc: run `loopy init` or provide `--prompt` (or use `--plan <file>` to point Loopy at your plan doc).
 - Agent exits immediately: verify `agent_command` is correct and accepts stdin.
 - Loop stops early: check `.loopy/progress.md` and `.loopy/activity.log` for caps or completion.
 - Guardrails growing: repeated failures or file thrashing were detected.
@@ -339,5 +337,5 @@ git:
 ## Notes
 
 - Logs redact common secret patterns, but avoid writing secrets to stdout/stderr.
-- The loop stops when all checkboxes in the task doc (default: `LOOPY_PLAN.md`) are checked.
+- The loop stops when all checkboxes in the plan doc (default: `.loopy/LOOPY_PLAN.md`) are checked.
 - The loop also stops on “gutter” guardrails (repeated identical failures or file thrashing); see `.loopy/guardrails.md` and `.loopy/progress.md`.

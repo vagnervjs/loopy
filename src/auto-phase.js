@@ -138,7 +138,7 @@ function renderTaskMarkdown({
 
   const yamlText = yaml.dump(fm, { lineWidth: 120 }).trimEnd();
 
-  const lines = ["---", yamlText, "---", "", "# Task", ""];
+  const lines = ["---", yamlText, "---", "", "# Plan", ""];
   if (includeSeedComment && seedText) {
     lines.push(`<!-- loopy:seed ${String(seedText).replace(/-->/g, "--&gt;")} -->`, "");
   }

@@ -1,8 +1,8 @@
 const path = require("path");
 
 const DEFAULTS = {
-  taskFile: "LOOPY_PLAN.md",
-  promptFile: "PROMPT.md",
+  taskFile: ".loopy/LOOPY_PLAN.md",
+  promptFile: ".loopy/PROMPT.md",
   loopyDir: ".loopy",
   progressFile: ".loopy/progress.md",
   guardrailsFile: ".loopy/guardrails.md",
@@ -79,46 +79,19 @@ function formatDuration(minutes) {
   return `${minutes}m`;
 }
 
-function looksLikeFilePath(value) {
-  const v = String(value || "").trim();
-  if (!v) return false;
-  // These are reserved for seed prompt semantics.
-  if (v === "-" || v.startsWith("@")) return false;
-  // If there is whitespace, it's far more likely to be an inline seed.
-  if (/\s/.test(v)) return false;
-  // Heuristic: treat paths and filenames with extensions as file-like.
-  return Boolean(path.extname(v) || v.includes("/") || v.includes("\\"));
-}
-
 function mergeConfig(flags, frontMatter) {
   const fm = frontMatter || {};
   const hooks = fm.hooks || {};
   const git = fm.git || {};
-  const taskPromptFlag = flags["task-prompt"];
-  const taskFileFlag = flags["task-file"] ?? flags["task-prompt-file"];
-  const promptOutFlag = flags["prompt-out"] ?? flags["prompt-file"];
   const hasPromptSeed = Object.prototype.hasOwnProperty.call(flags, "prompt");
   const promptSeedFlag = hasPromptSeed ? flags.prompt : undefined;
-  const legacySeedProvided =
-    Object.prototype.hasOwnProperty.call(flags, "task-prompt") ||
-    Object.prototype.hasOwnProperty.call(flags, "task-file") ||
-    Object.prototype.hasOwnProperty.call(flags, "task-prompt-file");
-
-  // Back-compat: historically `--prompt <file>` meant "prompt output file".
-  // If the user is using the legacy seed flags, allow `--prompt <file>` as a deprecated alias for `--prompt-out`.
-  const promptIsLegacyOutAlias =
-    legacySeedProvided &&
-    !Object.prototype.hasOwnProperty.call(flags, "prompt-out") &&
-    !Object.prototype.hasOwnProperty.call(flags, "prompt-file") &&
-    Object.prototype.hasOwnProperty.call(flags, "prompt") &&
-    promptSeedFlag !== true &&
-    looksLikeFilePath(promptSeedFlag);
+  const promptOutFlag = flags["prompt-out"];
   return {
     cwd: process.cwd(),
-    taskFile: flags.task || DEFAULTS.taskFile,
-    // NOTE: `--prompt` is reserved for the seed prompt going forward.
-    // Use `--prompt-out` for the generated prompt markdown file.
-    promptFile: promptOutFlag || (promptIsLegacyOutAlias ? String(promptSeedFlag) : "") || DEFAULTS.promptFile,
+    // NOTE: `--plan` is the plan doc path. (Internally we still call it `taskFile`.)
+    taskFile: flags.plan || DEFAULTS.taskFile,
+    // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.
+    promptFile: (promptOutFlag === true ? "" : String(promptOutFlag || "")) || DEFAULTS.promptFile,
     loopyDir: DEFAULTS.loopyDir,
     progressFile: flags.progress || DEFAULTS.progressFile,
     guardrailsFile: flags.guardrails || DEFAULTS.guardrailsFile,
@@ -130,11 +103,9 @@ function mergeConfig(flags, frontMatter) {
     // - `--prompt "<inline text>"`
     // - `--prompt @path/to/file`
     // - `--prompt -` (stdin)
-    promptSeed: promptIsLegacyOutAlias ? "" : promptSeedFlag === true ? "" : String(promptSeedFlag || ""),
-    agentCommand: normalizeCommand(flags["agent-cmd"] || fm.agent_command || fm.agentCommand || ""),
+    promptSeed: promptSeedFlag === true ? "" : String(promptSeedFlag || ""),
+    agentCommand: normalizeCommand(flags.agent || fm.agent_command || fm.agentCommand || ""),
     testCommand: normalizeCommand(fm.test_command || fm.testCommand || ""),
-    taskPrompt: taskPromptFlag === true ? "" : String(taskPromptFlag || ""),
-    taskPromptFile: taskFileFlag === true ? "" : String(taskFileFlag || ""),
     autoApply: coerceBoolean(flags["auto-apply"], false),
     autoPhase: coerceBoolean(
       flags["auto-phase"] ?? fm.auto_phase ?? fm.autoPhase,

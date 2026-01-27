@@ -40,16 +40,6 @@ function parseSkipPhaseList(value) {
     .filter(Boolean);
 }
 
-function looksLikeLegacyPromptOutFile(value) {
-  const v = String(value || "").trim();
-  if (!v) return false;
-  // These are reserved for seed prompt semantics.
-  if (v === "-" || v.startsWith("@")) return false;
-  // If there is whitespace, it's far more likely to be an inline seed.
-  if (/\s/.test(v)) return false;
-  return Boolean(path.extname(v) || v.includes("/") || v.includes("\\"));
-}
-
 async function readStdinText() {
   try {
     if (process.stdin.readableEnded) return "";
@@ -74,15 +64,7 @@ async function readStdinText() {
 async function loadTaskSeed(config) {
   const promptSeedRaw = config.promptSeed == null ? "" : String(config.promptSeed).trim();
 
-  const legacyInlineRaw = config.taskPrompt == null ? "" : String(config.taskPrompt);
-  const legacyInline = normalizeTaskSeedText(legacyInlineRaw);
-  const legacyFileArg = String(config.taskPromptFile || "").trim();
-
-  if (promptSeedRaw && (legacyInline || legacyFileArg)) {
-    throw new Error("Provide only one of --prompt or (--task-prompt / --task-file).");
-  }
-
-  // Preferred seed path: `--prompt`
+  // Seed path: `--prompt`
   if (promptSeedRaw) {
     if (promptSeedRaw === "-") {
       const raw = await readStdinText();
@@ -121,44 +103,6 @@ async function loadTaskSeed(config) {
     if (!seed) throw new Error("Seed prompt from --prompt is empty.");
     return { seed, source: "--prompt" };
   }
-
-  // Legacy seed path: `--task-prompt` / `--task-file`
-  if (legacyInline && legacyFileArg) {
-    throw new Error("Provide only one of --task-prompt or --task-file.");
-  }
-
-  if (legacyFileArg) {
-    if (legacyFileArg === "-") {
-      const raw = await readStdinText();
-      const seed = normalizeTaskSeedText(raw);
-      if (!seed) throw new Error("Task prompt from --task-file '-' (stdin) is empty.");
-      return { seed, source: "--task-file" };
-    }
-
-    const abs = resolveFrom(config.cwd, legacyFileArg);
-    let raw = "";
-    try {
-      raw = await fs.readFile(abs, "utf8");
-    } catch (err) {
-      if (err && err.code === "ENOENT") {
-        throw new Error(`Task prompt file not found: ${prettyPath(config.cwd, abs)}`);
-      }
-      if (err && err.code === "EISDIR") {
-        throw new Error(`Task prompt path is a directory: ${prettyPath(config.cwd, abs)}`);
-      }
-      if (err && (err.code === "EACCES" || err.code === "EPERM")) {
-        throw new Error(`Permission denied reading task prompt file: ${prettyPath(config.cwd, abs)}`);
-      }
-      throw new Error(
-        `Failed to read task prompt file ${prettyPath(config.cwd, abs)}: ${err && err.message ? err.message : String(err)}`
-      );
-    }
-    const seed = normalizeTaskSeedText(raw);
-    if (!seed) throw new Error(`Task prompt file is empty: ${prettyPath(config.cwd, abs)}`);
-    return { seed, source: "--task-file" };
-  }
-
-  if (legacyInline) return { seed: legacyInline, source: "--task-prompt" };
   return { seed: "", source: "" };
 }
 
@@ -232,11 +176,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     const loaded = loadedSeed || (await loadTaskSeed(config));
     let seed = loaded.seed;
     if (!seed) {
-      seed = await promptLine(`Enter a short task description for ${prettyPath(cwd, taskPath)}: `);
+      seed = await promptLine(`Enter a short plan description for ${prettyPath(cwd, taskPath)}: `);
     }
     if (!seed) {
       throw new Error(
-        `Missing ${prettyPath(cwd, taskPath)} and no seed prompt provided (use --prompt, or legacy --task-prompt/--task-file, or run in a TTY).`
+        `Missing ${prettyPath(cwd, taskPath)} and no seed prompt provided (use --prompt, or run in a TTY).`
       );
     }
 
@@ -284,7 +228,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
         ).trimEnd(),
         "---",
         "",
-        "# Task",
+        "# Plan",
         "",
         `- [ ] ${seed}`,
         "",
@@ -322,13 +266,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
         seedText: seed,
       });
     } else {
-      // Legacy update: overwrite checklist with a single new item.
+      // Non-phased update: overwrite checklist with a single new item.
       nextText = [
         "---",
         yaml.dump(fm, { lineWidth: 120 }).trimEnd(),
         "---",
         "",
-        "# Task",
+        "# Plan",
         "",
         `- [ ] ${seed}`,
         "",
@@ -398,8 +342,8 @@ async function runIteration(config) {
   const parsedTask = parseTask(taskText);
 
   if (parsedTask.allChecked) {
-    await appendActivity(config.activityLog, ["Task complete. Stopping loop."]);
-    printStep("Task complete. Stopping loop.");
+    await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
+    printStep("Plan complete. Stopping loop.");
     return { status: "complete", bytes: 0 };
   }
 
@@ -466,7 +410,7 @@ async function runIteration(config) {
 
   if (!config.agentCommand) {
     throw new Error(
-      `Missing agent_command. Set it in ${prettyPath(config.cwd, config.taskFile)} front matter or use --agent-cmd.`
+      `Missing agent_command. Set it in ${prettyPath(config.cwd, config.taskFile)} front matter or use --agent.`
     );
   }
 
@@ -714,8 +658,8 @@ async function runIteration(config) {
   ]);
 
   if (taskComplete) {
-    await appendActivity(config.activityLog, ["Task complete detected after iteration."]);
-    printStep("Task complete detected after iteration.", { iteration });
+    await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
+    printStep("Plan complete detected after iteration.", { iteration });
     return { status: "complete", bytes: bytesRead + bytesWritten };
   }
 
@@ -732,100 +676,74 @@ async function runIteration(config) {
 async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const stop = stopSignal || { stopRequested: false };
   const baseCwd = process.cwd();
-  const explicitTask = Object.prototype.hasOwnProperty.call(flags, "task");
-  const defaultTaskPath = resolveFrom(baseCwd, flags.task || DEFAULTS.taskFile);
-  let initialTaskPath = defaultTaskPath;
-  let taskText = await readText(initialTaskPath);
-
-  // Back-compat: if LOOPY_PLAN.md is missing and LOOPY_TASK.md exists, use it and warn.
-  if (!explicitTask && !taskText) {
-    const legacyPath = resolveFrom(baseCwd, "LOOPY_TASK.md");
-    const legacyText = await readText(legacyPath);
-    if (legacyText) {
-      initialTaskPath = legacyPath;
-      taskText = legacyText;
-      console.error(
-        "Warning: `LOOPY_TASK.md` is deprecated. Rename it to `LOOPY_PLAN.md` (or run with `--task LOOPY_TASK.md`)."
-      );
-    }
+  const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+  if (command === "run") {
+    throw new Error("Unsupported command. For a single iteration, use `loopy loop --max-iterations 1`.");
   }
 
-  const parsedTask = taskText ? parseTask(taskText) : { frontMatter: {} };
+  // No legacy flag compatibility: fail fast with a clear message.
+  if (hasOwn(flags, "task")) throw new Error("Unsupported legacy flag provided. Use `--plan <file>` instead.");
+  if (hasOwn(flags, "agent-cmd"))
+    throw new Error("Unsupported legacy flag provided. Use `--agent <command>` instead.");
+  if (hasOwn(flags, "task-prompt"))
+    throw new Error("Unsupported legacy seed flag provided. Use `--prompt \"<text>\"` instead.");
+  if (hasOwn(flags, "task-file") || hasOwn(flags, "task-prompt-file"))
+    throw new Error("Unsupported legacy seed flag provided. Use `--prompt @<file>` (or `--prompt -`) instead.");
+  if (hasOwn(flags, "prompt-file")) throw new Error("Unsupported legacy flag provided. Use `--prompt-out <file>` instead.");
+
+  const defaultPlanPath = resolveFrom(baseCwd, flags.plan || DEFAULTS.taskFile);
+  const planText = await readText(defaultPlanPath);
+
+  const parsedTask = planText ? parseTask(planText) : { frontMatter: {} };
   let config = mergeConfig(flags, parsedTask.frontMatter);
 
-  // Ensure config points at the same file we used for front matter.
-  if (!explicitTask && initialTaskPath !== defaultTaskPath) {
-    config.taskFile = path.relative(baseCwd, initialTaskPath) || initialTaskPath;
-  }
-
-  // Deprecation warnings.
-  if (Object.prototype.hasOwnProperty.call(flags, "task-prompt")) {
-    console.error("Warning: `--task-prompt` is deprecated. Use `--prompt` instead.");
-  }
-  if (Object.prototype.hasOwnProperty.call(flags, "task-file") || Object.prototype.hasOwnProperty.call(flags, "task-prompt-file")) {
-    console.error("Warning: `--task-file` is deprecated. Use `--prompt @<file>` (or `--prompt -`) instead.");
-  }
-  if (Object.prototype.hasOwnProperty.call(flags, "prompt-file")) {
-    console.error("Warning: `--prompt-file` is deprecated. Use `--prompt-out` instead.");
-  }
-
-  const legacySeedProvided =
-    Object.prototype.hasOwnProperty.call(flags, "task-prompt") ||
-    Object.prototype.hasOwnProperty.call(flags, "task-file") ||
-    Object.prototype.hasOwnProperty.call(flags, "task-prompt-file");
-  const promptIsLegacyOutAlias =
-    legacySeedProvided &&
-    !Object.prototype.hasOwnProperty.call(flags, "prompt-out") &&
-    !Object.prototype.hasOwnProperty.call(flags, "prompt-file") &&
-    Object.prototype.hasOwnProperty.call(flags, "prompt") &&
-    flags.prompt !== true &&
-    looksLikeLegacyPromptOutFile(flags.prompt);
-
-  if (promptIsLegacyOutAlias) {
-    console.error("Warning: `--prompt <file>` is deprecated. Use `--prompt-out <file>` instead.");
+  // Validate seed prompt flag early.
+  if (hasOwn(flags, "prompt")) {
     if (flags.prompt === true) {
-      throw new Error("Missing value for --prompt (expected a prompt output file path).");
+      throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
     }
     const v = String(flags.prompt || "").trim();
-    if (!v) throw new Error("Missing value for --prompt (expected a prompt output file path).");
-  } else {
-    // Validate new seed prompt flag early.
-    if (Object.prototype.hasOwnProperty.call(flags, "prompt")) {
-      if (flags.prompt === true) {
-        throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
-      }
-      const v = String(flags.prompt || "").trim();
-      if (!v) throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
-      if (v.startsWith("@") && !v.slice(1).trim()) {
-        throw new Error("Missing file path after --prompt @<file>.");
-      }
+    if (!v) throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
+    if (v.startsWith("@") && !v.slice(1).trim()) {
+      throw new Error("Missing file path after --prompt @<file>.");
     }
   }
 
-  // Validate prompt output alias flags.
+  // Validate prompt output flag.
   if (flags["prompt-out"] === true) {
     throw new Error("Missing value for --prompt-out (expected a file path).");
   }
-  if (flags["prompt-file"] === true) {
-    throw new Error("Missing value for --prompt-file (expected a file path).");
+
+  // Ensure agent command is defined before any planning/execution.
+  if (!config.agentCommand) {
+    const entered = await promptLine('Enter agent command (e.g. "cursor-agent"): ');
+    if (!entered) {
+      throw new Error(
+        `Missing agent_command. Set it in ${prettyPath(baseCwd, resolveFrom(baseCwd, config.taskFile))} front matter or use --agent.`
+      );
+    }
+    config.agentCommand = entered;
   }
 
-  if (Object.prototype.hasOwnProperty.call(flags, "task-prompt") && flags["task-prompt"] !== true) {
-    const v = String(flags["task-prompt"] || "").trim();
-    if (!v) throw new Error("Missing value for --task-prompt (expected text).");
-  }
-  if (flags["task-prompt"] === true) {
-    throw new Error("Missing value for --task-prompt (expected text).");
-  }
-  if (
-    (Object.prototype.hasOwnProperty.call(flags, "task-file") && flags["task-file"] !== true) ||
-    (Object.prototype.hasOwnProperty.call(flags, "task-prompt-file") && flags["task-prompt-file"] !== true)
-  ) {
-    const raw = String((flags["task-file"] ?? flags["task-prompt-file"]) || "").trim();
-    if (!raw) throw new Error("Missing value for --task-file (expected a file path or '-').");
-  }
-  if (flags["task-file"] === true || flags["task-prompt-file"] === true) {
-    throw new Error("Missing value for --task-file (expected a file path or '-').");
+  // Default git branch when missing (only when running inside a git repo).
+  if (!config.gitBranch) {
+    let isGitRepo = false;
+    try {
+      await fs.stat(path.join(baseCwd, ".git"));
+      isGitRepo = true;
+    } catch (_) {
+      isGitRepo = false;
+    }
+    if (isGitRepo) {
+      const rawPrompt =
+        hasOwn(flags, "prompt") && flags.prompt !== true ? String(flags.prompt || "").trim() : "";
+      let base = rawPrompt;
+      if (base.startsWith("@")) base = path.basename(base.slice(1).trim() || "seed");
+      if (base === "-") base = "stdin";
+      base = base.replace(/\.[a-z0-9]+$/i, "");
+      const slug = toSlug(base) || toSlug(path.basename(baseCwd)) || "work";
+      config.gitBranch = `loopy/${slug}`.slice(0, 80);
+    }
   }
 
   printStep(
@@ -853,19 +771,81 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   config = materializeConfigPaths(config, effectiveCwd);
   if (onActivityLog) onActivityLog(config.activityLog);
 
-  // Load the task seed once so stdin ('-') works and prompts can reuse the content.
+  // Load the plan seed once so stdin ('-') works and prompts can reuse the content.
   const loadedSeed = await loadTaskSeed(config);
   config.taskSeedText = loadedSeed.seed || "";
   config.taskSeedSource = loadedSeed.source || "";
 
-  // Task initialization / auto-phase planning happens once, before looping.
+  // Plan initialization / auto-phase planning happens once, before looping.
   const ensured = await ensureTaskBeforeLoop(config, loadedSeed);
   if (ensured.rewritten) {
     await appendActivity(config.activityLog, [
-      `Task updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
+      `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
     ]);
-    printStep(`Task updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
+    printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
   }
+
+  // Ensure test command is defined (via plan front matter, phase defaults, or per-phase test commands).
+  // If not, prompt once before we run any agent/tests.
+  const planNow = await readText(config.taskFile);
+  const parsedNow = planNow ? parseTask(planNow) : { frontMatter: {}, phases: [], phaseDefaults: {} };
+  const fmNow = parsedNow.frontMatter || {};
+  const pdNow = parsedNow.phaseDefaults || {};
+  const hasAnyTestCommand = Boolean(
+    String(fmNow.test_command || fmNow.testCommand || "").trim() ||
+      String(pdNow.test_command || pdNow.testCommand || "").trim() ||
+      (parsedNow.phases || []).some((p) => String((p && p.testCommand) || "").trim())
+  );
+
+  let promptedTest = false;
+  if (!hasAnyTestCommand && !config.dryRun) {
+    const entered = await promptLine('Enter test command (e.g. "npm test"; leave blank to disable tests): ');
+    if (!entered && !process.stdin.isTTY) {
+      throw new Error(
+        `Missing test_command. Set it in ${prettyPath(config.cwd, config.taskFile)} front matter (test_command or phase_defaults.test_command) before running.`
+      );
+    }
+    config.testCommand = String(entered || "").trim();
+    promptedTest = true;
+  }
+
+  // Persist key defaults into the plan front matter when missing (agent/test/branch).
+  const applyFrontMatterPatch = async (patchFn) => {
+    const text = await readText(config.taskFile);
+    if (!text) return;
+    const m = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+    let fm = {};
+    let body = text;
+    if (m) {
+      try {
+        fm = yaml.load(m[1]) || {};
+      } catch (_) {
+        fm = {};
+      }
+      body = text.slice(m[0].length);
+    }
+    const nextFm = (patchFn && patchFn(fm)) || fm;
+    const yamlText = yaml.dump(nextFm, { lineWidth: 120 }).trimEnd();
+    const normalizedBody = String(body || "").replace(/^\n+/, "");
+    const next = ["---", yamlText, "---", "", normalizedBody].join("\n");
+    if (next !== text) await writeText(config.taskFile, next);
+  };
+
+  await applyFrontMatterPatch((fm) => {
+    const next = { ...(fm || {}) };
+    if (!String(next.agent_command || next.agentCommand || "").trim()) {
+      next.agent_command = config.agentCommand || "";
+    }
+    if (promptedTest && !String(next.test_command || next.testCommand || "").trim()) {
+      next.test_command = config.testCommand || "";
+    }
+    const git = next.git && typeof next.git === "object" ? { ...next.git } : {};
+    if (config.gitBranch && !String(git.branch || git.git_branch || git.gitBranch || "").trim()) {
+      git.branch = config.gitBranch;
+    }
+    if (Object.keys(git).length) next.git = git;
+    return next;
+  });
 
   const start = Date.now();
   let iteration = 0;
@@ -901,10 +881,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     if (stop.stopRequested) {
       await appendActivity(config.activityLog, ["Stop requested. Exiting loop."]);
       printStep("Stop requested. Exiting loop.");
-      break;
-    }
-
-    if (command === "run") {
       break;
     }
 

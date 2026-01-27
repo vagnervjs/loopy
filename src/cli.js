@@ -37,9 +37,9 @@ function printHelp() {
     "  --prompt <text>          Seed prompt (inline) to generate/update the plan before looping",
     "  --prompt @<file>         Seed prompt from a file",
     "  --prompt -               Seed prompt from stdin",
-    `  --task <file>            Task doc (default: ${DEFAULTS.taskFile})`,
+    `  --plan <file>            Plan doc (default: ${DEFAULTS.taskFile})`,
     `  --prompt-out <file>      Prompt output file (default: ${DEFAULTS.promptFile})`,
-    "  --agent-cmd <command>    Agent command (overrides task front matter)",
+    "  --agent <command>        Agent command (overrides plan front matter)",
     "  --auto-apply             Skip confirmation prompts (apply changes)",
     "  --dry-run                Build prompt, skip agent execution",
     "  --help, -h               Show help",
@@ -65,13 +65,6 @@ function printHelp() {
     "  --backoff-ms <n>         Backoff between iterations (default: 5000)",
     "  --rotate-bytes <n>       Bytes threshold for rotation (default: 150000)",
     "",
-    "Legacy / deprecated (one release cycle):",
-    "  --task-prompt <text>     Deprecated alias for --prompt <text>",
-    "  --task-file <path>       Deprecated alias for --prompt @<path> (or --prompt -)",
-    "  --prompt-file <file>     Deprecated alias for --prompt-out <file>",
-    "  --prompt <file>          Deprecated alias for --prompt-out <file> (only when using legacy seed flags)",
-    "  loopy run [options]      Single iteration (legacy name)",
-    "",
     `Default commit template: ${DEFAULTS.gitCommitMessage}`,
     "",
   ];
@@ -90,7 +83,7 @@ async function runStatus(flags) {
     if (err && err.code === "ENOENT") {
       console.error(
         `No Loopy state found at ${path.relative(cwd, stateFile) || stateFile}.\n` +
-          "Run `loopy run` or `loopy loop` first."
+          "Run `loopy loop` first."
       );
       process.exitCode = 1;
       return;
@@ -164,7 +157,7 @@ async function runInit(flags) {
   const cwd = process.cwd();
   const loopyDir = resolveFrom(cwd, DEFAULTS.loopyDir);
   const hintsFile = resolveFrom(cwd, flags.hints || DEFAULTS.hintsFile);
-  const planFile = resolveFrom(cwd, flags.task || DEFAULTS.taskFile);
+  const planFile = resolveFrom(cwd, flags.plan || DEFAULTS.taskFile);
 
   await fs.mkdir(loopyDir, { recursive: true });
 
@@ -202,7 +195,7 @@ async function runInit(flags) {
       "    test_command: \"npm test\"",
       "---",
       "",
-      "# Task",
+      "# Plan",
       "",
       "## Phase: plan",
       "<!-- loopy:phase plan -->",
@@ -259,7 +252,13 @@ async function runCli(argv) {
     return;
   }
 
-  if (command !== "run" && command !== "loop") {
+  if (command === "run") {
+    console.error("Unsupported command. For a single iteration, use `loopy loop --max-iterations 1`.");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (command !== "loop") {
     console.error(`Unknown command: ${command}`);
     printHelp();
     process.exitCode = 1;

@@ -6,9 +6,9 @@ max_minutes: 60
 backoff_ms: 5000
 rotate_bytes: 150000
 git:
-  branch: "loopy/example-task"
+  branch: "loopy/example-plan"
   worktree: "../wt/loopy-example"
-  worktree_branch: "loopy/example-task"
+  worktree_branch: "loopy/example-plan"
   commit: true
   commit_message: "loopy: {change_type} {task_summary}"
 hooks:
@@ -16,6 +16,9 @@ hooks:
   postIteration: "echo post"
   onFailure: "echo failed"
 ---
-# Task
+# Plan
+
+> Intended location: `.loopy/LOOPY_PLAN.md`
 
 - [ ] Describe the change you want Loopy to implement.
+

@@ -94,18 +94,23 @@ async function initGitRepo(tmp, { withTask = true } = {}) {
     GIT_COMMITTER_EMAIL: "loopy-test@example.com",
   };
   await runCmd("git", ["init"], { cwd: tmp });
-  await fs.writeFile(path.join(tmp, ".gitignore"), ["/.loopy", "/PROMPT.md"].join("\n") + "\n", "utf8");
+  await fs.writeFile(
+    path.join(tmp, ".gitignore"),
+    ["/node_modules", "/.loopy/*", "!/.loopy/LOOPY_PLAN.md"].join("\n") + "\n",
+    "utf8"
+  );
 
   if (withTask) {
+    await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
     await fs.writeFile(
-      path.join(tmp, "LOOPY_PLAN.md"),
+      path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
       [
         "---",
         "max_iterations: 1",
         "backoff_ms: 0",
         "---",
         "",
-        "# Task",
+        "# Plan",
         "",
         "- [ ] do something",
         "",
@@ -185,43 +190,45 @@ test("`status` exits 1 with friendly message when state file is missing", async 
   assert.equal(code, 1);
   assert.equal(stdout, "");
   assert.match(stderr, /No Loopy state found/);
-  assert.match(stderr, /loopy run|loopy loop/);
+  assert.match(stderr, /loopy loop/);
 });
 
 test("no subcommand defaults to `loop`", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-default-loop-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
-    path.join(tmp, "LOOPY_PLAN.md"),
-    ["---", 'agent_command: "ignored"', "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do it", ""].join(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", 'agent_command: "ignored"', "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do it", ""].join(
       "\n"
     ),
     "utf8"
   );
   const agentCmd = 'node -e "process.exit(0)"';
   const { code, stdout, stderr } = await runNodeCli(
-    [CLI_PATH, "--dry-run", "--agent-cmd", agentCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
+    [CLI_PATH, "--dry-run", "--agent", agentCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
   assert.match(stdout, /Starting loop/);
-  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
+  const prompt = await fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8");
   assert.match(prompt, /Loopy Loop Prompt/);
 });
 
-test("`init` scaffolds `LOOPY_PLAN.md` and `.loopy/hints.md`", async () => {
+test("`init` scaffolds `.loopy/LOOPY_PLAN.md` and `.loopy/hints.md`", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-init-"));
   const { code, stderr } = await runNodeCli([CLI_PATH, "init"], { cwd: tmp });
   assert.equal(code, 0, stderr);
-  await fs.readFile(path.join(tmp, "LOOPY_PLAN.md"), "utf8");
+  await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   const hints = await fs.readFile(path.join(tmp, ".loopy", "hints.md"), "utf8");
   assert.match(hints, /Loopy Hints/);
 });
 
-test("`hint` appends and appears in next `PROMPT.md`", async () => {
+test("`hint` appends and appears in next `.loopy/PROMPT.md`", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-hint-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
-    path.join(tmp, "LOOPY_PLAN.md"),
-    ["---", 'agent_command: "ignored"', "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do it", ""].join(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", 'agent_command: "ignored"', "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do it", ""].join(
       "\n"
     ),
     "utf8"
@@ -237,49 +244,24 @@ test("`hint` appends and appears in next `PROMPT.md`", async () => {
 
   const agentCmd = 'node -e "process.exit(0)"';
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--agent-cmd", agentCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
+    [CLI_PATH, "loop", "--dry-run", "--agent", agentCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
 
-  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
+  const prompt = await fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8");
   assert.match(prompt, /## Hints/);
   assert.match(prompt, /Remember to handle edge cases\./);
 });
 
-test("back-compat: uses `LOOPY_TASK.md` with warning when `LOOPY_PLAN.md` is missing", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-legacy-task-"));
-  await fs.writeFile(
-    path.join(tmp, "LOOPY_TASK.md"),
-    ["---", 'agent_command: "ignored"', "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do it", ""].join(
-      "\n"
-    ),
-    "utf8"
-  );
-
-  const agentCmd = 'node -e "process.exit(0)"';
-  const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--agent-cmd", agentCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
-    { cwd: tmp }
-  );
-  assert.equal(code, 0);
-  assert.match(stderr, /LOOPY_TASK\.md.*deprecated/i);
-  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
-  assert.match(prompt, /## Task \(LOOPY_TASK\.md\)/);
-});
-
-test("legacy seed flags still work and warn", async () => {
+test("unsupported legacy seed flag exits 1", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-legacy-seed-"));
-  const plannerCmd =
-    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
-  const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--task-prompt", "build a thing", "--auto-apply", "--agent-cmd", plannerCmd, "--max-minutes", "1"],
-    { cwd: tmp }
-  );
-  assert.equal(code, 0);
-  assert.match(stderr, /deprecated/i);
-  const plan = await fs.readFile(path.join(tmp, "LOOPY_PLAN.md"), "utf8");
-  assert.match(plan, /## Phase:\s+build/);
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "loop", "--dry-run", "--task-prompt", "build a thing"], {
+    cwd: tmp,
+  });
+  assert.equal(code, 1);
+  assert.equal(stdout, "");
+  assert.match(stderr, /Unsupported legacy seed flag/i);
 });
 
 test("unknown command exits 1", async () => {
@@ -291,7 +273,8 @@ test("unknown command exits 1", async () => {
 
 test("loop stops on repeated failure signature guardrail", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-test-"));
-  const taskPath = path.join(tmp, "LOOPY_PLAN.md");
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  const taskPath = path.join(tmp, ".loopy", "LOOPY_PLAN.md");
   await fs.writeFile(
     taskPath,
     [
@@ -301,7 +284,7 @@ test("loop stops on repeated failure signature guardrail", async () => {
       "backoff_ms: 0",
       "---",
       "",
-      "# Task",
+      "# Plan",
       "",
       "- [ ] do something",
       "",
@@ -315,9 +298,7 @@ test("loop stops on repeated failure signature guardrail", async () => {
     [
       CLI_PATH,
       "loop",
-      "--task",
-      "LOOPY_PLAN.md",
-      "--agent-cmd",
+      "--agent",
       agentCmd,
       "--max-iterations",
       "10",
@@ -341,7 +322,7 @@ test("`--git-branch` creates/switches branch before iteration", async () => {
   const gitEnv = await initGitRepo(tmp);
 
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--git-branch", "loopy/test-branch"],
+    [CLI_PATH, "loop", "--dry-run", "--agent", 'node -e "process.exit(0)"', "--git-branch", "loopy/test-branch"],
     { cwd: tmp, env: gitEnv }
   );
   assert.equal(code, 0, stderr);
@@ -363,10 +344,8 @@ test("`--git-commit` commits changes after successful iteration", async () => {
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
-      "--task",
-      "LOOPY_PLAN.md",
-      "--agent-cmd",
+      "loop",
+      "--agent",
       agentCmd,
       "--git-commit",
       "--git-commit-message",
@@ -393,7 +372,17 @@ test("`--git-worktree` runs loop inside worktree path", async () => {
 
   const wt = path.join(tmp, "wt");
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--git-worktree", wt, "--git-worktree-branch", "loopy/wt-branch"],
+    [
+      CLI_PATH,
+      "loop",
+      "--dry-run",
+      "--agent",
+      'node -e "process.exit(0)"',
+      "--git-worktree",
+      wt,
+      "--git-worktree-branch",
+      "loopy/wt-branch",
+    ],
     { cwd: tmp, env: gitEnv }
   );
   assert.equal(code, 0, stderr);
@@ -402,17 +391,18 @@ test("`--git-worktree` runs loop inside worktree path", async () => {
   assert.equal(head.code, 0);
   assert.equal(head.stdout.trim(), "loopy/wt-branch");
 
-  const promptInWorktree = await fs.readFile(path.join(wt, "PROMPT.md"), "utf8");
+  const promptInWorktree = await fs.readFile(path.join(wt, ".loopy", "PROMPT.md"), "utf8");
   assert.match(promptInWorktree, /Loopy Loop Prompt/);
 
-  await assert.rejects(() => fs.readFile(path.join(tmp, "PROMPT.md"), "utf8"));
+  await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8"));
 });
 
 test("agent output streams to `.loopy/agent_stream.log`", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-log-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
-    path.join(tmp, "LOOPY_PLAN.md"),
-    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do something", ""].join(
       "\n"
     ),
     "utf8"
@@ -420,7 +410,7 @@ test("agent output streams to `.loopy/agent_stream.log`", async () => {
 
   const agentCmd = 'node -e "console.log(\\"out\\"); console.error(\\"err\\")"';
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--task", "LOOPY_PLAN.md", "--agent-cmd", agentCmd, "--max-minutes", "1"],
+    [CLI_PATH, "loop", "--agent", agentCmd, "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
@@ -431,11 +421,12 @@ test("agent output streams to `.loopy/agent_stream.log`", async () => {
   assert.match(streamLog, /\berr\b/);
 });
 
-test("prints step status lines to terminal during run", async () => {
+test("prints step status lines to terminal during loop", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-step-status-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
-    path.join(tmp, "LOOPY_PLAN.md"),
-    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do something", ""].join(
       "\n"
     ),
     "utf8"
@@ -443,7 +434,7 @@ test("prints step status lines to terminal during run", async () => {
 
   const agentCmd = 'node -e "process.exit(0)"';
   const { code, stdout, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--task", "LOOPY_PLAN.md", "--agent-cmd", agentCmd, "--max-minutes", "1"],
+    [CLI_PATH, "loop", "--agent", agentCmd, "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
@@ -454,9 +445,10 @@ test("prints step status lines to terminal during run", async () => {
 
 test("`--stream` mirrors agent output to terminal", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-terminal-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
-    path.join(tmp, "LOOPY_PLAN.md"),
-    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Task", "", "- [ ] do something", ""].join(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do something", ""].join(
       "\n"
     ),
     "utf8"
@@ -466,10 +458,8 @@ test("`--stream` mirrors agent output to terminal", async () => {
   const { code, stdout, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
-      "--task",
-      "LOOPY_PLAN.md",
-      "--agent-cmd",
+      "loop",
+      "--agent",
       agentCmd,
       "--stream",
       "--max-minutes",
@@ -492,11 +482,11 @@ test("auto-phase task creation requires confirmation without `--auto-apply`", as
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
+      "loop",
       "--dry-run",
       "--prompt",
       "build a thing",
-      "--agent-cmd",
+      "--agent",
       plannerCmd,
       "--max-minutes",
       "1",
@@ -506,7 +496,7 @@ test("auto-phase task creation requires confirmation without `--auto-apply`", as
 
   assert.equal(code, 1);
   assert.match(stderr, /Aborted|not created|confirmation/i);
-  await assert.rejects(() => fs.readFile(path.join(tmp, "LOOPY_PLAN.md"), "utf8"));
+  await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
 });
 
 test("`--prompt` + `--auto-apply` generates phased `LOOPY_PLAN.md` before looping", async () => {
@@ -518,12 +508,12 @@ test("`--prompt` + `--auto-apply` generates phased `LOOPY_PLAN.md` before loopin
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
+      "loop",
       "--dry-run",
       "--prompt",
       "build a thing",
       "--auto-apply",
-      "--agent-cmd",
+      "--agent",
       plannerCmd,
       "--max-minutes",
       "1",
@@ -532,7 +522,7 @@ test("`--prompt` + `--auto-apply` generates phased `LOOPY_PLAN.md` before loopin
   );
   assert.equal(code, 0, stderr);
 
-  const task = await fs.readFile(path.join(tmp, "LOOPY_PLAN.md"), "utf8");
+  const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
   assert.match(task, /## Phase:\s+build/);
   assert.match(task, /- \[ \]\s+do build/);
@@ -548,12 +538,12 @@ test("`--prompt @file` + `--auto-apply` generates phased `LOOPY_PLAN.md` before 
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
+      "loop",
       "--dry-run",
       "--prompt",
       "@task.txt",
       "--auto-apply",
-      "--agent-cmd",
+      "--agent",
       plannerCmd,
       "--max-minutes",
       "1",
@@ -562,13 +552,13 @@ test("`--prompt @file` + `--auto-apply` generates phased `LOOPY_PLAN.md` before 
   );
   assert.equal(code, 0, stderr);
 
-  const task = await fs.readFile(path.join(tmp, "LOOPY_PLAN.md"), "utf8");
+  const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
   assert.match(task, /## Phase:\s+build/);
   assert.match(task, /- \[ \]\s+do build/);
 });
 
-test("`--prompt @file` accepts markdown and includes it in `PROMPT.md`", async () => {
+test("`--prompt @file` accepts markdown and includes it in `.loopy/PROMPT.md`", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-md-"));
   await fs.writeFile(
     path.join(tmp, "PRD.md"),
@@ -584,12 +574,12 @@ test("`--prompt @file` accepts markdown and includes it in `PROMPT.md`", async (
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
+      "loop",
       "--dry-run",
       "--prompt",
       "@PRD.md",
       "--auto-apply",
-      "--agent-cmd",
+      "--agent",
       plannerCmd,
       "--max-minutes",
       "1",
@@ -598,15 +588,15 @@ test("`--prompt @file` accepts markdown and includes it in `PROMPT.md`", async (
   );
   assert.equal(code, 0, stderr);
 
-  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
-  assert.match(prompt, /## Task file \(PRD\)/);
+  const prompt = await fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8");
+  assert.match(prompt, /## Plan seed \(PRD\)/);
   assert.match(prompt, /# PRD: Build a thing/);
   assert.match(prompt, /## Requirements/);
   assert.match(prompt, /- Must support X/);
-  assert.match(prompt, /## Task \(LOOPY_PLAN\.md\)/);
+  assert.match(prompt, /## Plan \(LOOPY_PLAN\.md\)/);
 });
 
-test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `PROMPT.md`", async () => {
+test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `.loopy/PROMPT.md`", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-rst-"));
   await fs.writeFile(
     path.join(tmp, "spec.rst"),
@@ -620,12 +610,12 @@ test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `P
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
+      "loop",
       "--dry-run",
       "--prompt",
       "@spec.rst",
       "--auto-apply",
-      "--agent-cmd",
+      "--agent",
       plannerCmd,
       "--max-minutes",
       "1",
@@ -634,8 +624,8 @@ test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `P
   );
   assert.equal(code, 0, stderr);
 
-  const prompt = await fs.readFile(path.join(tmp, "PROMPT.md"), "utf8");
-  assert.match(prompt, /## Task file \(PRD\)/);
+  const prompt = await fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8");
+  assert.match(prompt, /## Plan seed \(PRD\)/);
   assert.match(prompt, /Loopy PRD/);
   assert.match(prompt, /\* requirement A/);
 });
@@ -649,12 +639,12 @@ test("`--prompt -` reads prompt from stdin", async () => {
   const { code, stderr } = await runNodeCliWithStdin(
     [
       CLI_PATH,
-      "run",
+      "loop",
       "--dry-run",
       "--prompt",
       "-",
       "--auto-apply",
-      "--agent-cmd",
+      "--agent",
       plannerCmd,
       "--max-minutes",
       "1",
@@ -663,7 +653,7 @@ test("`--prompt -` reads prompt from stdin", async () => {
   );
   assert.equal(code, 0, stderr);
 
-  const task = await fs.readFile(path.join(tmp, "LOOPY_PLAN.md"), "utf8");
+  const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /## Phase:\s+build/);
 });
 
@@ -672,7 +662,7 @@ test("`--prompt @file` errors on missing file", async () => {
   const plannerCmd = 'node -e "process.exit(0)"';
 
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--prompt", "@nope.txt", "--auto-apply", "--agent-cmd", plannerCmd, "--max-minutes", "1"],
+    [CLI_PATH, "loop", "--dry-run", "--prompt", "@nope.txt", "--auto-apply", "--agent", plannerCmd, "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 1);
@@ -685,7 +675,7 @@ test("`--prompt @file` errors on empty file", async () => {
   const plannerCmd = 'node -e "process.exit(0)"';
 
   const { code, stderr } = await runNodeCli(
-    [CLI_PATH, "run", "--dry-run", "--prompt", "@empty.txt", "--auto-apply", "--agent-cmd", plannerCmd, "--max-minutes", "1"],
+    [CLI_PATH, "loop", "--dry-run", "--prompt", "@empty.txt", "--auto-apply", "--agent", plannerCmd, "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 1);
@@ -704,12 +694,12 @@ test("`--prompt @file` errors on unreadable file", async () => {
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
+      "loop",
       "--dry-run",
       "--prompt",
       "@secret.md",
       "--auto-apply",
-      "--agent-cmd",
+      "--agent",
       plannerCmd,
       "--max-minutes",
       "1",
@@ -731,12 +721,12 @@ test("`--prompt @file` errors when path is a directory", async () => {
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
-      "run",
+      "loop",
       "--dry-run",
       "--prompt",
       "@seedDir",
       "--auto-apply",
-      "--agent-cmd",
+      "--agent",
       plannerCmd,
       "--max-minutes",
       "1",
@@ -747,37 +737,25 @@ test("`--prompt @file` errors when path is a directory", async () => {
   assert.match(stderr, /Seed prompt path is a directory/i);
 });
 
-test("`--prompt` + legacy `--task-file` errors (no precedence)", async () => {
+test("unsupported legacy seed flag errors even when `--prompt` is provided", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-task-file-both-"));
   await fs.writeFile(path.join(tmp, "task.txt"), "build a thing\n", "utf8");
-  const plannerCmd = 'node -e "process.exit(0)"';
+  const agentCmd = 'node -e "process.exit(0)"';
 
   const { code, stderr } = await runNodeCli(
-    [
-      CLI_PATH,
-      "run",
-      "--dry-run",
-      "--prompt",
-      "inline",
-      "--task-file",
-      "task.txt",
-      "--auto-apply",
-      "--agent-cmd",
-      plannerCmd,
-      "--max-minutes",
-      "1",
-    ],
+    [CLI_PATH, "loop", "--dry-run", "--prompt", "inline", "--task-file", "task.txt", "--agent", agentCmd, "--max-minutes", "1"],
     { cwd: tmp }
   );
   assert.equal(code, 1);
-  assert.match(stderr, /Provide only one of --prompt or/i);
+  assert.match(stderr, /Unsupported legacy seed flag/i);
 });
 
 test("phase progression: `--phase-only` stops after phase completion and records phase history", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-phase-only-"));
 
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
-    path.join(tmp, "LOOPY_PLAN.md"),
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
     [
       "---",
       "max_iterations: 5",
@@ -789,7 +767,7 @@ test("phase progression: `--phase-only` stops after phase completion and records
       "    title: Phase 2",
       "---",
       "",
-      "# Task",
+      "# Plan",
       "",
       "## Phase: phase1",
       "<!-- loopy:phase phase1 -->",
@@ -804,13 +782,13 @@ test("phase progression: `--phase-only` stops after phase completion and records
   );
 
   const agentCmd =
-    'node -e "const fs=require(\\\"fs\\\");let t=fs.readFileSync(\\\"LOOPY_PLAN.md\\\",\\\"utf8\\\");t=t.replace(/(## Phase: phase1[\\\\s\\\\S]*?- \\\\[) \\\\]/,(m,g1)=>g1+\\\"x]\\\");fs.writeFileSync(\\\"LOOPY_PLAN.md\\\",t);process.exit(0)"';
+    'node -e "const fs=require(\\\"fs\\\");let t=fs.readFileSync(\\\".loopy/LOOPY_PLAN.md\\\",\\\"utf8\\\");t=t.replace(/(## Phase: phase1[\\\\s\\\\S]*?- \\\\[) \\\\]/,(m,g1)=>g1+\\\"x]\\\");fs.writeFileSync(\\\".loopy/LOOPY_PLAN.md\\\",t);process.exit(0)"';
 
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
       "loop",
-      "--agent-cmd",
+      "--agent",
       agentCmd,
       "--phase-only",
       "--max-iterations",

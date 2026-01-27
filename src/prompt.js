@@ -61,10 +61,10 @@ function formatPrompt({
   taskFilePath,
   hintsText,
 }) {
-  const taskLabel = taskFilePath ? path.basename(String(taskFilePath)) : "task doc";
+  const planLabel = taskFilePath ? path.basename(String(taskFilePath)) : "plan doc";
 
   const seedLabel = taskSeedText
-    ? `## Task file (PRD)${taskSeedSource ? ` (${taskSeedSource})` : ""}`
+    ? `## Plan seed (PRD)${taskSeedSource ? ` (${taskSeedSource})` : ""}`
     : "";
 
   const rawHints = String(hintsText || "").trimEnd();
@@ -92,7 +92,7 @@ function formatPrompt({
     normalizedHints ? "## Hints" : "",
     normalizedHints ? normalizedHints : "",
     normalizedHints ? "" : "",
-    `## Task (${taskLabel})`,
+    `## Plan (${planLabel})`,
     taskText.trimEnd(),
     "",
     "## Guardrails",
@@ -109,8 +109,8 @@ function formatPrompt({
   lines.push(
     "",
     "## Instructions",
-    `- Follow the task checklist in ${taskLabel}.`,
-    "- Update task checkboxes as you complete items.",
+    `- Follow the plan checklist in ${planLabel}.`,
+    "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",
     ""

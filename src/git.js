@@ -101,7 +101,15 @@ async function gitCommitIfNeeded(
   const hasChanges = porcelain
     .split(/\r?\n/)
     .filter(Boolean)
-    .some((line) => !line.startsWith("?? .loopy") && !line.startsWith("?? PROMPT.md"));
+    .some((line) => {
+      const file = line.slice(3);
+      if (file === ".loopy/LOOPY_PLAN.md") return true;
+      if (line.startsWith("?? .loopy/")) return false;
+      if (line.startsWith("?? .loopy")) return false;
+      if (line.startsWith("?? PROMPT.md")) return false;
+      if (line.startsWith("?? .loopy/PROMPT.md")) return false;
+      return true;
+    });
 
   if (!hasChanges) return { committed: false, reason: "no-changes" };
 
