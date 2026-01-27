@@ -203,4 +203,4 @@ phases:
 ## Phase: verify
 <!-- loopy:phase verify -->
 
-- [ ] Run tests: npm test
+- [x] Run tests: npm test
