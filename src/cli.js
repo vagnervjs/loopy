@@ -63,7 +63,7 @@ function printHelp() {
     },
     {
       label: 'hint "<text>"',
-      desc: "Save a hint for the next prompt\nAppends to `.loopy/hints.md` (included in the next prompt under \"Hints\")",
+      desc: "Save a hint for the next prompt\nAppends to `.loopy/hints.md` (included in the next prompt under \"Hints\")\nUse --reset to clear all hints, --pop to remove the last hint",
     },
     { label: "init", desc: "Initialize `.loopy/` files if missing\nCreates `.loopy/LOOPY_PLAN.md` and `.loopy/hints.md`" },
     { label: "help", desc: "Show help" },

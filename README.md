@@ -74,6 +74,18 @@ Add a mid-loop hint (included in the next generated `.loopy/PROMPT.md`):
 loopy hint "Focus on fixing the failing test first."
 ```
 
+Remove the last hint (pop):
+
+```bash
+loopy hint --pop
+```
+
+Clear all hints (reset):
+
+```bash
+loopy hint --reset
+```
+
 Show help:
 
 ```bash
