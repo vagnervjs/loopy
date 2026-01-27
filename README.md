@@ -257,12 +257,12 @@ For live agent output (stdout/stderr), tail the stream log:
 tail -f .loopy/agent_stream.log
 ```
 
-## Git integration (optional)
-Loopy can optionally:
+## Git integration (default-on in git repos)
+Loopy can:
 
-- create/switch a branch before running
+- create/switch a branch before running (prompts by default when in a git repo)
 - create/switch a worktree before running (then run the loop inside that worktree)
-- commit changes after a successful iteration
+- commit changes after a successful iteration (default on; disable with `--git-commit=false`)
 
 CLI flags:
 ```bash
@@ -298,7 +298,8 @@ git:
 Safety notes:
 - Loopy never pushes to remotes.
 - If `--git-worktree` is set without a branch, Loopy creates a detached HEAD worktree (`git worktree add --detach ...`).
-- If you do not set `--git-branch` (or `git.branch` in the plan) and you are in a git repo, Loopy will synthesize a default `loopy/<slug>` branch (based on the seed prompt or the current directory) unless you explicitly set `--git-worktree-branch`.
+- If you do not set `--git-branch` (or `git.branch` in the plan) and you are in a git repo, Loopy prompts for a branch name when starting a new loop.
+- Non-interactive runs must pass `--git-branch` (or set `git.branch`) to avoid the branch prompt.
 - If `--git-branch` is set, Loopy refuses to switch branches when there are uncommitted changes.
 - With `--continue`, Loopy does not switch branches/worktrees (resume-only), so staged/dirty files will not block resuming.
 - Auto-commit runs `git add -A` and then `git commit -m "<rendered message>"`.

@@ -105,8 +105,14 @@ function printHelp() {
     Git: [
       { label: "--git-worktree <path>", desc: "Use/create git worktree at path (optional)" },
       { label: "--git-worktree-branch <name>", desc: "Branch for worktree add/checkout (optional)" },
-      { label: "--git-branch <name>", desc: "Create/checkout branch before iteration (optional)" },
-      { label: "--git-commit", desc: "Commit changes after successful iteration (optional)" },
+      {
+        label: "--git-branch <name>",
+        desc: "Create/checkout branch before iteration (default: prompt when in git repo)",
+      },
+      {
+        label: "--git-commit",
+        desc: "Commit changes after successful iteration (default: true; disable with --git-commit=false)",
+      },
       {
         label: "--git-commit-message <template>",
         desc: `Commit message template (default: ${DEFAULTS.gitCommitMessage})`,

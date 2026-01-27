@@ -96,7 +96,15 @@ async function gitCommitIfNeeded(
 ) {
   if (!config.gitCommit) return { committed: false, reason: "disabled" };
 
-  await ensureGitRepo(config.cwd);
+  try {
+    await ensureGitRepo(config.cwd);
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    if (/not a git repository/i.test(msg)) {
+      return { committed: false, reason: "not-git-repo" };
+    }
+    throw err;
+  }
   const porcelain = await gitStatusPorcelain(config.cwd);
   const hasChanges = porcelain
     .split(/\r?\n/)

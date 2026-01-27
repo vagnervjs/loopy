@@ -21,7 +21,7 @@ test("`--git-branch` creates/switches branch before iteration", async () => {
   assert.equal(head.stdout.trim(), "loopy/test-branch");
 });
 
-test("`--git-commit` commits changes after successful iteration", async () => {
+test("default git commit commits changes after successful iteration", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-git-commit-"));
   const gitEnv = await initGitRepo(tmp);
 
@@ -35,7 +35,8 @@ test("`--git-commit` commits changes after successful iteration", async () => {
       CLI_PATH,
       "--agent",
       agentCmd,
-      "--git-commit",
+      "--git-branch",
+      "loopy/test-commit",
       "--git-commit-message",
       "it {iteration} {status}",
       "--max-minutes",
@@ -52,6 +53,19 @@ test("`--git-commit` commits changes after successful iteration", async () => {
   const subject = await runCmd("git", ["log", "-1", "--pretty=%s"], { cwd: tmp });
   assert.equal(subject.code, 0);
   assert.match(subject.stdout.trim(), /^it 1 success$/);
+});
+
+test("missing git branch name fails without a TTY", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-git-branch-tty-"));
+  const gitEnv = await initGitRepo(tmp);
+
+  const { code, stderr } = await runNodeCli(
+    [CLI_PATH, "--dry-run", "--agent", 'node -e "process.exit(0)"', "--max-minutes", "1"],
+    { cwd: tmp, env: gitEnv }
+  );
+  assert.equal(code, 1);
+  assert.match(stderr, /git branch/i);
+  assert.match(stderr, /--git-branch/i);
 });
 
 test("`--git-worktree` runs loop inside worktree path", async () => {
