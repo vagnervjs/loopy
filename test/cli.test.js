@@ -132,6 +132,12 @@ test("`--help` prints usage and exits 0", async () => {
   assert.match(stdout, /Usage:/);
   assert.match(stdout, /\bloopy help\b/);
   assert.match(stdout, /--continue\b/);
+  assert.match(
+    stdout,
+    /--git-commit-message <template> Commit message template \(default: loopy: \{change_type\} \{task_summary\}\)/
+  );
+  assert.ok(!/Default commit template:/i.test(stdout));
+  assert.ok(!/default shown below/i.test(stdout));
 });
 
 test("`--version` prints version and exits 0", async () => {
@@ -145,6 +151,12 @@ test("`help` command prints usage and exits 0", async () => {
   const { code, stdout } = await runNodeCli([CLI_PATH, "help"]);
   assert.equal(code, 0);
   assert.match(stdout, /Loopy/);
+  assert.match(
+    stdout,
+    /--git-commit-message <template> Commit message template \(default: loopy: \{change_type\} \{task_summary\}\)/
+  );
+  assert.ok(!/Default commit template:/i.test(stdout));
+  assert.ok(!/default shown below/i.test(stdout));
 });
 
 test("`status` prints summary from `.loopy/state.json`", async () => {

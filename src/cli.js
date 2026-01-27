@@ -73,14 +73,12 @@ function printHelp() {
     "    --git-worktree-branch <name>   Branch for worktree add/checkout (optional)",
     "    --git-branch <name>      Create/checkout branch before iteration (optional)",
     "    --git-commit             Commit changes after successful iteration (optional)",
-    "    --git-commit-message <template> Commit message template (default shown below)",
+    `    --git-commit-message <template> Commit message template (default: ${DEFAULTS.gitCommitMessage})`,
     "  Limits:",
     "    --max-iterations <n>     Max iterations (default: 50)",
     "    --max-minutes <n>        Max wall time in minutes (default: 120)",
     "    --backoff-ms <n>         Backoff between iterations (default: 5000)",
     "    --rotate-bytes <n>       Bytes threshold for rotation (default: 150000)",
-    "",
-    `Default commit template: ${DEFAULTS.gitCommitMessage}`,
     "",
   ];
   console.log(lines.join("\n"));
