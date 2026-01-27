@@ -4,7 +4,7 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 
-const { CLI_PATH, runNodeCli } = require("./cli-helpers");
+const { CLI_PATH, runNodeCli, initGitRepo } = require("./cli-helpers");
 
 test("no subcommand runs the default loop", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-default-loop-"));
@@ -231,4 +231,82 @@ test("phase progression: `--phase-only` stops after phase completion and records
 
   const progress = await fs.readFile(path.join(tmp, ".loopy", "progress.md"), "utf8");
   assert.match(progress, /Current phase:\s+phase1/);
+});
+
+test("archives completed plan to completed_plans on loop completion", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-archive-plan-"));
+  const gitEnv = await initGitRepo(tmp);
+
+  const agentCmd =
+    `node -e "const fs=require('fs');let t=fs.readFileSync('.loopy/LOOPY_PLAN.md','utf8');t=t.replace(/- \\\\[ \\\\]/, '- [x]');fs.writeFileSync('.loopy/LOOPY_PLAN.md',t);"`;
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--agent",
+      agentCmd,
+      "--git-branch",
+      "loopy/archive-plan",
+      "--git-commit=false",
+      "--max-iterations",
+      "1",
+      "--backoff-ms",
+      "0",
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp, env: gitEnv }
+  );
+  assert.equal(code, 0, stderr);
+
+  await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
+
+  const archived = await fs.readFile(
+    path.join(tmp, ".loopy", "completed_plans", "archive-plan.md"),
+    "utf8"
+  );
+  assert.match(archived, /- \[x\]/i);
+});
+
+test("creates a fresh plan on the next loop after archiving", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-archive-regen-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do it", ""].join("\n"),
+    "utf8"
+  );
+
+  const completeCmd =
+    `node -e "const fs=require('fs');let t=fs.readFileSync('.loopy/LOOPY_PLAN.md','utf8');t=t.replace(/- \\\\[ \\\\]/, '- [x]');fs.writeFileSync('.loopy/LOOPY_PLAN.md',t);"`;
+  const { code, stderr } = await runNodeCli(
+    [CLI_PATH, "--agent", completeCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
+  const archived = await fs.readFile(
+    path.join(tmp, ".loopy", "completed_plans", "completed-plan.md"),
+    "utf8"
+  );
+  assert.match(archived, /- \[x\]/i);
+
+  const { code: regenCode, stderr: regenErr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--dry-run",
+      "--prompt",
+      "new work",
+      "--auto-phase=false",
+      "--agent",
+      'node -e "process.exit(0)"',
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(regenCode, 0, regenErr);
+
+  const newPlan = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
+  assert.match(newPlan, /- \[ \] new work/);
 });

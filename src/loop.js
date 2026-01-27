@@ -230,6 +230,65 @@ function computeNextPhaseId(parsedTask, currentPhaseId, config) {
   return "";
 }
 
+function stripLoopyPrefix(branch) {
+  const raw = String(branch || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("loopy/")) return raw.slice("loopy/".length);
+  if (raw.startsWith("loopy-")) return raw.slice("loopy-".length);
+  if (raw.startsWith("loopy_")) return raw.slice("loopy_".length);
+  return raw;
+}
+
+function archivePlanFileName(branch, taskFile) {
+  const ext = path.extname(taskFile) || ".md";
+  const base = stripLoopyPrefix(branch) || "completed-plan";
+  if (ext && base.toLowerCase().endsWith(ext.toLowerCase())) return base;
+  return `${base}${ext}`;
+}
+
+async function archiveCompletedPlan(config) {
+  const taskPath = config.taskFile;
+  if (!taskPath) return { archived: false, reason: "missing-path" };
+
+  const taskText = await readText(taskPath);
+  if (!taskText) return { archived: false, reason: "missing-plan" };
+
+  let parsed = null;
+  try {
+    parsed = parseTask(taskText);
+  } catch (_) {
+    return { archived: false, reason: "parse-failed" };
+  }
+  if (!parsed.allChecked) return { archived: false, reason: "incomplete" };
+
+  const fm = parsed.frontMatter || {};
+  const fmGit = fm.git && typeof fm.git === "object" ? fm.git : {};
+  const branch =
+    String(config.gitBranch || "").trim() ||
+    String(fm.git_branch || fm.gitBranch || "").trim() ||
+    String(fmGit.branch || fmGit.git_branch || fmGit.gitBranch || "").trim();
+
+  const fileName = archivePlanFileName(branch, taskPath);
+  const baseDir = config.loopyDir || path.dirname(taskPath);
+  const archivePath = path.join(baseDir, "completed_plans", fileName);
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+
+  try {
+    await fs.rename(taskPath, archivePath);
+  } catch (err) {
+    if (err && err.code === "EXDEV") {
+      await fs.copyFile(taskPath, archivePath);
+      await fs.unlink(taskPath);
+    } else if (err && err.code === "ENOENT") {
+      return { archived: false, reason: "missing-plan" };
+    } else {
+      throw err;
+    }
+  }
+
+  return { archived: true, archivePath };
+}
+
 async function ensureTaskBeforeLoop(config, loadedSeed) {
   const cwd = config.cwd;
   const taskPath = config.taskFile;
@@ -1058,6 +1117,13 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     await writeText(config.stateFile, JSON.stringify(stoppedState, null, 2) + "\n");
     await appendActivity(config.activityLog, ["Final status: stopped."]);
     printStep("Final status: stopped.");
+  }
+
+  const archiveResult = await archiveCompletedPlan(config);
+  if (archiveResult.archived) {
+    const prettyArchive = prettyPath(config.cwd, archiveResult.archivePath);
+    await appendActivity(config.activityLog, [`Plan archived: ${prettyArchive}`]);
+    printStep(`Plan archived: ${prettyArchive}`);
   }
 }
 
