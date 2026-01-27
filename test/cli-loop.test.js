@@ -233,7 +233,7 @@ test("phase progression: `--phase-only` stops after phase completion and records
   assert.match(progress, /Current phase:\s+phase1/);
 });
 
-test("archives completed plan to completed_plans on loop completion", async () => {
+test("archives completed loop files to completed_loops/<branch> on loop completion", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-archive-plan-"));
   const gitEnv = await initGitRepo(tmp);
 
@@ -259,9 +259,10 @@ test("archives completed plan to completed_plans on loop completion", async () =
   assert.equal(code, 0, stderr);
 
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
+  await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
 
   const archived = await fs.readFile(
-    path.join(tmp, ".loopy", "completed_plans", "archive-plan.md"),
+    path.join(tmp, ".loopy", "completed_loops", "archive-plan", "LOOPY_PLAN.md"),
     "utf8"
   );
   assert.match(archived, /- \[x\]/i);
@@ -286,7 +287,7 @@ test("creates a fresh plan on the next loop after archiving", async () => {
 
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
   const archived = await fs.readFile(
-    path.join(tmp, ".loopy", "completed_plans", "completed-plan.md"),
+    path.join(tmp, ".loopy", "completed_loops", "completed-loop", "LOOPY_PLAN.md"),
     "utf8"
   );
   assert.match(archived, /- \[x\]/i);
