@@ -81,6 +81,8 @@ function mergeConfig(flags, frontMatter) {
   const fm = frontMatter || {};
   const hooks = fm.hooks || {};
   const git = fm.git || {};
+  const taskPromptFlag = flags["task-prompt"];
+  const taskFileFlag = flags["task-file"] ?? flags["task-prompt-file"];
   return {
     cwd: process.cwd(),
     taskFile: flags.task || DEFAULTS.taskFile,
@@ -93,7 +95,8 @@ function mergeConfig(flags, frontMatter) {
     stateFile: flags.state || DEFAULTS.stateFile,
     agentCommand: normalizeCommand(flags["agent-cmd"] || fm.agent_command || fm.agentCommand || ""),
     testCommand: normalizeCommand(fm.test_command || fm.testCommand || ""),
-    taskPrompt: String(flags["task-prompt"] || ""),
+    taskPrompt: taskPromptFlag === true ? "" : String(taskPromptFlag || ""),
+    taskPromptFile: taskFileFlag === true ? "" : String(taskFileFlag || ""),
     autoApply: coerceBoolean(flags["auto-apply"], false),
     autoPhase: coerceBoolean(
       flags["auto-phase"] ?? fm.auto_phase ?? fm.autoPhase,

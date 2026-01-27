@@ -40,6 +40,67 @@ function parseSkipPhaseList(value) {
     .filter(Boolean);
 }
 
+async function readStdinText() {
+  try {
+    if (process.stdin.readableEnded) return "";
+  } catch (_) {
+    // ignore
+  }
+  return await new Promise((resolve, reject) => {
+    let data = "";
+    try {
+      process.stdin.setEncoding("utf8");
+    } catch (_) {
+      // ignore
+    }
+    process.stdin.on("data", (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on("error", reject);
+    process.stdin.on("end", () => resolve(data));
+  });
+}
+
+async function loadTaskSeed(config) {
+  const inline = String(config.taskPrompt || "").trim();
+  const fileArg = String(config.taskPromptFile || "").trim();
+
+  if (inline && fileArg) {
+    throw new Error("Provide only one of --task-prompt or --task-file.");
+  }
+
+  if (fileArg) {
+    if (fileArg === "-") {
+      const raw = await readStdinText();
+      const seed = String(raw || "").trim();
+      if (!seed) throw new Error("Task prompt from --task-file '-' (stdin) is empty.");
+      return { seed, source: "--task-file" };
+    }
+
+    const abs = resolveFrom(config.cwd, fileArg);
+    let raw = "";
+    try {
+      raw = await fs.readFile(abs, "utf8");
+    } catch (err) {
+      if (err && err.code === "ENOENT") {
+        throw new Error(`Task prompt file not found: ${prettyPath(config.cwd, abs)}`);
+      }
+      if (err && err.code === "EACCES") {
+        throw new Error(`Permission denied reading task prompt file: ${prettyPath(config.cwd, abs)}`);
+      }
+      throw new Error(
+        `Failed to read task prompt file ${prettyPath(config.cwd, abs)}: ${err && err.message ? err.message : String(err)}`
+      );
+    }
+    const seed = String(raw || "").trim();
+    if (!seed) throw new Error(`Task prompt file is empty: ${prettyPath(config.cwd, abs)}`);
+    return { seed, source: "--task-file" };
+  }
+
+  if (inline) return { seed: inline, source: "--task-prompt" };
+  return { seed: "", source: "" };
+}
+
 function pickCurrentPhaseId(parsedTask, state, config) {
   const phases = (parsedTask && parsedTask.phases) || [];
   if (!phases.length) return "";
@@ -107,13 +168,14 @@ async function ensureTaskBeforeLoop(config) {
 
   let existing = await readText(taskPath);
   if (!existing) {
-    let seed = String(config.taskPrompt || "").trim();
+    const loaded = await loadTaskSeed(config);
+    let seed = loaded.seed;
     if (!seed) {
       seed = await promptLine("Enter a short task description for LOOPY_TASK.md: ");
     }
     if (!seed) {
       throw new Error(
-        `Missing ${prettyPath(cwd, taskPath)} and no task prompt provided (use --task-prompt or run in a TTY).`
+        `Missing ${prettyPath(cwd, taskPath)} and no task prompt provided (use --task-prompt/--task-file or run in a TTY).`
       );
     }
 
@@ -178,8 +240,9 @@ async function ensureTaskBeforeLoop(config) {
   }
 
   // User-provided prompt explicitly requests an update.
-  if (String(config.taskPrompt || "").trim()) {
-    const seed = String(config.taskPrompt).trim();
+  const loaded = await loadTaskSeed(config);
+  if (loaded.seed) {
+    const seed = loaded.seed;
     const parsed = parseTask(existing);
     const fm = parsed.frontMatter || {};
 
@@ -212,7 +275,7 @@ async function ensureTaskBeforeLoop(config) {
     }
 
     if (nextText !== existing) {
-      const ok = await confirm(`Update ${prettyPath(cwd, taskPath)} from --task-prompt?`, {
+      const ok = await confirm(`Update ${prettyPath(cwd, taskPath)} from ${loaded.source}?`, {
         autoApply: config.autoApply,
         defaultYes: false,
       });
@@ -602,6 +665,24 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const taskText = await readText(initialTaskPath);
   const parsedTask = taskText ? parseTask(taskText) : { frontMatter: {} };
   let config = mergeConfig(flags, parsedTask.frontMatter);
+
+  if (Object.prototype.hasOwnProperty.call(flags, "task-prompt") && flags["task-prompt"] !== true) {
+    const v = String(flags["task-prompt"] || "").trim();
+    if (!v) throw new Error("Missing value for --task-prompt (expected text).");
+  }
+  if (flags["task-prompt"] === true) {
+    throw new Error("Missing value for --task-prompt (expected text).");
+  }
+  if (
+    (Object.prototype.hasOwnProperty.call(flags, "task-file") && flags["task-file"] !== true) ||
+    (Object.prototype.hasOwnProperty.call(flags, "task-prompt-file") && flags["task-prompt-file"] !== true)
+  ) {
+    const raw = String((flags["task-file"] ?? flags["task-prompt-file"]) || "").trim();
+    if (!raw) throw new Error("Missing value for --task-file (expected a file path or '-').");
+  }
+  if (flags["task-file"] === true || flags["task-prompt-file"] === true) {
+    throw new Error("Missing value for --task-file (expected a file path or '-').");
+  }
 
   printStep(
     `Starting ${command} (max iterations: ${config.maxIterations}, max minutes: ${config.maxMinutes}, backoff ms: ${config.backoffMs})`

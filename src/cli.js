@@ -34,6 +34,7 @@ function printHelp() {
     "  --task <file>           Task file (default: LOOPY_TASK.md)",
     "  --prompt <file>         Prompt file (default: PROMPT.md)",
     "  --task-prompt <text>    Generate/update LOOPY_TASK.md from text before looping",
+    "  --task-file <path>      Generate/update LOOPY_TASK.md from prompt read from file (or '-' for stdin)",
     "  --progress <file>       Progress file (default: .loopy/progress.md)",
     "  --guardrails <file>     Guardrails file (default: .loopy/guardrails.md)",
     "  --activity-log <file>   Activity log (default: .loopy/activity.log)",

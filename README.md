@@ -30,6 +30,12 @@ Generate or update `LOOPY_TASK.md` from a simple prompt, then start looping:
 loopy loop --agent-cmd "cursor-agent" --task-prompt "Add OAuth login to the app" --auto-apply
 ```
 
+Or read the task prompt from a file (or stdin via `-`):
+
+```bash
+loopy loop --agent-cmd "cursor-agent" --task-file ./task.txt --auto-apply
+```
+
 By default, Loopy will try to auto-phase (create `phases` + per-phase checklists) when a task file has no phases.
 To disable auto-phase and use the legacy “single checklist” behavior:
 
@@ -161,6 +167,8 @@ Notes:
 - `--task <file>` task file path (default: `LOOPY_TASK.md`)
 - `--prompt <file>` prompt output file (default: `PROMPT.md`)
 - `--task-prompt <text>` generate/update `LOOPY_TASK.md` from text before looping
+- `--task-file <path>` generate/update `LOOPY_TASK.md` from prompt read from file (or `-` for stdin)
+- Note: `--task-prompt` and `--task-file` are mutually exclusive.
 - `--progress <file>` progress file (default: `.loopy/progress.md`)
 - `--guardrails <file>` guardrails file (default: `.loopy/guardrails.md`)
 - `--activity-log <file>` activity log (default: `.loopy/activity.log`)
