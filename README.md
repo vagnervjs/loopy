@@ -223,6 +223,7 @@ Notes:
 - `--version` print version and exit
 - `--plan <file>` plan doc path (default: `.loopy/LOOPY_PLAN.md`)
 - `--prompt <text|@file|->` seed prompt to generate/update the plan doc before looping
+- `--continue` resume from existing `.loopy/state.json` (requires an existing plan + state; skips git switching so staged files don't block)
 - `--prompt-out <file>` prompt output file (default: `.loopy/PROMPT.md`)
 - `--progress <file>` progress file (default: `.loopy/progress.md`)
 - `--guardrails <file>` guardrails file (default: `.loopy/guardrails.md`)
@@ -330,6 +331,7 @@ git:
 - Loopy **never pushes** to remotes.
 - If `--git-worktree` is set without a branch, Loopy creates a **detached HEAD** worktree (`git worktree add --detach ...`).
 - If `--git-branch` is set, Loopy refuses to switch branches when there are **uncommitted changes**.
+- With `--continue`, Loopy **does not** switch branches/worktrees (resume-only), so staged/dirty files won't block resuming.
 - Auto-commit runs `git add -A` and then `git commit -m "<rendered message>"`.
 - Git commits require an author/committer identity (via repo config or environment variables).
 

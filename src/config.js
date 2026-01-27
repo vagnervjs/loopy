@@ -91,6 +91,7 @@ function mergeConfig(flags, frontMatter) {
   const gitWorktreeBranchFlag = flags["git-worktree-branch"];
   return {
     cwd: process.cwd(),
+    continue: coerceBoolean(flags.continue, false),
     // NOTE: `--plan` is the plan doc path. (Internally we still call it `taskFile`.)
     taskFile: flags.plan || DEFAULTS.taskFile,
     // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.

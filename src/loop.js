@@ -759,6 +759,11 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const parsedTask = planText ? parseTask(planText) : { frontMatter: {} };
   let config = mergeConfig(flags, parsedTask.frontMatter);
 
+  // `--continue` is a "resume only" mode: don't accept seed prompt updates here.
+  if (config.continue && hasOwn(flags, "prompt")) {
+    throw new Error("`--continue` cannot be used with `--prompt`. Omit `--prompt` to resume, or run without `--continue`.");
+  }
+
   // Validate seed prompt flag early.
   if (hasOwn(flags, "prompt")) {
     if (flags.prompt === true) {
@@ -788,7 +793,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   // Default git branch when missing (only when running inside a git repo).
-  if (!config.gitBranch) {
+  if (!config.continue && !config.gitBranch) {
     let isGitRepo = false;
     try {
       await fs.stat(path.join(baseCwd, ".git"));
@@ -818,13 +823,34 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   // Optional git workspace setup (worktree / branch). This is done once, before the loop.
   let effectiveCwd = baseCwd;
   if (config.gitWorktree) {
-    printStep(
-      `git worktree: ensure ${prettyPath(baseCwd, resolveFrom(baseCwd, config.gitWorktree))}` +
-        (config.gitWorktreeBranch ? ` (branch: ${config.gitWorktreeBranch})` : " (detached)"),
-      {}
-    );
-    effectiveCwd = await ensureGitWorktree(baseCwd, config.gitWorktree, config.gitWorktreeBranch);
-    printStep(`git worktree: using ${prettyPath(baseCwd, effectiveCwd)}`, {});
+    const worktreeAbs = resolveFrom(baseCwd, config.gitWorktree);
+    if (config.continue) {
+      // Resume mode: use existing worktree path only (don't create/switch).
+      try {
+        const stat = await fs.stat(worktreeAbs);
+        if (!stat.isDirectory()) {
+          throw new Error(`Worktree path exists but is not a directory: ${worktreeAbs}`);
+        }
+      } catch (err) {
+        if (err && err.code === "ENOENT") {
+          throw new Error(
+            `Cannot continue: git worktree path not found: ${prettyPath(baseCwd, worktreeAbs)} (run without --continue to create it)`
+          );
+        }
+        throw err;
+      }
+      effectiveCwd = worktreeAbs;
+      await ensureGitRepo(effectiveCwd);
+      printStep(`git worktree: using existing ${prettyPath(baseCwd, effectiveCwd)} (--continue)`, {});
+    } else {
+      printStep(
+        `git worktree: ensure ${prettyPath(baseCwd, worktreeAbs)}` +
+          (config.gitWorktreeBranch ? ` (branch: ${config.gitWorktreeBranch})` : " (detached)"),
+        {}
+      );
+      effectiveCwd = await ensureGitWorktree(baseCwd, config.gitWorktree, config.gitWorktreeBranch);
+      printStep(`git worktree: using ${prettyPath(baseCwd, effectiveCwd)}`, {});
+    }
   }
   // If a worktree branch was specified, don't switch away from it via any default/implicit `gitBranch`.
   // Only honor `gitBranch` when the user explicitly provided it (flag or plan front matter).
@@ -839,27 +865,71 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     config.gitBranch = "";
   }
   if (config.gitBranch) {
-    printStep(`git branch: switch to ${config.gitBranch}`, {});
-    await ensureGitRepo(effectiveCwd);
-    await gitSwitchBranch(effectiveCwd, config.gitBranch);
-    printStep(`git branch: now on ${config.gitBranch}`, {});
+    if (config.continue) {
+      printStep(`git branch: skipping switch to ${config.gitBranch} (--continue)`, {});
+    } else {
+      printStep(`git branch: switch to ${config.gitBranch}`, {});
+      await ensureGitRepo(effectiveCwd);
+      await gitSwitchBranch(effectiveCwd, config.gitBranch);
+      printStep(`git branch: now on ${config.gitBranch}`, {});
+    }
   }
 
   config = materializeConfigPaths(config, effectiveCwd);
   if (onActivityLog) onActivityLog(config.activityLog);
 
-  // Load the plan seed once so stdin ('-') works and prompts can reuse the content.
-  const loadedSeed = await loadTaskSeed(config);
-  config.taskSeedText = loadedSeed.seed || "";
-  config.taskSeedSource = loadedSeed.source || "";
+  if (config.continue) {
+    // Resume mode: require existing plan + state, but do not create/update the plan doc.
+    const taskTextNow = await readText(config.taskFile);
+    if (!taskTextNow) {
+      throw new Error(
+        `Cannot continue: missing ${prettyPath(config.cwd, config.taskFile)}. Run \`loopy init\` or run without --continue and provide --prompt.`
+      );
+    }
 
-  // Plan initialization / auto-phase planning happens once, before looping.
-  const ensured = await ensureTaskBeforeLoop(config, loadedSeed);
-  if (ensured.rewritten) {
-    await appendActivity(config.activityLog, [
-      `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
-    ]);
-    printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
+    let stateText = "";
+    try {
+      stateText = await fs.readFile(config.stateFile, "utf8");
+    } catch (err) {
+      if (err && err.code === "ENOENT") {
+        throw new Error(
+          `No Loopy state found at ${prettyPath(config.cwd, config.stateFile)}.\nRun \`loopy loop\` first (without --continue).`
+        );
+      }
+      throw err;
+    }
+
+    let resumeState = null;
+    try {
+      resumeState = JSON.parse(stateText);
+    } catch (err) {
+      throw new Error(
+        `Failed to parse Loopy state at ${prettyPath(config.cwd, config.stateFile)}: ${
+          err && err.message ? err.message : String(err)
+        }`
+      );
+    }
+
+    const phase = resumeState && resumeState.currentPhase ? `, phase: ${resumeState.currentPhase}` : "";
+    const iter = resumeState && resumeState.iteration != null ? resumeState.iteration : 0;
+    const last = (resumeState && resumeState.lastStatus) || "n/a";
+    printStep(`Continuing from saved state (iter ${iter}${phase}; last status: ${last})`, {});
+    config.taskSeedText = "";
+    config.taskSeedSource = "";
+  } else {
+    // Load the plan seed once so stdin ('-') works and prompts can reuse the content.
+    const loadedSeed = await loadTaskSeed(config);
+    config.taskSeedText = loadedSeed.seed || "";
+    config.taskSeedSource = loadedSeed.source || "";
+
+    // Plan initialization / auto-phase planning happens once, before looping.
+    const ensured = await ensureTaskBeforeLoop(config, loadedSeed);
+    if (ensured.rewritten) {
+      await appendActivity(config.activityLog, [
+        `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
+      ]);
+      printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
+    }
   }
 
   // Persist key defaults into the plan front matter when missing (agent/test/branch).

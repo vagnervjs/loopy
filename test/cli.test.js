@@ -131,6 +131,7 @@ test("`--help` prints usage and exits 0", async () => {
   assert.equal(stderr, "");
   assert.match(stdout, /Usage:/);
   assert.match(stdout, /\bloopy help\b/);
+  assert.match(stdout, /--continue\b/);
 });
 
 test("`--version` prints version and exits 0", async () => {
@@ -395,6 +396,46 @@ test("`--git-worktree` runs loop inside worktree path", async () => {
   assert.match(promptInWorktree, /Loopy Loop Prompt/);
 
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8"));
+});
+
+test("`--continue` resumes even with staged changes", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-continue-staged-"));
+  const gitEnv = await initGitRepo(tmp);
+
+  // Create a pending state (required for --continue).
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "state.json"),
+    JSON.stringify({ iteration: 3, lastStatus: "stopped", currentPhase: "n/a" }, null, 2) + "\n",
+    "utf8"
+  );
+
+  // Stage a change (should not block in --continue mode).
+  await fs.writeFile(path.join(tmp, "dirty.txt"), "hi\n", "utf8");
+  await runCmd("git", ["add", "-A"], { cwd: tmp, env: gitEnv });
+
+  const agentCmd = 'node -e "process.exit(0)"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [CLI_PATH, "loop", "--continue", "--dry-run", "--agent", agentCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
+    { cwd: tmp, env: gitEnv }
+  );
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /Continuing from saved state/);
+  assert.match(stdout, /\[loopy\] iter \d+: Iteration start/);
+});
+
+test("`--continue` rejects `--prompt`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-continue-prompt-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(path.join(tmp, ".loopy", "state.json"), "{}\n", "utf8");
+  await fs.writeFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] x", ""].join("\n"), "utf8");
+
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "loop", "--continue", "--prompt", "seed", "--agent", 'node -e "process.exit(0)"'], {
+    cwd: tmp,
+  });
+  assert.equal(code, 1);
+  assert.equal(stdout, "");
+  assert.match(stderr, /--continue.*--prompt/i);
 });
 
 test("agent output streams to `.loopy/agent_stream.log`", async () => {

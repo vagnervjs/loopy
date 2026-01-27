@@ -19,6 +19,8 @@ hooks:
 # Plan
 
 > Intended location: `.loopy/LOOPY_PLAN.md`
+>
+> Tip: if the loop is interrupted, resume with `loopy loop --continue` (works even with staged files).
 
 - [ ] Describe the change you want Loopy to implement.
 

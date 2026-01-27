@@ -45,6 +45,7 @@ function printHelp() {
     "  --prompt <text>          Seed prompt (inline) to generate/update the plan before looping",
     "  --prompt @<file>         Seed prompt from a file to generate/update the plan before looping",
     "  --prompt -               Seed prompt from stdin to generate/update the plan before looping",
+    "  --continue               Resume from saved state (requires existing `.loopy/state.json`); skips git switching",
     `  --plan <file>            Plan doc (default: ${DEFAULTS.taskFile})`,
     "  --agent <command>        Agent command (e.g. cursor-agent; overrides plan front matter)",
     "  --auto-apply             Skip confirmation prompts (apply changes)",
