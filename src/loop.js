@@ -780,6 +780,26 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     throw new Error("Missing value for --prompt-out (expected a file path).");
   }
 
+  const fm0 = (parsedTask && parsedTask.frontMatter) || {};
+  const fmGit = fm0.git && typeof fm0.git === "object" ? fm0.git : {};
+  const gitCommitExplicit =
+    hasOwn(flags, "git-commit") ||
+    Object.prototype.hasOwnProperty.call(fm0, "git_commit") ||
+    Object.prototype.hasOwnProperty.call(fm0, "gitCommit") ||
+    Object.prototype.hasOwnProperty.call(fmGit, "commit") ||
+    Object.prototype.hasOwnProperty.call(fmGit, "git_commit") ||
+    Object.prototype.hasOwnProperty.call(fmGit, "gitCommit");
+  let isGitRepo = false;
+  try {
+    await ensureGitRepo(baseCwd);
+    isGitRepo = true;
+  } catch (_) {
+    isGitRepo = false;
+  }
+  if (!isGitRepo && !gitCommitExplicit) {
+    config.gitCommit = false;
+  }
+
   // Ensure agent command is defined before any planning/execution.
   if (!config.agentCommand) {
     const entered = await promptLine('Enter agent command (e.g. "cursor-agent"): ');
@@ -792,26 +812,22 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   // Default git branch when missing (only when running inside a git repo).
-  if (!config.continue && !config.gitBranch) {
-    let isGitRepo = false;
-    try {
-      await fs.stat(path.join(baseCwd, ".git"));
-      isGitRepo = true;
-    } catch (_) {
-      isGitRepo = false;
-    }
-    // If the user is explicitly running in a worktree branch, don't auto-switch
-    // away from it by synthesizing a default branch.
+  if (!config.continue) {
+    const hasGitBranch = Boolean(String(config.gitBranch || "").trim());
     const hasWorktreeBranch = Boolean(String(config.gitWorktreeBranch || "").trim());
-    if (isGitRepo && !hasWorktreeBranch) {
-      const rawPrompt =
-        hasOwn(flags, "prompt") && flags.prompt !== true ? String(flags.prompt || "").trim() : "";
-      let base = rawPrompt;
-      if (base.startsWith("@")) base = path.basename(base.slice(1).trim() || "seed");
-      if (base === "-") base = "stdin";
-      base = base.replace(/\.[a-z0-9]+$/i, "");
-      const slug = toSlug(base) || toSlug(path.basename(baseCwd)) || "work";
-      config.gitBranch = `loopy/${slug}`.slice(0, 80);
+    if (!hasGitBranch && !hasWorktreeBranch) {
+      if (isGitRepo) {
+        if (!process.stdin.isTTY) {
+          throw new Error(
+            "Missing git branch name. Provide --git-branch <name> or set git.branch in the plan front matter."
+          );
+        }
+        const entered = await promptLine('Enter git branch name (e.g. "loopy/my-task"): ');
+        if (!entered) {
+          throw new Error("Aborted: git branch name is required.");
+        }
+        config.gitBranch = String(entered || "").trim();
+      }
     }
   }
 
@@ -853,8 +869,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
   // If a worktree branch was specified, don't switch away from it via any default/implicit `gitBranch`.
   // Only honor `gitBranch` when the user explicitly provided it (flag or plan front matter).
-  const fm0 = (parsedTask && parsedTask.frontMatter) || {};
-  const fmGit = fm0.git && typeof fm0.git === "object" ? fm0.git : {};
   const gitBranchExplicit = Boolean(
     String(flags["git-branch"] || "").trim() ||
       String(fm0.git_branch || fm0.gitBranch || "").trim() ||
@@ -931,7 +945,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     }
   }
 
-  // Persist key defaults into the plan front matter when missing (agent/test/branch).
+  // Persist key defaults into the plan front matter when missing (agent/test/git settings).
   const applyFrontMatterPatch = async (patchFn) => {
     const text = await readText(config.taskFile);
     if (!text) return;
@@ -965,6 +979,13 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     const git = next.git && typeof next.git === "object" ? { ...next.git } : {};
     if (config.gitBranch && !String(git.branch || git.git_branch || git.gitBranch || "").trim()) {
       git.branch = config.gitBranch;
+    }
+    const hasCommit =
+      Object.prototype.hasOwnProperty.call(git, "commit") ||
+      Object.prototype.hasOwnProperty.call(git, "git_commit") ||
+      Object.prototype.hasOwnProperty.call(git, "gitCommit");
+    if (!hasCommit && config.gitCommit) {
+      git.commit = true;
     }
     if (Object.keys(git).length) next.git = git;
     return next;

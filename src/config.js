@@ -15,6 +15,7 @@ const DEFAULTS = {
   backoffMs: 5000,
   rotateBytes: 150000,
   maxOutputBytes: 1024 * 1024,
+  gitCommit: true,
   gitCommitMessage: "loopy: {change_type} {task_summary}",
   autoPhase: true,
   confirm: false,
@@ -132,7 +133,10 @@ function mergeConfig(flags, frontMatter) {
       git.git_branch ||
       git.gitBranch ||
       "",
-    gitCommit: coerceBoolean(flags["git-commit"] ?? fm.git_commit ?? fm.gitCommit ?? git.commit ?? git.git_commit),
+    gitCommit: coerceBoolean(
+      flags["git-commit"] ?? fm.git_commit ?? fm.gitCommit ?? git.commit ?? git.git_commit,
+      DEFAULTS.gitCommit
+    ),
     gitCommitMessage:
       flags["git-commit-message"] ||
       fm.git_commit_message ||
