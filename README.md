@@ -91,6 +91,7 @@ loopy --version
 2. If you provide a seed prompt, Loopy generates or updates the plan doc before looping.
 3. Each iteration runs the agent, optional tests, and updates logs/state.
 4. The loop stops when all plan checkboxes are checked or when guardrails stop it.
+5. On completion, Loopy archives `.loopy` artifacts to `.loopy/completed_loops/<branch>/` and starts fresh.
 
 ## Core concepts
 

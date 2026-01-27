@@ -239,14 +239,53 @@ function stripLoopyPrefix(branch) {
   return raw;
 }
 
-function archivePlanFileName(branch, taskFile) {
-  const ext = path.extname(taskFile) || ".md";
-  const base = stripLoopyPrefix(branch) || "completed-plan";
-  if (ext && base.toLowerCase().endsWith(ext.toLowerCase())) return base;
-  return `${base}${ext}`;
+function archiveLoopFolderName(branch) {
+  const base = stripLoopyPrefix(branch) || "completed-loop";
+  const sanitized = base
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return sanitized || "completed-loop";
 }
 
-async function archiveCompletedPlan(config) {
+function isPathInside(baseDir, targetPath) {
+  if (!baseDir || !targetPath) return false;
+  const rel = path.relative(baseDir, targetPath);
+  if (!rel) return true;
+  return rel && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+async function movePath(sourcePath, destinationPath) {
+  try {
+    await fs.rm(destinationPath, { recursive: true, force: true });
+  } catch (_) {
+    // ignore
+  }
+
+  try {
+    await fs.rename(sourcePath, destinationPath);
+    return true;
+  } catch (err) {
+    if (err && err.code === "EXDEV") {
+      const stat = await fs.stat(sourcePath);
+      if (stat.isDirectory()) {
+        await fs.mkdir(destinationPath, { recursive: true });
+        await fs.cp(sourcePath, destinationPath, { recursive: true });
+        await fs.rm(sourcePath, { recursive: true, force: true });
+      } else {
+        await fs.mkdir(path.dirname(destinationPath), { recursive: true });
+        await fs.copyFile(sourcePath, destinationPath);
+        await fs.unlink(sourcePath);
+      }
+      return true;
+    }
+    if (err && err.code === "ENOENT") return false;
+    throw err;
+  }
+}
+
+async function archiveCompletedLoop(config) {
   const taskPath = config.taskFile;
   if (!taskPath) return { archived: false, reason: "missing-path" };
 
@@ -268,25 +307,27 @@ async function archiveCompletedPlan(config) {
     String(fm.git_branch || fm.gitBranch || "").trim() ||
     String(fmGit.branch || fmGit.git_branch || fmGit.gitBranch || "").trim();
 
-  const fileName = archivePlanFileName(branch, taskPath);
   const baseDir = config.loopyDir || path.dirname(taskPath);
-  const archivePath = path.join(baseDir, "completed_plans", fileName);
-  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  const archiveDir = path.join(baseDir, "completed_loops", archiveLoopFolderName(branch));
+  await fs.mkdir(archiveDir, { recursive: true });
 
-  try {
-    await fs.rename(taskPath, archivePath);
-  } catch (err) {
-    if (err && err.code === "EXDEV") {
-      await fs.copyFile(taskPath, archivePath);
-      await fs.unlink(taskPath);
-    } else if (err && err.code === "ENOENT") {
-      return { archived: false, reason: "missing-plan" };
-    } else {
-      throw err;
-    }
+  const prettyArchive = prettyPath(config.cwd, archiveDir);
+  await appendActivity(config.activityLog, [`Loop archived: ${prettyArchive}`]);
+
+  const entries = await fs.readdir(baseDir);
+  for (const entry of entries) {
+    if (entry === "completed_loops") continue;
+    const sourcePath = path.join(baseDir, entry);
+    const destinationPath = path.join(archiveDir, entry);
+    await movePath(sourcePath, destinationPath);
   }
 
-  return { archived: true, archivePath };
+  if (!isPathInside(baseDir, taskPath)) {
+    const destinationPath = path.join(archiveDir, path.basename(taskPath));
+    await movePath(taskPath, destinationPath);
+  }
+
+  return { archived: true, archiveDir };
 }
 
 async function ensureTaskBeforeLoop(config, loadedSeed) {
@@ -1136,11 +1177,10 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     printStep("loop: final status stopped");
   }
 
-  const archiveResult = await archiveCompletedPlan(config);
+  const archiveResult = await archiveCompletedLoop(config);
   if (archiveResult.archived) {
-    const prettyArchive = prettyPath(config.cwd, archiveResult.archivePath);
-    await appendActivity(config.activityLog, [`Plan archived: ${prettyArchive}`]);
-    printStep(`plan: archived to ${prettyArchive}`);
+    const prettyArchive = prettyPath(config.cwd, archiveResult.archiveDir);
+    printStep(`loop: archived to ${prettyArchive}`);
   }
 }
 
