@@ -94,6 +94,7 @@ function printHelp() {
     Output: [
       { label: "--prompt-out <file>", desc: `Prompt output file (default: ${DEFAULTS.promptFile})` },
       { label: "--stream", desc: "Mirror agent stdout/stderr to your terminal" },
+      { label: "--no-color", desc: "Disable ANSI colors (also respects NO_COLOR)" },
     ],
     Files: [
       { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },

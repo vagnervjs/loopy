@@ -532,7 +532,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     // If auto-phase is on, try to generate phases; otherwise create a minimal legacy task file.
     let nextText = "";
     if (config.autoPhase) {
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed);
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: config.testCommand });
@@ -598,7 +598,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
 
     let nextText = existing;
     if (config.autoPhase) {
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed);
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || config.testCommand });
@@ -642,7 +642,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     const hasPhases = Boolean(parsed.phases && parsed.phases.length);
     if (!hasPhases) {
       const seed = parsed.body && parsed.body.trim() ? parsed.body.trim() : existing.trim();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed);
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : null;
@@ -765,6 +765,7 @@ async function runIteration(config) {
       printStep(`hook preIteration: run ${redact(config.preIteration)}`, { iteration });
       const hookResult = await runShellCommand(config.preIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
+        noColor: config.noColor,
       });
       await appendActivity(config.activityLog, [`preIteration hook exit ${hookResult.code}`]);
       printStep(`hook preIteration: exit ${hookResult.code}`, { iteration });
@@ -794,6 +795,7 @@ async function runIteration(config) {
       cwd: config.cwd,
       agentStreamLogPath,
       streamToTerminal: Boolean(config.stream),
+      noColor: config.noColor,
     });
     const redactedStdout = redact(agentResult.stdout);
     const redactedStderr = redact(agentResult.stderr);
@@ -827,6 +829,7 @@ async function runIteration(config) {
       printStep(`tests: run ${redact(effectiveTestCommand)}`, { iteration });
       const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
+        noColor: config.noColor,
       });
       const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
       await writeText(lastTestOutputPath, testOutput);
@@ -862,7 +865,9 @@ async function runIteration(config) {
     let changeType = taskContext.changeType;
     if (taskContext.changeType === "chore" && !/^[a-zA-Z]+\s*:/.test(taskLine || "")) {
       if (config.gitCommit) {
-        const agentType = await inferChangeTypeFromAgent(config.agentCommand, taskLine);
+        const agentType = await inferChangeTypeFromAgent(config.agentCommand, taskLine, {
+          noColor: config.noColor,
+        });
         changeType = agentType || inferChangeTypeHeuristic(taskLine);
       } else {
         changeType = inferChangeTypeHeuristic(taskLine);
@@ -875,6 +880,7 @@ async function runIteration(config) {
       printStep(`hook postIteration: run ${redact(config.postIteration)}`, { iteration });
       const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
+        noColor: config.noColor,
       });
       postIterationRan = true;
       await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
@@ -914,6 +920,7 @@ async function runIteration(config) {
       printStep(`hook onFailure: run ${redact(config.onFailure)}`, { iteration });
       const hookResult = await runShellCommand(config.onFailure, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
+        noColor: config.noColor,
       });
       await appendActivity(config.activityLog, [`onFailure hook exit ${hookResult.code}`]);
       printStep(`hook onFailure: exit ${hookResult.code}`, { iteration });
@@ -923,6 +930,7 @@ async function runIteration(config) {
       printStep(`hook postIteration: run ${redact(config.postIteration)}`, { iteration });
       const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
+        noColor: config.noColor,
       });
       await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
       printStep(`hook postIteration: exit ${hookResult.code}`, { iteration });

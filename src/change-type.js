@@ -23,7 +23,7 @@ function inferChangeTypeHeuristic(text) {
   return "feat";
 }
 
-async function inferChangeTypeFromAgent(command, taskLine) {
+async function inferChangeTypeFromAgent(command, taskLine, { noColor } = {}) {
   if (!command || !taskLine) return "";
   const prompt = [
     "You are a commit message classifier.",
@@ -33,7 +33,9 @@ async function inferChangeTypeFromAgent(command, taskLine) {
     `Task: ${taskLine}`,
   ].join("\n");
 
-  const result = await runShellCommand(command, prompt, 2000, {});
+  const shellOptions = {};
+  if (noColor !== undefined) shellOptions.noColor = noColor;
+  const result = await runShellCommand(command, prompt, 2000, shellOptions);
   const output = `${result.stdout || ""}\n${result.stderr || ""}`.trim().toLowerCase();
   const token = output.split(/\s+/).find(Boolean) || "";
   const allowed = new Set([
