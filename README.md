@@ -86,6 +86,31 @@ loopy help
 loopy --version
 ```
 
+## Log output
+Loopy prints timestamped lines (local time) with a compact icon + message. Default output uses emoji and color.
+
+- Use `--no-emoji` for ASCII icons.
+- Use `--plain` for no color and no emoji.
+- Set `NO_COLOR=1` to disable ANSI color (emoji remain).
+- Use `--verbose` to print full checklist details in the plan summary.
+- Stable markers: `Iteration <n> start` and `Iteration <n> complete`.
+
+Example (plain mode):
+```
+2026-01-27 01:22:00  >> Loop start (max iterations: 50, max minutes: 120, backoff: 5s)
+2026-01-27 01:22:00  br Branch     loopy/plan-progress-ux
+
+2026-01-27 01:22:01  pl Plan       3 phases, 7 tasks
+2026-01-27 01:22:01    > Locate legacy archive usage (2)
+2026-01-27 01:22:01    > Remove legacy compatibility (3)
+2026-01-27 01:22:01    > Update tests and docs (2)
+
+2026-01-27 01:22:02  it Iteration 1 start - Locate legacy archive usage
+2026-01-27 01:22:02    pm Prompt saved to .loopy/PROMPT.md
+2026-01-27 01:22:02    ag Agent run cursor-agent
+2026-01-27 01:22:46  ok Iteration 1 complete - Duration 0m 44s
+```
+
 ## How Loopy works
 1. Loopy reads a plan doc (default: `.loopy/LOOPY_PLAN.md`) on every iteration.
 2. If you provide a seed prompt, Loopy generates or updates the plan doc before looping.
@@ -232,6 +257,10 @@ Input/output paths:
 
 Output/utility:
 - `--stream` mirror agent stdout/stderr to your terminal
+- `--no-color` disable ANSI colors (also honors `NO_COLOR`)
+- `--no-emoji` disable emoji icons (ASCII fallback)
+- `--plain` disable color and emoji
+- `--verbose` print full checklist details in the plan summary
 - `--version` print version and exit
 
 ## Files created

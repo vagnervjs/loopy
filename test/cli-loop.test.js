@@ -22,7 +22,7 @@ test("no subcommand runs the default loop", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /loop: start/);
+  assert.match(stdout, /Loop start/);
   const prompt = await fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8");
   assert.match(prompt, /Loopy Loop Prompt/);
 });
@@ -109,13 +109,54 @@ test("prints step status lines to terminal during loop", async () => {
 
   const agentCmd = 'node -e "process.exit(0)"';
   const { code, stdout, stderr } = await runNodeCli(
-    [CLI_PATH, "--agent", agentCmd, "--max-minutes", "1"],
+    [CLI_PATH, "--agent", agentCmd, "--max-minutes", "1", "--plain"],
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /\[loopy\] \[info\s*\] iter 1: start \(rotation: /);
-  assert.match(stdout, /\[loopy\] \[info\s*\] iter 1: agent: run/);
-  assert.match(stdout, /\[loopy\] \[info\s*\] iter 1: state: updated/);
+  assert.match(stdout, /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+it Iteration 1 start/);
+  assert.match(stdout, /Agent run/);
+  assert.match(stdout, /State updated/);
+  assert.match(stdout, /Iteration 1 complete/);
+  assert.ok(!/\x1b\[[0-9;]*m/.test(stdout));
+});
+
+test("NO_COLOR disables ANSI formatting in logs", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-no-color-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do something", ""].join("\n"),
+    "utf8"
+  );
+
+  const agentCmd = 'node -e "process.exit(0)"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [CLI_PATH, "--agent", agentCmd, "--max-minutes", "1", "--dry-run", "--no-emoji"],
+    { cwd: tmp, env: { NO_COLOR: "1" } }
+  );
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /Loop start/);
+  assert.match(stdout, /\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s+it Iteration 1 start/);
+  assert.ok(!/\x1b\[[0-9;]*m/.test(stdout));
+});
+
+test("`--verbose` prints full checklist details", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-verbose-plan-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do something", ""].join("\n"),
+    "utf8"
+  );
+
+  const agentCmd = 'node -e "process.exit(0)"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [CLI_PATH, "--agent", agentCmd, "--max-minutes", "1", "--dry-run", "--verbose", "--auto-phase=false"],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /Plan details/);
+  assert.match(stdout, /\[ \] do something/);
 });
 
 test("`--stream` mirrors agent output to terminal", async () => {
@@ -166,10 +207,10 @@ test("`--dry-run` stops after the first iteration (no backoff loop)", async () =
   );
 
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /\[loopy\] \[info\s*\] iter 1: start \(rotation: /);
-  assert.equal(stdout.includes("[loopy] [info ] iter 2: start"), false, stdout);
-  assert.equal(stdout.includes("sleeping"), false, stdout);
-  assert.match(stdout, /dry run: complete; stopping/i);
+  assert.match(stdout, /Iteration 1 start/);
+  assert.equal(stdout.includes("Iteration 2 start"), false, stdout);
+  assert.equal(stdout.includes("Sleeping"), false, stdout);
+  assert.match(stdout, /Dry run complete; stopping/i);
 });
 
 test("phase progression: `--phase-only` stops after phase completion and records phase history", async () => {

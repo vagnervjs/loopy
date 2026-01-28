@@ -99,6 +99,8 @@ function mergeConfig(flags, frontMatter) {
   const promptOutFlag = flags["prompt-out"];
   const gitWorktreeFlag = flags["git-worktree"];
   const gitWorktreeBranchFlag = flags["git-worktree-branch"];
+  const plain = coerceBoolean(flags.plain, false);
+  const noEmoji = coerceBoolean(flags["no-emoji"], false);
   return {
     cwd: process.cwd(),
     continue: coerceBoolean(flags.continue, false),
@@ -175,9 +177,12 @@ function mergeConfig(flags, frontMatter) {
     maxMinutes: clampMin(coerceNumber(flags["max-minutes"] || fm.max_minutes, DEFAULTS.maxMinutes), 1),
     backoffMs: clampMin(coerceNumber(flags["backoff-ms"] || fm.backoff_ms, DEFAULTS.backoffMs), 0),
     rotateBytes: clampMin(coerceNumber(flags["rotate-bytes"] || fm.rotate_bytes, DEFAULTS.rotateBytes), 1024),
-    noColor: resolveNoColor(flags),
+    plain,
+    noEmoji: plain ? true : noEmoji,
+    noColor: plain ? true : resolveNoColor(flags),
     dryRun: Boolean(flags["dry-run"]),
     stream: Boolean(flags.stream),
+    verbose: coerceBoolean(flags.verbose, false),
   };
 }
 
