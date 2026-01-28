@@ -409,7 +409,7 @@ async function loadPlanSeed(config, { stdinText } = {}) {
   return loadSeedFromFlag(config.planSeed, { flagName: "plan", cwd: config.cwd, stdinText });
 }
 
-function pickCurrentPhaseId(parsedTask, state, config) {
+function pickCurrentPhaseId(parsedTask, state, config, options = {}) {
   const phases = (parsedTask && parsedTask.phases) || [];
   if (!phases.length) return "";
   const ids = phases.map((p) => p.id);
@@ -418,11 +418,28 @@ function pickCurrentPhaseId(parsedTask, state, config) {
   const preferred = toSlug(config.phase) || String(config.phase || "").trim() || String(state.currentPhase || "").trim();
   const preferredId = toSlug(preferred) || preferred;
   const start = preferredId && ids.includes(preferredId) ? preferredId : ids[0];
+  const startIdx = Math.max(0, ids.indexOf(start));
+  const phaseLocked = Boolean(options && options.phaseExplicit) || Boolean(config.phaseOnly);
 
-  // Walk forward until we find a non-skipped phase.
-  let idx = Math.max(0, ids.indexOf(start));
+  if (phaseLocked) {
+    for (let i = 0; i < ids.length; i += 1) {
+      const candidate = ids[(startIdx + i) % ids.length];
+      if (!skip.has(candidate)) return candidate;
+    }
+    return start;
+  }
+
+  // Prefer the next incomplete phase in plan order.
   for (let i = 0; i < ids.length; i += 1) {
-    const candidate = ids[(idx + i) % ids.length];
+    const candidate = ids[(startIdx + i) % ids.length];
+    if (skip.has(candidate)) continue;
+    if (isPhaseComplete(parsedTask, candidate, state)) continue;
+    return candidate;
+  }
+
+  // All phases are complete or skipped; fall back to the next available.
+  for (let i = 0; i < ids.length; i += 1) {
+    const candidate = ids[(startIdx + i) % ids.length];
     if (!skip.has(candidate)) return candidate;
   }
   return start;
@@ -433,6 +450,11 @@ function phaseStopOn(parsedTask, phaseId) {
   const phase = (parsedTask.phases || []).find((p) => p.id === phaseId);
   const raw = phase && Array.isArray(phase.stopOn) ? phase.stopOn : phase && phase.stopOn ? [phase.stopOn] : [];
   return raw.map((s) => String(s || "").trim()).filter(Boolean);
+}
+
+function phaseCriteria(parsedTask, phaseId) {
+  const stopOn = phaseStopOn(parsedTask, phaseId);
+  return stopOn.length ? stopOn : ["all_checked"];
 }
 
 function phaseTestCommand(parsedTask, phaseId) {
@@ -446,6 +468,11 @@ function phaseTestCommand(parsedTask, phaseId) {
   return fromPhase || fromDefaults || fromGlobal || "";
 }
 
+function hasPhase(parsedTask, phaseId) {
+  if (!phaseId) return false;
+  return Boolean((parsedTask.phases || []).find((p) => p.id === phaseId));
+}
+
 function isPhaseAllChecked(parsedTask, phaseId) {
   if (!phaseId) return false;
   const sec = parsedTask.phaseSections && parsedTask.phaseSections[phaseId];
@@ -455,6 +482,18 @@ function isPhaseAllChecked(parsedTask, phaseId) {
 function didTestsPass(state) {
   const last = String((state && state.lastTest) || "");
   return /^pass\b/i.test(last.trim());
+}
+
+function isPhaseComplete(parsedTask, phaseId, state, { testStatus } = {}) {
+  if (!hasPhase(parsedTask, phaseId)) return false;
+  const criteria = phaseCriteria(parsedTask, phaseId);
+  const needsAllChecked = criteria.includes("all_checked");
+  const needsTests = criteria.includes("tests_pass");
+  const phaseChecked = isPhaseAllChecked(parsedTask, phaseId);
+  const hasTestStatus = typeof testStatus === "string" && testStatus.trim() && testStatus !== "n/a";
+  const testsOk = !needsTests || (hasTestStatus ? /^pass\b/i.test(testStatus.trim()) : didTestsPass(state));
+  const phaseOk = !needsAllChecked || phaseChecked;
+  return phaseOk && testsOk;
 }
 
 function computeNextPhaseId(parsedTask, currentPhaseId, config) {
@@ -786,7 +825,9 @@ async function runIteration(config) {
   const iteration = (state.iteration || 0) + 1;
   const rotationPending = Boolean(state.rotatePending);
 
-  const currentPhaseId = pickCurrentPhaseId(parsedTask, state || {}, config);
+  const currentPhaseId = pickCurrentPhaseId(parsedTask, state || {}, config, {
+    phaseExplicit: Boolean(config.phaseExplicit),
+  });
   const phaseLabel = resolvePhaseLabel(parsedTask, currentPhaseId);
   const iterationStartedAt = new Date();
   startIteration({ iteration, phase: phaseLabel, startedAt: iterationStartedAt });
@@ -899,7 +940,11 @@ async function runIteration(config) {
       printStep(`Agent exit ${agentResult.code}`, { iteration, kind: "agent" });
     }
 
-    const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTask, currentPhaseId) : config.testCommand;
+    const taskAfter = await readText(config.taskFile);
+    bytesRead += Buffer.byteLength(taskAfter);
+    const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
+
+    const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTaskAfter, currentPhaseId) : config.testCommand;
     if (status === "success" && effectiveTestCommand) {
       printStep(`Tests run ${redact(effectiveTestCommand)}`, { iteration, kind: "tests" });
       const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
@@ -926,10 +971,6 @@ async function runIteration(config) {
         errorSignature = `${effectiveTestCommand}::${lastError}`;
       }
     }
-
-    const taskAfter = await readText(config.taskFile);
-    bytesRead += Buffer.byteLength(taskAfter);
-    const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
     const taskComplete = Boolean(parsedTaskAfter.allChecked);
     const completedSections = findNewlyCompletedTasks(parsedTask, parsedTaskAfter);
     printStepLines(formatCompletedTaskLines(completedSections), { iteration });
@@ -1035,18 +1076,10 @@ async function runIteration(config) {
     nextState.history = [...nextState.history, historyEntry].slice(-50);
 
     // Phase completion / progression.
-    if (status === "success" && currentPhaseId && parsedTask.phases && parsedTask.phases.length) {
-      const stopOn = phaseStopOn(parsedTask, currentPhaseId);
-      const phaseChecked = isPhaseAllChecked(parseTask(taskAfter || taskText), currentPhaseId);
-      const criteria = stopOn.length ? stopOn : ["all_checked"];
-      const needsAllChecked = criteria.includes("all_checked");
-      const needsTests = criteria.includes("tests_pass");
-      const testsOk = !needsTests || (testStatus !== "n/a" ? /^pass\b/i.test(testStatus) : didTestsPass(nextState));
-      const phaseOk = !needsAllChecked || phaseChecked;
-      const phaseComplete = phaseOk && testsOk;
-
+    if (status === "success" && currentPhaseId && parsedTaskAfter.phases && parsedTaskAfter.phases.length) {
+      const phaseComplete = isPhaseComplete(parsedTaskAfter, currentPhaseId, nextState, { testStatus });
       if (phaseComplete) {
-        const nextPhase = computeNextPhaseId(parsedTask, currentPhaseId, config);
+        const nextPhase = computeNextPhaseId(parsedTaskAfter, currentPhaseId, config);
         nextState.phaseHistory = [...(nextState.phaseHistory || [])].concat([
           `${nextState.updatedAt} phase ${currentPhaseId} complete`,
         ]).slice(-100);
@@ -1058,6 +1091,15 @@ async function runIteration(config) {
             `${nextState.updatedAt} phase advanced: ${currentPhaseId} -> ${nextPhase}`,
           ]).slice(-100);
         }
+      }
+    }
+
+    if (!config.phaseOnly && parsedTaskAfter.phases && parsedTaskAfter.phases.length) {
+      const syncedPhase = pickCurrentPhaseId(parsedTaskAfter, nextState, config, {
+        phaseExplicit: Boolean(config.phaseExplicit),
+      });
+      if (syncedPhase && syncedPhase !== nextState.currentPhase) {
+        nextState.currentPhase = syncedPhase;
       }
     }
 
@@ -1149,6 +1191,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
   const planSeedProvided = hasOwn(flags, "plan");
   const promptSeedProvided = hasOwn(flags, "prompt");
+  const phaseExplicit = hasOwn(flags, "phase") && flags.phase !== true;
   if (command === "run") {
     throw new Error("Unsupported command. For a single iteration, use `loopy --max-iterations 1`.");
   }
@@ -1359,6 +1402,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   config = materializeConfigPaths(config, effectiveCwd);
+  config.phaseExplicit = phaseExplicit;
   if (onActivityLog) onActivityLog(config.activityLog);
   let prdGenerated = false;
   const planReviewRequired = !config.resume && (planSeedProvided || promptSeedProvided);
