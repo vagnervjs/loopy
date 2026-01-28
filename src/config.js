@@ -28,6 +28,35 @@ const DEFAULTS = {
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseGlobalConfig(raw, filePath) {
+  if (!String(raw || "").trim()) return {};
+  let parsed = null;
+  try {
+    parsed = yaml.load(raw);
+  } catch (err) {
+    throw new Error(`Failed to parse global config at ${filePath}: ${err && err.message ? err.message : String(err)}`);
+  }
+  if (!isPlainObject(parsed)) {
+    throw new Error(`Global config at ${filePath} must be a YAML/JSON object.`);
+  }
+  return parsed;
+}
+
+function pickDefinedKey(obj, keys) {
+  const target = obj && typeof obj === "object" ? obj : null;
+  if (!target) return "";
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(target, key)) {
+      return key;
+    }
+  }
+  return "";
+}
+
 function resolveFrom(cwd, maybePath) {
   if (!maybePath) return maybePath;
   if (path.isAbsolute(maybePath)) return maybePath;
@@ -122,23 +151,59 @@ async function loadGlobalConfig() {
       if (err && err.code === "ENOENT") continue;
       throw err;
     }
-    if (!String(raw || "").trim()) {
-      return { config: {}, path: filePath };
-    }
-    let parsed = null;
-    try {
-      parsed = yaml.load(raw);
-    } catch (err) {
-      throw new Error(`Failed to parse global config at ${filePath}: ${err && err.message ? err.message : String(err)}`);
-    }
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error(`Global config at ${filePath} must be a YAML/JSON object.`);
-    }
-    const config =
-      parsed.defaults && typeof parsed.defaults === "object" && !Array.isArray(parsed.defaults) ? parsed.defaults : parsed;
+    const parsed = parseGlobalConfig(raw, filePath);
+    const config = isPlainObject(parsed.defaults) ? parsed.defaults : parsed;
     return { config, path: filePath };
   }
   return { config: {}, path: "" };
+}
+
+function detectConfigFormat(filePath) {
+  return path.extname(filePath).toLowerCase() === ".json" ? "json" : "yaml";
+}
+
+async function loadGlobalConfigSource() {
+  const configDir = path.join(os.homedir(), ".loopy");
+  for (const filename of GLOBAL_CONFIG_FILES) {
+    const filePath = path.join(configDir, filename);
+    let raw = "";
+    try {
+      raw = await fs.readFile(filePath, "utf8");
+    } catch (err) {
+      if (err && err.code === "ENOENT") continue;
+      throw err;
+    }
+    const parsed = parseGlobalConfig(raw, filePath);
+    return { config: parsed, path: filePath, format: detectConfigFormat(filePath), exists: true };
+  }
+  const fallbackPath = path.join(configDir, GLOBAL_CONFIG_FILES[0]);
+  return { config: {}, path: fallbackPath, format: detectConfigFormat(fallbackPath), exists: false };
+}
+
+async function persistGlobalAgentCommand(agentCommand) {
+  const normalized = normalizeCommand(agentCommand);
+  if (!normalized) return { saved: false, reason: "missing-agent" };
+  const source = await loadGlobalConfigSource();
+  const root = isPlainObject(source.config) ? { ...source.config } : {};
+  const hasDefaults = isPlainObject(root.defaults);
+  const defaults = hasDefaults ? { ...root.defaults } : null;
+  const target = hasDefaults ? defaults : root;
+  const key = pickDefinedKey(target, ["agent", "agent_command", "agentCommand"]) || "agent";
+  const current = target[key] == null ? "" : String(target[key]).trim();
+  if (current === normalized) {
+    return { saved: false, reason: "unchanged", path: source.path };
+  }
+  target[key] = normalized;
+  if (hasDefaults) {
+    root.defaults = target;
+  }
+  await fs.mkdir(path.dirname(source.path), { recursive: true });
+  const payload =
+    source.format === "json"
+      ? JSON.stringify(root, null, 2) + "\n"
+      : `${yaml.dump(root, { lineWidth: 120 }).trimEnd()}\n`;
+  await fs.writeFile(source.path, payload, "utf8");
+  return { saved: true, path: source.path };
 }
 
 function mergeConfig(flags, frontMatter, defaults = {}) {
@@ -324,5 +389,6 @@ module.exports = {
   materializeConfigPaths,
   formatDuration,
   loadGlobalConfig,
+  persistGlobalAgentCommand,
   mergeConfig,
 };

@@ -10,6 +10,7 @@ const {
   formatDuration,
   materializeConfigPaths,
   loadGlobalConfig,
+  persistGlobalAgentCommand,
   mergeConfig,
   prettyPath,
   resolveFrom,
@@ -17,13 +18,14 @@ const {
 const { readText, writeText } = require("./fs");
 const { detectRepeatFailure, detectThrash } = require("./guardrails");
 const { formatProgress, ensureGuardrails, appendSign, formatPrompt } = require("./prompt");
-const { confirm, promptLine } = require("./confirm");
+const { confirm, promptLine, promptSelect } = require("./confirm");
 const { runShellCommand } = require("./shell");
 const { loadState } = require("./state");
 const { configureSteps, endIteration, printBlankLine, printStep, startIteration } = require("./steps");
 const { getTaskLine, parseTask, toSlug } = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
+const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
 const {
   ensureGitRepo,
   ensureGitWorktree,
@@ -1192,11 +1194,36 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
   // Ensure agent command is defined before any planning/execution.
   if (!agentCommandExplicit) {
-    const entered = await promptLine('Enter agent command (e.g. "cursor-agent"):', {
-      defaultValue: config.agentCommand,
-    });
-    if (entered) {
-      config.agentCommand = entered;
+    const initialAgentCommand = config.agentCommand;
+    if (process.stdin.isTTY) {
+      const availableAgents = await detectAvailableAgents();
+      const { options, defaultValue } = buildAgentChoiceOptions(availableAgents, initialAgentCommand, {
+        includeCustom: true,
+      });
+      let selected = "";
+      if (options.length) {
+        selected = await promptSelect("Select agent command:", options, { defaultValue });
+        if (selected === "__custom__") {
+          selected = await promptLine('Enter agent command (e.g. "cursor-agent"):', {
+            defaultValue: initialAgentCommand,
+          });
+        }
+      } else {
+        selected = await promptLine('Enter agent command (e.g. "cursor-agent"):', {
+          defaultValue: initialAgentCommand,
+        });
+      }
+      if (selected) {
+        config.agentCommand = selected;
+      }
+      if (selected && selected !== initialAgentCommand) {
+        try {
+          await persistGlobalAgentCommand(selected);
+        } catch (err) {
+          const message = err && err.message ? err.message : String(err);
+          printStep(`Global config update failed: ${message}`, { level: "warn" });
+        }
+      }
     }
   }
   if (!config.agentCommand) {
