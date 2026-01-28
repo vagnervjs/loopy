@@ -30,20 +30,22 @@ node bin/loopy.js --help
 
 ### Run your first loop
 
-**The easiest way to get started:**
+**🚀 Just run `loopy` — that's it!**
 
-Just run the `loopy` command — no flags required! The tool will interactively prompt you for everything it needs:
+No configuration needed upfront. Simply run:
 
 ```bash
 loopy
 ```
 
-Loopy will ask you to:
-1. Select or enter your agent command (e.g., "cursor-agent", "copilot")
-2. Enter a plan description or task prompt
-3. Optionally choose a git branch
+The tool will interactively guide you through setup, prompting you to:
+1. **Select or enter your agent command** (e.g., "cursor-agent", "copilot")
+2. **Enter your task or plan description** (what you want to build/fix)
+3. **Choose a git branch** (optional)
 
-**Advanced: provide everything via flags:**
+Everything you need will be requested as you go — no config files required to get started!
+
+**Advanced users: provide everything via flags:**
 ```bash
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 loopy status
@@ -63,15 +65,20 @@ cat ./problem.md | loopy --agent "cursor-agent" --plan -
 
 ## Common workflows
 
-**Start a new loop (interactive — recommended for first-time users):**
+**Start a new loop (interactive — recommended):**
 
-Simply run `loopy` with no arguments. The tool will prompt you for everything it needs (agent command, task description, git branch).
+Simply run `loopy` with no arguments. The tool will interactively prompt you for:
+- Agent command (e.g., "cursor-agent", "copilot")
+- Task description or plan
+- Git branch (optional)
+
+No configuration files needed — just run:
 
 ```bash
 loopy
 ```
 
-Start a new loop (non-interactive):
+**Start a new loop (non-interactive — for automation):**
 ```bash
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 ```
