@@ -186,8 +186,8 @@ function printHelp() {
       const out = [];
       for (const [group, rows] of Object.entries(advancedByGroup)) {
         out.push("");
-        out.push(`  ${group}:`);
-        out.push(...formatHelpRows(rows, { indent: "    ", labelWidth, gap: 2 }));
+        out.push(`${group}:`);
+        out.push(...formatHelpRows(rows, { indent: "  ", labelWidth, gap: 2 }));
       }
       return out;
     })(),
