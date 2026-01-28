@@ -33,7 +33,6 @@ node bin/loopy.js --help
 
 ### Run your first loop
 ```bash
-loopy init
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 loopy status
 ```
@@ -390,13 +389,13 @@ Safety notes:
 - There is no explicit max size cap today; very large prompts can degrade planning quality.
 
 ## Troubleshooting
-- Missing plan doc: run `loopy init` or provide `--prompt` (or use `--plan-file <file>`).
+- Missing plan doc: provide `--prompt` or `--plan` to generate one (or use `--plan-file <file>` to point to an existing file).
 - Agent exits immediately: verify `agent_command` is correct and accepts stdin.
 - Loop stops early: check `.loopy/progress.md` and `.loopy/activity.log` for caps or completion.
 - Guardrails growing: repeated failures or file thrashing were detected.
 - Resume errors: `--resume` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt` or `--plan`.
 - Flag errors: `--prompt` requires a value (`"<text>"`, `@<file>`, or `-`); `--prompt-out` requires a file path value.
-- Resetting state: delete `.loopy/state.json` (and optionally `.loopy/progress.md`) to force a fresh run; delete the whole `.loopy/` directory for a full reset.
+- Resetting state: use `loopy reset` to archive all `.loopy/` files to `.loopy/archive/reset-<timestamp>/` for a clean start; or delete the whole `.loopy/` directory for a full reset.
 
 ## Notes
 - Logs redact common secret patterns, but avoid writing secrets to stdout/stderr.

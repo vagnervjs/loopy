@@ -6,13 +6,54 @@ const path = require("node:path");
 
 const { CLI_PATH, runNodeCli } = require("./cli-helpers");
 
-test("`init` scaffolds `.loopy/LOOPY_PLAN.md` and `.loopy/hints.md`", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-init-"));
-  const { code, stderr } = await runNodeCli([CLI_PATH, "init"], { cwd: tmp });
+test("`reset` archives all files from .loopy to .loopy/archive/reset-<timestamp>", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-reset-"));
+  
+  const loopyDir = path.join(tmp, ".loopy");
+  await fs.mkdir(loopyDir, { recursive: true });
+  await fs.writeFile(path.join(loopyDir, "LOOPY_PLAN.md"), "# Plan\n", "utf8");
+  await fs.writeFile(path.join(loopyDir, "hints.md"), "# Hints\n", "utf8");
+  await fs.writeFile(path.join(loopyDir, "state.json"), "{}", "utf8");
+  
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "reset"], { cwd: tmp });
   assert.equal(code, 0, stderr);
-  await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
-  const hints = await fs.readFile(path.join(tmp, ".loopy", "hints.md"), "utf8");
-  assert.match(hints, /Loopy Hints/);
+  assert.match(stdout, /Reset complete/);
+  assert.match(stdout, /Moved 3 item/);
+  
+  const entries = await fs.readdir(loopyDir);
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0], "archive");
+  
+  const archiveEntries = await fs.readdir(path.join(loopyDir, "archive"));
+  assert.equal(archiveEntries.length, 1);
+  assert.match(archiveEntries[0], /^reset-/);
+  
+  const resetDir = path.join(loopyDir, "archive", archiveEntries[0]);
+  const archivedFiles = await fs.readdir(resetDir);
+  assert.equal(archivedFiles.length, 3);
+  assert.ok(archivedFiles.includes("LOOPY_PLAN.md"));
+  assert.ok(archivedFiles.includes("hints.md"));
+  assert.ok(archivedFiles.includes("state.json"));
+});
+
+test("`reset` when .loopy directory does not exist", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-reset-nodir-"));
+  
+  const { code, stderr } = await runNodeCli([CLI_PATH, "reset"], { cwd: tmp });
+  assert.equal(code, 1);
+  assert.match(stderr, /No \.loopy directory found/);
+});
+
+test("`reset` when .loopy directory is already clean", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-reset-clean-"));
+  
+  const loopyDir = path.join(tmp, ".loopy");
+  await fs.mkdir(loopyDir, { recursive: true });
+  
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "reset"], { cwd: tmp });
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /Reset complete/);
+  assert.match(stdout, /Nothing to archive/);
 });
 
 test("`hint` appends and appears in next `.loopy/PROMPT.md`", async () => {

@@ -85,7 +85,7 @@ function printHelp() {
       label: 'hint "<text>"',
       desc: "Save a hint for the next prompt\nAppends to `.loopy/hints.md` (included in the next prompt under \"Hints\")\nUse --reset to clear all hints, --pop to remove the last hint",
     },
-    { label: "init", desc: "Initialize `.loopy/` files if missing\nCreates `.loopy/LOOPY_PLAN.md` and `.loopy/hints.md`" },
+    { label: "reset", desc: "Archive all files from `.loopy/` to `.loopy/archive/reset-<timestamp>/`\nClears loop state for a fresh start" },
     { label: "help", desc: "Show help" },
   ];
 
@@ -164,7 +164,7 @@ function printHelp() {
     "  loopy [options]",
     "  loopy status",
     '  loopy hint "<text>"',
-    "  loopy init",
+    "  loopy reset",
     "  loopy help",
     "  loopy --help, -h",
     "  loopy --version",
@@ -356,71 +356,62 @@ async function runHint(flags) {
   console.log(`Hint saved to ${path.relative(cwd, hintsFile) || hintsFile}`);
 }
 
-async function runInit(flags) {
+async function runReset(flags) {
   const cwd = process.cwd();
   const loopyDir = resolveFrom(cwd, DEFAULTS.loopyDir);
-  const hintsFile = resolveFrom(cwd, flags.hints || DEFAULTS.hintsFile);
-  const planFile = resolveFrom(cwd, flags["plan-file"] || flags["plan-doc"] || DEFAULTS.taskFile);
 
-  await fs.mkdir(loopyDir, { recursive: true });
-
-  const created = [];
-
-  // Hints file (append-only).
-  const existingHints = await readText(hintsFile);
-  if (!existingHints) {
-    await writeText(hintsFile, "# Loopy Hints\n\n");
-    created.push(path.relative(cwd, hintsFile) || hintsFile);
+  // Check if .loopy directory exists
+  try {
+    await fs.access(loopyDir);
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      console.error(`No .loopy directory found at ${path.relative(cwd, loopyDir) || loopyDir}`);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
   }
 
-  // Plan file scaffold (do not overwrite).
-  const existingPlan = await readText(planFile);
-  if (!existingPlan) {
-    const template = [
-      "---",
-      "agent_command: \"cursor-agent\"",
-      "test_command: \"npm test\"",
-      "max_iterations: 10",
-      "max_minutes: 60",
-      "backoff_ms: 5000",
-      "rotate_bytes: 150000",
-      "phase_defaults:",
-      "  stop_on: all_checked",
-      "  test_command: \"npm test\"",
-      "phases:",
-      "  - id: plan",
-      "    title: Plan",
-      "  - id: implement",
-      "    title: Implement",
-      "  - id: verify",
-      "    title: Verify",
-      "    stop_on: [all_checked, tests_pass]",
-      "    test_command: \"npm test\"",
-      "---",
-      "",
-      "# Plan",
-      "",
-      "## Phase: plan",
-      "<!-- loopy:phase plan -->",
-      "- [ ] Describe the goal and constraints.",
-      "",
-      "## Phase: implement",
-      "<!-- loopy:phase implement -->",
-      "- [ ] Implement the requested changes.",
-      "",
-      "## Phase: verify",
-      "<!-- loopy:phase verify -->",
-      "- [ ] Run tests and validate behavior.",
-      "",
-    ].join("\n");
-    await writeText(planFile, template);
-    created.push(path.relative(cwd, planFile) || planFile);
+  // Create archive directory with timestamp
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const archiveDir = path.join(loopyDir, "archive", `reset-${timestamp}`);
+  await fs.mkdir(archiveDir, { recursive: true });
+
+  // Move all files except archive directory
+  const entries = await fs.readdir(loopyDir);
+  const moved = [];
+  
+  for (const entry of entries) {
+    if (entry === "archive") continue;
+    
+    const sourcePath = path.join(loopyDir, entry);
+    const destinationPath = path.join(archiveDir, entry);
+    
+    try {
+      await fs.rename(sourcePath, destinationPath);
+      moved.push(entry);
+    } catch (err) {
+      if (err && err.code === "EXDEV") {
+        // Cross-device move - copy then delete
+        const stat = await fs.stat(sourcePath);
+        if (stat.isDirectory()) {
+          await fs.cp(sourcePath, destinationPath, { recursive: true });
+        } else {
+          await fs.copyFile(sourcePath, destinationPath);
+        }
+        await fs.rm(sourcePath, { recursive: true, force: true });
+        moved.push(entry);
+      } else {
+        throw err;
+      }
+    }
   }
 
-  if (created.length) {
-    console.log(["Initialized:", ...created.map((p) => `- ${p}`)].join("\n"));
+  const relArchive = path.relative(cwd, archiveDir) || archiveDir;
+  if (moved.length) {
+    console.log(`Reset complete. Moved ${moved.length} item(s) to ${relArchive}`);
   } else {
-    console.log("Nothing to init (files already exist).");
+    console.log(`Reset complete. Nothing to archive (already clean).`);
   }
 }
 
@@ -456,8 +447,8 @@ async function runCli(argv) {
     return;
   }
 
-  if (command === "init") {
-    await runInit(flags);
+  if (command === "reset") {
+    await runReset(flags);
     return;
   }
 
