@@ -19,6 +19,17 @@ function shellQuotePosix(value) {
   return `'${String(value).replace(/'/g, `'\"'\"'`)}'`;
 }
 
+function applyNoColorEnv(env, noColor) {
+  if (!noColor) return env;
+  return {
+    ...env,
+    NO_COLOR: "1",
+    FORCE_COLOR: "0",
+    CLICOLOR: "0",
+    CLICOLOR_FORCE: "0",
+  };
+}
+
 function buildShellCommand(command, inputFile) {
   if (process.platform === "win32") {
     return { shell: "cmd.exe", args: ["/c", command] };
@@ -37,9 +48,15 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
   const agentStreamLogPath =
     options && options.agentStreamLogPath ? String(options.agentStreamLogPath) : "";
   const streamToTerminal = Boolean(options && options.streamToTerminal);
+  const hasNoColorOption = Object.prototype.hasOwnProperty.call(options || {}, "noColor");
+  const noColor = hasNoColorOption
+    ? Boolean(options.noColor)
+    : Object.prototype.hasOwnProperty.call(process.env, "NO_COLOR");
+  const baseEnv = { ...(process.env || {}), ...(options && options.env ? options.env : {}) };
+  const childEnv = applyNoColorEnv(baseEnv, noColor);
   // Use a PTY only when it's available (node-pty installed) and streaming was requested.
   // Otherwise fall back to normal pipes (more portable; matches test expectations).
-  const pty = streamToTerminal ? loadPty() : null;
+  const pty = streamToTerminal && !noColor ? loadPty() : null;
 
   let appendQueue = Promise.resolve();
   const appendToLog = (payload) => {
@@ -68,7 +85,7 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
         cols: 120,
         rows: 40,
         cwd: cwd || process.cwd(),
-        env: process.env,
+        env: childEnv,
       });
     } catch (_) {
       child = null;
@@ -105,7 +122,7 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
     const child = spawn(command, [], {
       shell: true,
       stdio: ["pipe", "pipe", "pipe"],
-      env: process.env,
+      env: childEnv,
       cwd: cwd || process.cwd(),
     });
 

@@ -23,6 +23,22 @@ function truncate(text, maxBytes) {
   return `...TRUNCATED (${buffer.length - maxBytes} bytes)\n` + slice.toString();
 }
 
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatLocalTimestamp(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = pad2(date.getMonth() + 1);
+  const day = pad2(date.getDate());
+  const hour = pad2(date.getHours());
+  const minute = pad2(date.getMinutes());
+  const second = pad2(date.getSeconds());
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
 function normalizeTaskSeedText(raw) {
   if (raw === undefined || raw === null) return "";
   let text = String(raw);
@@ -49,6 +65,7 @@ function renderTemplate(template, vars) {
 }
 
 module.exports = {
+  formatLocalTimestamp,
   redact,
   truncate,
   normalizeTaskSeedText,

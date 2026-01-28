@@ -19,9 +19,9 @@ const { formatProgress, ensureGuardrails, appendSign, formatPrompt } = require("
 const { confirm, promptLine } = require("./confirm");
 const { runShellCommand } = require("./shell");
 const { loadState } = require("./state");
-const { printStep } = require("./steps");
+const { configureSteps, endIteration, printBlankLine, printStep, startIteration } = require("./steps");
 const { getTaskLine, parseTask, toSlug } = require("./task");
-const { redact, truncate, normalizeTaskSeedText } = require("./text");
+const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const {
   ensureGitRepo,
@@ -31,6 +31,8 @@ const {
   gitSwitchBranch,
 } = require("./git");
 
+const ARCHIVE_DIRNAME = "archive";
+
 function parseSkipPhaseList(value) {
   const raw = String(value || "").trim();
   if (!raw) return [];
@@ -39,6 +41,230 @@ function parseSkipPhaseList(value) {
     .map((s) => toSlug(s) || s.trim())
     .map((s) => String(s || "").trim())
     .filter(Boolean);
+}
+
+function normalizeChecklistItems(items) {
+  if (!Array.isArray(items)) return [];
+  const normalized = [];
+  for (const item of items) {
+    if (!item) continue;
+    const text = String(item.text || "").trim();
+    if (!text) continue;
+    normalized.push({ checked: Boolean(item.checked), text });
+  }
+  return normalized;
+}
+
+function collectPlanSections(parsedTask) {
+  const phases = (parsedTask && parsedTask.phases) || [];
+  if (phases.length) {
+    return phases.map((phase) => {
+      const section = parsedTask.phaseSections && parsedTask.phaseSections[phase.id];
+      return {
+        scope: "phase",
+        id: phase.id,
+        title: String(phase.title || phase.id || "").trim(),
+        items: normalizeChecklistItems(section && section.checklist),
+      };
+    });
+  }
+  return [
+    {
+      scope: "plan",
+      id: "plan",
+      title: "Plan",
+      items: normalizeChecklistItems(parsedTask && parsedTask.checklist),
+    },
+  ];
+}
+
+function formatChecklistItem(item) {
+  return `[${item.checked ? "x" : " "}] ${item.text}`;
+}
+
+function formatSectionLabel(section) {
+  const title = String(section.title || "").trim();
+  const id = String(section.id || "").trim();
+  if (title && id && title !== id) return `${title} (${id})`;
+  return title || id || "phase";
+}
+
+function resolvePhaseLabel(parsedTask, phaseId) {
+  if (!phaseId) return "";
+  const phases = parsedTask && parsedTask.phases;
+  if (!Array.isArray(phases)) return String(phaseId);
+  const match = phases.find((phase) => phase && String(phase.id || "").trim() === String(phaseId));
+  const title = match && String(match.title || "").trim();
+  return title || String(phaseId);
+}
+
+function formatPlanOverviewLines(parsedTask, options = {}) {
+  const sections = collectPlanSections(parsedTask);
+  if (!sections.length) return [];
+  const verbose = Boolean(options.verbose);
+  const totals = countChecklist(sections.flatMap((section) => section.items));
+  const hasPhases = sections.some((section) => section.scope === "phase");
+  const totalLabel = `${totals.total} task${totals.total === 1 ? "" : "s"}`;
+
+  if (verbose) {
+    const lines = [
+      {
+        message: hasPhases ? `Plan details (${sections.length} phases, ${totalLabel})` : `Plan details (${totalLabel})`,
+        kind: "plan",
+      },
+    ];
+    for (const section of sections) {
+      if (section.scope === "phase") {
+        lines.push({ message: formatSectionLabel(section), kind: "plan-item", indent: 2 });
+        if (!section.items.length) {
+          lines.push({ message: "(no tasks)", kind: "plan-item", indent: 4 });
+          continue;
+        }
+        for (const item of section.items) {
+          lines.push({ message: formatChecklistItem(item), kind: "plan-item", indent: 4 });
+        }
+        continue;
+      }
+      if (!section.items.length) {
+        lines.push({ message: "(no tasks)", kind: "plan-item", indent: 2 });
+        continue;
+      }
+      for (const item of section.items) {
+        lines.push({ message: formatChecklistItem(item), kind: "plan-item", indent: 2 });
+      }
+    }
+    return lines;
+  }
+
+  const header = hasPhases
+    ? `Plan ${sections.length} phase${sections.length === 1 ? "" : "s"}, ${totalLabel}`
+    : `Plan ${totalLabel}`;
+  const lines = [{ message: header, kind: "plan" }];
+  if (hasPhases) {
+    for (const section of sections) {
+      lines.push({
+        message: `${formatSectionLabel(section)} (${section.items.length})`,
+        kind: "plan-item",
+        indent: 2,
+      });
+    }
+  }
+  return lines;
+}
+
+function countCheckedByText(items) {
+  const counts = new Map();
+  for (const item of items || []) {
+    if (!item || !item.checked) continue;
+    const text = String(item.text || "").trim();
+    if (!text) continue;
+    counts.set(text, (counts.get(text) || 0) + 1);
+  }
+  return counts;
+}
+
+function diffNewlyChecked(beforeItems, afterItems) {
+  const before = countCheckedByText(beforeItems);
+  const after = countCheckedByText(afterItems);
+  const newly = [];
+  for (const [text, afterCount] of after.entries()) {
+    const beforeCount = before.get(text) || 0;
+    const diff = afterCount - beforeCount;
+    if (diff > 0) {
+      for (let i = 0; i < diff; i += 1) {
+        newly.push(text);
+      }
+    }
+  }
+  return newly;
+}
+
+function findNewlyCompletedTasks(parsedBefore, parsedAfter) {
+  const beforeSections = collectPlanSections(parsedBefore);
+  const afterSections = collectPlanSections(parsedAfter);
+  const beforeByKey = new Map();
+  for (const section of beforeSections) {
+    const key = section.scope === "phase" ? `phase:${section.id}` : "plan";
+    beforeByKey.set(key, section.items);
+  }
+
+  const results = [];
+  for (const section of afterSections) {
+    const key = section.scope === "phase" ? `phase:${section.id}` : "plan";
+    const beforeItems = beforeByKey.get(key) || [];
+    const newly = diffNewlyChecked(beforeItems, section.items);
+    if (!newly.length) continue;
+    results.push({ ...section, items: newly });
+  }
+  return results;
+}
+
+function formatCompletedTaskLines(completedSections) {
+  if (!completedSections || !completedSections.length) return [];
+  const lines = [{ message: "Tasks completed", kind: "tasks" }];
+  for (const section of completedSections) {
+    if (section.scope === "phase") {
+      lines.push({ message: formatSectionLabel(section), kind: "tasks", indent: 2 });
+      for (const text of section.items) {
+        lines.push({ message: `[x] ${text}`, kind: "tasks", indent: 4 });
+      }
+      continue;
+    }
+    for (const text of section.items) {
+      lines.push({ message: `[x] ${text}`, kind: "tasks", indent: 2 });
+    }
+  }
+  return lines;
+}
+
+function countChecklist(items) {
+  let total = 0;
+  let checked = 0;
+  for (const item of items || []) {
+    total += 1;
+    if (item.checked) checked += 1;
+  }
+  return { total, checked };
+}
+
+function summarizePlanProgress(parsedTask, currentPhaseId) {
+  const sections = collectPlanSections(parsedTask);
+  const totals = countChecklist(sections.flatMap((section) => section.items));
+  let phaseSummary = null;
+  if (currentPhaseId) {
+    const phase = sections.find((section) => section.scope === "phase" && section.id === currentPhaseId);
+    if (phase) {
+      phaseSummary = { id: phase.id, ...countChecklist(phase.items) };
+    }
+  }
+  return { ...totals, phase: phaseSummary };
+}
+
+function formatProgressLine(summary) {
+  if (!summary || !summary.total) return { message: "Tasks progress unavailable", kind: "tasks" };
+  let line = `Tasks ${summary.checked}/${summary.total} complete`;
+  if (summary.phase && summary.phase.total) {
+    line += `; phase ${summary.phase.id}: ${summary.phase.checked}/${summary.phase.total}`;
+  }
+  return { message: line, kind: "tasks" };
+}
+
+function printStepLines(lines, options) {
+  if (!Array.isArray(lines)) return;
+  for (const line of lines) {
+    if (!line) continue;
+    if (typeof line === "string") {
+      if (!line.trim()) continue;
+      printStep(line, options);
+      continue;
+    }
+    if (typeof line === "object") {
+      const { message, text, ...lineOptions } = line;
+      const msg = message != null ? message : text;
+      if (!String(msg || "").trim()) continue;
+      printStep(msg, { ...options, ...lineOptions });
+    }
+  }
 }
 
 async function readStdinText() {
@@ -308,7 +534,8 @@ async function archiveCompletedLoop(config) {
     String(fmGit.branch || fmGit.git_branch || fmGit.gitBranch || "").trim();
 
   const baseDir = config.loopyDir || path.dirname(taskPath);
-  const archiveDir = path.join(baseDir, "completed_loops", archiveLoopFolderName(branch));
+  const archiveRoot = path.join(baseDir, ARCHIVE_DIRNAME);
+  const archiveDir = path.join(archiveRoot, archiveLoopFolderName(branch));
   await fs.mkdir(archiveDir, { recursive: true });
 
   const prettyArchive = prettyPath(config.cwd, archiveDir);
@@ -316,7 +543,7 @@ async function archiveCompletedLoop(config) {
 
   const entries = await fs.readdir(baseDir);
   for (const entry of entries) {
-    if (entry === "completed_loops") continue;
+    if (entry === ARCHIVE_DIRNAME) continue;
     const sourcePath = path.join(baseDir, entry);
     const destinationPath = path.join(archiveDir, entry);
     await movePath(sourcePath, destinationPath);
@@ -350,7 +577,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     // If auto-phase is on, try to generate phases; otherwise create a minimal legacy task file.
     let nextText = "";
     if (config.autoPhase) {
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed);
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: config.testCommand });
@@ -416,7 +643,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
 
     let nextText = existing;
     if (config.autoPhase) {
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed);
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || config.testCommand });
@@ -460,7 +687,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     const hasPhases = Boolean(parsed.phases && parsed.phases.length);
     if (!hasPhases) {
       const seed = parsed.body && parsed.body.trim() ? parsed.body.trim() : existing.trim();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed);
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : null;
@@ -494,6 +721,8 @@ async function runIteration(config) {
   let bytesRead = 0;
   let bytesWritten = 0;
   const guardrailStopReasons = [];
+  let iterationStatus = "failure";
+  let testStatus = "n/a";
 
   const taskText = await readText(config.taskFile);
   bytesRead += Buffer.byteLength(taskText);
@@ -505,7 +734,7 @@ async function runIteration(config) {
 
   if (parsedTask.allChecked) {
     await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
-    printStep("plan: complete; stopping loop");
+    printStep("Plan complete; stopping loop", { kind: "plan" });
     return { status: "complete", bytes: 0 };
   }
 
@@ -530,326 +759,360 @@ async function runIteration(config) {
   const rotationPending = Boolean(state.rotatePending);
 
   const currentPhaseId = pickCurrentPhaseId(parsedTask, state || {}, config);
-  const phaseLabel = currentPhaseId ? `, phase: ${currentPhaseId}` : "";
-  printStep(`start (rotation: ${rotationPending ? "fresh" : "standard"}${phaseLabel})`, { iteration });
+  const phaseLabel = resolvePhaseLabel(parsedTask, currentPhaseId);
+  const iterationStartedAt = new Date();
+  startIteration({ iteration, phase: phaseLabel, startedAt: iterationStartedAt });
+  try {
+    printStep(`Rotation ${rotationPending ? "fresh" : "standard"}`, { iteration, kind: "meta" });
 
-  const lastOutputRaw = rotationPending ? "" : await readText(path.join(config.loopyDir, "last_agent_output.txt"));
-  bytesRead += Buffer.byteLength(lastOutputRaw);
-  const lastOutput = truncate(lastOutputRaw, 4000);
+    const lastOutputRaw = rotationPending ? "" : await readText(path.join(config.loopyDir, "last_agent_output.txt"));
+    bytesRead += Buffer.byteLength(lastOutputRaw);
+    const lastOutput = truncate(lastOutputRaw, 4000);
 
-  const hintsTextRaw = await readText(config.hintsFile);
-  bytesRead += Buffer.byteLength(hintsTextRaw);
-  const hintsText = truncate(hintsTextRaw, 8000);
+    const hintsTextRaw = await readText(config.hintsFile);
+    bytesRead += Buffer.byteLength(hintsTextRaw);
+    const hintsText = truncate(hintsTextRaw, 8000);
 
-  const prompt = formatPrompt({
-    iteration,
-    taskText,
-    taskSeedText: config.taskSeedText || "",
-    taskSeedSource: config.taskSeedSource || "",
-    guardrailsText,
-    progressText: progressText || "(no progress recorded yet)",
-    lastOutput,
-    rotationPending,
-    currentPhase: currentPhaseId,
-    taskFilePath: config.taskFile,
-    hintsText,
-  });
-
-  await writeText(config.promptFile, prompt);
-  bytesWritten += Buffer.byteLength(prompt);
-  printStep(`prompt: saved to ${prettyPath(config.cwd, config.promptFile)}`, { iteration });
-
-  await appendActivity(config.activityLog, [
-    `Iteration ${iteration} start`,
-    `Rotation pending: ${rotationPending ? "yes" : "no"}`,
-  ]);
-
-  if (config.dryRun) {
-    await appendActivity(config.activityLog, ["Dry run enabled. Skipping agent execution."]);
-    printStep("dry run: enabled; skipping agent execution", { iteration });
-    return { status: "dry-run", bytes: bytesRead + bytesWritten };
-  }
-
-  if (!config.agentCommand) {
-    throw new Error(
-      `Missing agent_command. Set it in ${prettyPath(config.cwd, config.taskFile)} front matter or use --agent.`
-    );
-  }
-
-  if (config.preIteration) {
-    printStep(`hook preIteration: run ${redact(config.preIteration)}`, { iteration });
-    const hookResult = await runShellCommand(config.preIteration, "", DEFAULTS.maxOutputBytes, {
-      cwd: config.cwd,
+    const prompt = formatPrompt({
+      iteration,
+      taskText,
+      taskSeedText: config.taskSeedText || "",
+      taskSeedSource: config.taskSeedSource || "",
+      guardrailsText,
+      progressText: progressText || "(no progress recorded yet)",
+      lastOutput,
+      rotationPending,
+      currentPhase: currentPhaseId,
+      taskFilePath: config.taskFile,
+      hintsText,
     });
-    await appendActivity(config.activityLog, [`preIteration hook exit ${hookResult.code}`]);
-    printStep(`hook preIteration: exit ${hookResult.code}`, { iteration });
-  }
 
-  const agentStreamLogPath = config.agentStreamLog
-    ? resolveFrom(config.cwd, config.agentStreamLog)
-    : path.join(config.loopyDir, "agent_stream.log");
-  const lastAgentOutputPath = path.join(config.loopyDir, "last_agent_output.txt");
-  const lastTestOutputPath = path.join(config.loopyDir, "last_test_output.txt");
+    await writeText(config.promptFile, prompt);
+    bytesWritten += Buffer.byteLength(prompt);
+    printStep(`Prompt saved to ${prettyPath(config.cwd, config.promptFile)}`, { iteration, kind: "prompt" });
 
-  // Write a small header so runs are easy to separate.
-  await fs.mkdir(path.dirname(agentStreamLogPath), { recursive: true });
-  await fs.appendFile(
-    agentStreamLogPath,
-    `\n\n===== Iteration ${iteration} @ ${new Date().toISOString()} =====\n$ ${redact(
-      config.agentCommand
-    )}\n\n`,
-    "utf8"
-  );
+    await appendActivity(config.activityLog, [
+      `Iteration ${iteration} start`,
+      `Rotation pending: ${rotationPending ? "yes" : "no"}`,
+    ]);
 
-  printStep(
-    `agent: run ${redact(config.agentCommand)} (stream log: ${prettyPath(config.cwd, agentStreamLogPath)})`,
-    { iteration }
-  );
-  const agentResult = await runShellCommand(config.agentCommand, prompt, DEFAULTS.maxOutputBytes, {
-    cwd: config.cwd,
-    agentStreamLogPath,
-    streamToTerminal: Boolean(config.stream),
-  });
-  const redactedStdout = redact(agentResult.stdout);
-  const redactedStderr = redact(agentResult.stderr);
-  const combinedOutput = truncate(`${redactedStdout}\n${redactedStderr}`, DEFAULTS.maxOutputBytes);
+    if (config.dryRun) {
+      await appendActivity(config.activityLog, ["Dry run enabled. Skipping agent execution."]);
+      printStep("Dry run enabled; skipping agent run", { iteration, kind: "result", level: "warn" });
+      iterationStatus = "dry-run";
+      return { status: "dry-run", bytes: bytesRead + bytesWritten };
+    }
 
-  await writeText(lastAgentOutputPath, combinedOutput);
-  bytesWritten += Buffer.byteLength(combinedOutput);
+    if (!config.agentCommand) {
+      throw new Error(
+        `Missing agent_command. Set it in ${prettyPath(config.cwd, config.taskFile)} front matter or use --agent.`
+      );
+    }
 
-  let status = agentResult.code === 0 ? "success" : "failure";
-  let lastError = "";
-  let errorSignature = "";
+    if (config.preIteration) {
+      printStep(`Hook pre-iteration run ${redact(config.preIteration)}`, { iteration, kind: "hook" });
+      const hookResult = await runShellCommand(config.preIteration, "", DEFAULTS.maxOutputBytes, {
+        cwd: config.cwd,
+        noColor: config.noColor,
+      });
+      await appendActivity(config.activityLog, [`preIteration hook exit ${hookResult.code}`]);
+      printStep(`Hook pre-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
+    }
 
-  if (status === "failure") {
-    const firstErrorLine = (redactedStderr || redactedStdout).split(/\r?\n/).find(Boolean) || "unknown";
-    lastError = firstErrorLine;
-    errorSignature = `${config.agentCommand}::${firstErrorLine}`;
+    const agentStreamLogPath = config.agentStreamLog
+      ? resolveFrom(config.cwd, config.agentStreamLog)
+      : path.join(config.loopyDir, "agent_stream.log");
+    const lastAgentOutputPath = path.join(config.loopyDir, "last_agent_output.txt");
+    const lastTestOutputPath = path.join(config.loopyDir, "last_test_output.txt");
+
+    // Write a small header so runs are easy to separate.
+    await fs.mkdir(path.dirname(agentStreamLogPath), { recursive: true });
+    await fs.appendFile(
+      agentStreamLogPath,
+      `\n\n===== Iteration ${iteration} @ ${new Date().toISOString()} =====\n$ ${redact(
+        config.agentCommand
+      )}\n\n`,
+      "utf8"
+    );
+
     printStep(
-      `agent: exit ${agentResult.code}; error: ${lastError} (see ${prettyPath(
-        config.cwd,
-        lastAgentOutputPath
-      )})`,
-      { iteration, level: "error" }
+      `Agent run ${redact(config.agentCommand)} (stream log: ${prettyPath(config.cwd, agentStreamLogPath)})`,
+      { iteration, kind: "agent" }
     );
-  } else {
-    printStep(`agent: exit ${agentResult.code}`, { iteration });
-  }
-
-  let testStatus = "n/a";
-  const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTask, currentPhaseId) : config.testCommand;
-  if (status === "success" && effectiveTestCommand) {
-    printStep(`tests: run ${redact(effectiveTestCommand)}`, { iteration });
-    const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
+    const agentResult = await runShellCommand(config.agentCommand, prompt, DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
+      agentStreamLogPath,
+      streamToTerminal: Boolean(config.stream),
+      noColor: config.noColor,
     });
-    const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
-    await writeText(lastTestOutputPath, testOutput);
-    bytesWritten += Buffer.byteLength(testOutput);
-    const testOutcome = testResult.code === 0 ? "pass" : "fail";
-    testStatus = `${testOutcome} @ ${new Date().toISOString()}`;
-    if (testOutcome === "fail") {
+    const redactedStdout = redact(agentResult.stdout);
+    const redactedStderr = redact(agentResult.stderr);
+    const combinedOutput = truncate(`${redactedStdout}\n${redactedStderr}`, DEFAULTS.maxOutputBytes);
+
+    await writeText(lastAgentOutputPath, combinedOutput);
+    bytesWritten += Buffer.byteLength(combinedOutput);
+
+    let status = agentResult.code === 0 ? "success" : "failure";
+    let lastError = "";
+    let errorSignature = "";
+
+    if (status === "failure") {
+      const firstErrorLine = (redactedStderr || redactedStdout).split(/\r?\n/).find(Boolean) || "unknown";
+      lastError = firstErrorLine;
+      errorSignature = `${config.agentCommand}::${firstErrorLine}`;
       printStep(
-        `tests: result fail (see ${prettyPath(config.cwd, lastTestOutputPath)})`,
-        { iteration, level: "error" }
+        `Agent exit ${agentResult.code}; error: ${lastError} (see ${prettyPath(
+          config.cwd,
+          lastAgentOutputPath
+        )})`,
+        { iteration, level: "error", kind: "agent" }
       );
     } else {
-      printStep(`tests: result pass`, { iteration });
+      printStep(`Agent exit ${agentResult.code}`, { iteration, kind: "agent" });
     }
-    if (testOutcome === "fail") {
-      status = "failure";
-      lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
-      errorSignature = `${effectiveTestCommand}::${lastError}`;
-    }
-  }
 
-  const taskAfter = await readText(config.taskFile);
-  bytesRead += Buffer.byteLength(taskAfter);
-  const taskComplete = taskAfter ? parseTask(taskAfter).allChecked : false;
-  const taskLine = getTaskLine(taskAfter || taskText, { phaseId: currentPhaseId });
-  const taskContext = extractChangeType(taskLine);
-  const taskSummary = taskContext.summary;
-  let changeType = taskContext.changeType;
-  if (taskContext.changeType === "chore" && !/^[a-zA-Z]+\s*:/.test(taskLine || "")) {
-    const agentType = await inferChangeTypeFromAgent(config.agentCommand, taskLine);
-    changeType = agentType || inferChangeTypeHeuristic(taskLine);
-  }
-  await appendActivity(config.activityLog, [`change_type inferred: ${changeType} (task: ${taskLine})`]);
-
-  let postIterationRan = false;
-  if (status === "success" && config.postIteration) {
-    printStep(`hook postIteration: run ${redact(config.postIteration)}`, { iteration });
-    const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
-      cwd: config.cwd,
-    });
-    postIterationRan = true;
-    await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
-    printStep(`hook postIteration: exit ${hookResult.code}`, { iteration });
-  }
-
-  if (status === "success") {
-    try {
-      if (config.gitCommit) {
-        printStep("git: commit enabled; checking changes", { iteration });
-      }
-      const commitResult = await gitCommitIfNeeded(config, {
-        iteration,
-        status,
-        testStatus,
-        taskComplete,
-        taskSummary,
-        changeType,
+    const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTask, currentPhaseId) : config.testCommand;
+    if (status === "success" && effectiveTestCommand) {
+      printStep(`Tests run ${redact(effectiveTestCommand)}`, { iteration, kind: "tests" });
+      const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
+        cwd: config.cwd,
+        noColor: config.noColor,
       });
-      if (commitResult.committed) {
-        await appendActivity(config.activityLog, [
-          `git commit: ${commitResult.hash || "(unknown hash)"} ${commitResult.message}`,
-        ]);
-        printStep(`git: commit created ${commitResult.hash || "(unknown hash)"}`, { iteration });
-      } else if (config.gitCommit) {
-        printStep(`git: commit skipped: ${commitResult.reason}`, { iteration });
+      const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
+      await writeText(lastTestOutputPath, testOutput);
+      bytesWritten += Buffer.byteLength(testOutput);
+      const testOutcome = testResult.code === 0 ? "pass" : "fail";
+      const testTimestamp = formatLocalTimestamp(new Date());
+      testStatus = testTimestamp ? `${testOutcome} @ ${testTimestamp}` : `${testOutcome}`;
+      if (testOutcome === "fail") {
+        printStep(
+          `Tests fail (see ${prettyPath(config.cwd, lastTestOutputPath)})`,
+          { iteration, level: "error", kind: "tests" }
+        );
+      } else {
+        printStep("Tests pass", { iteration, kind: "tests", level: "success" });
       }
-    } catch (err) {
-      status = "failure";
-      lastError = err && err.message ? err.message : String(err);
-      errorSignature = `git commit::${lastError}`;
-      printStep(`git: commit failed: ${lastError}`, { iteration, level: "error" });
+      if (testOutcome === "fail") {
+        status = "failure";
+        lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
+        errorSignature = `${effectiveTestCommand}::${lastError}`;
+      }
     }
-  }
 
-  if (status === "failure" && config.onFailure) {
-    printStep(`hook onFailure: run ${redact(config.onFailure)}`, { iteration });
-    const hookResult = await runShellCommand(config.onFailure, "", DEFAULTS.maxOutputBytes, {
-      cwd: config.cwd,
-    });
-    await appendActivity(config.activityLog, [`onFailure hook exit ${hookResult.code}`]);
-    printStep(`hook onFailure: exit ${hookResult.code}`, { iteration });
-  }
+    const taskAfter = await readText(config.taskFile);
+    bytesRead += Buffer.byteLength(taskAfter);
+    const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
+    const taskComplete = Boolean(parsedTaskAfter.allChecked);
+    const completedSections = findNewlyCompletedTasks(parsedTask, parsedTaskAfter);
+    printStepLines(formatCompletedTaskLines(completedSections), { iteration });
+    printStepLines([formatProgressLine(summarizePlanProgress(parsedTaskAfter, currentPhaseId))], { iteration });
+    const taskLine = getTaskLine(taskAfter || taskText, { phaseId: currentPhaseId });
+    const taskContext = extractChangeType(taskLine);
+    const taskSummary = taskContext.summary;
+    let changeType = taskContext.changeType;
+    if (taskContext.changeType === "chore" && !/^[a-zA-Z]+\s*:/.test(taskLine || "")) {
+      if (config.gitCommit) {
+        const agentType = await inferChangeTypeFromAgent(config.agentCommand, taskLine, {
+          noColor: config.noColor,
+        });
+        changeType = agentType || inferChangeTypeHeuristic(taskLine);
+      } else {
+        changeType = inferChangeTypeHeuristic(taskLine);
+      }
+    }
+    await appendActivity(config.activityLog, [`change_type inferred: ${changeType} (task: ${taskLine})`]);
 
-  if (!postIterationRan && config.postIteration) {
-    printStep(`hook postIteration: run ${redact(config.postIteration)}`, { iteration });
-    const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
-      cwd: config.cwd,
-    });
-    await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
-    printStep(`hook postIteration: exit ${hookResult.code}`, { iteration });
-  }
+    let postIterationRan = false;
+    if (status === "success" && config.postIteration) {
+      printStep(`Hook post-iteration run ${redact(config.postIteration)}`, { iteration, kind: "hook" });
+      const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
+        cwd: config.cwd,
+        noColor: config.noColor,
+      });
+      postIterationRan = true;
+      await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
+      printStep(`Hook post-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
+    }
 
-  const modifiedFiles = await getGitModifiedFiles(config.cwd);
-  let nextState = {
-    ...state,
-    iteration,
-    lastStatus: taskComplete ? "complete" : status,
-    lastTest: testStatus,
-    lastError: lastError || state.lastError || "",
-    lastBytes: bytesRead + bytesWritten,
-    rotatePending: false,
-    updatedAt: new Date().toISOString(),
-    startedAt: state.startedAt || new Date().toISOString(),
-    history: state.history || [],
-    currentPhase: currentPhaseId || state.currentPhase || "",
-    phaseHistory: state.phaseHistory || [],
-  };
+    if (status === "success") {
+      try {
+        if (config.gitCommit) {
+          printStep("Git commit enabled; checking changes", { iteration, kind: "git" });
+        }
+        const commitResult = await gitCommitIfNeeded(config, {
+          iteration,
+          status,
+          testStatus,
+          taskComplete,
+          taskSummary,
+          changeType,
+        });
+        if (commitResult.committed) {
+          await appendActivity(config.activityLog, [
+            `git commit: ${commitResult.hash || "(unknown hash)"} ${commitResult.message}`,
+          ]);
+          printStep(`Git commit ${commitResult.hash || "(unknown hash)"}`, {
+            iteration,
+            kind: "git",
+            level: "success",
+          });
+        } else if (config.gitCommit) {
+          printStep(`Git commit skipped: ${commitResult.reason}`, { iteration, kind: "git" });
+        }
+      } catch (err) {
+        status = "failure";
+        lastError = err && err.message ? err.message : String(err);
+        errorSignature = `git commit::${lastError}`;
+        printStep(`Git commit failed: ${lastError}`, { iteration, level: "error", kind: "git" });
+      }
+    }
 
-  const historyEntry = `${nextState.updatedAt} iteration ${iteration} ${status} (test: ${testStatus})`;
-  nextState.history = [...nextState.history, historyEntry].slice(-50);
+    if (status === "failure" && config.onFailure) {
+      printStep(`Hook on-failure run ${redact(config.onFailure)}`, { iteration, kind: "hook" });
+      const hookResult = await runShellCommand(config.onFailure, "", DEFAULTS.maxOutputBytes, {
+        cwd: config.cwd,
+        noColor: config.noColor,
+      });
+      await appendActivity(config.activityLog, [`onFailure hook exit ${hookResult.code}`]);
+      printStep(`Hook on-failure exit ${hookResult.code}`, { iteration, kind: "hook" });
+    }
 
-  // Phase completion / progression.
-  if (status === "success" && currentPhaseId && parsedTask.phases && parsedTask.phases.length) {
-    const stopOn = phaseStopOn(parsedTask, currentPhaseId);
-    const phaseChecked = isPhaseAllChecked(parseTask(taskAfter || taskText), currentPhaseId);
-    const criteria = stopOn.length ? stopOn : ["all_checked"];
-    const needsAllChecked = criteria.includes("all_checked");
-    const needsTests = criteria.includes("tests_pass");
-    const testsOk = !needsTests || (testStatus !== "n/a" ? /^pass\b/i.test(testStatus) : didTestsPass(nextState));
-    const phaseOk = !needsAllChecked || phaseChecked;
-    const phaseComplete = phaseOk && testsOk;
+    if (!postIterationRan && config.postIteration) {
+      printStep(`Hook post-iteration run ${redact(config.postIteration)}`, { iteration, kind: "hook" });
+      const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
+        cwd: config.cwd,
+        noColor: config.noColor,
+      });
+      await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
+      printStep(`Hook post-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
+    }
 
-    if (phaseComplete) {
-      const nextPhase = computeNextPhaseId(parsedTask, currentPhaseId, config);
-      nextState.phaseHistory = [...(nextState.phaseHistory || [])].concat([
-        `${nextState.updatedAt} phase ${currentPhaseId} complete`,
-      ]).slice(-100);
-      if (config.phaseOnly) {
-        nextState.lastStatus = "phase-complete";
-      } else if (nextPhase) {
-        nextState.currentPhase = nextPhase;
+    const modifiedFiles = await getGitModifiedFiles(config.cwd);
+    let nextState = {
+      ...state,
+      iteration,
+      lastStatus: taskComplete ? "complete" : status,
+      lastTest: testStatus,
+      lastError: lastError || state.lastError || "",
+      lastBytes: bytesRead + bytesWritten,
+      rotatePending: false,
+      updatedAt: new Date().toISOString(),
+      startedAt: state.startedAt || new Date().toISOString(),
+      history: state.history || [],
+      currentPhase: currentPhaseId || state.currentPhase || "",
+      phaseHistory: state.phaseHistory || [],
+    };
+
+    const historyEntry = `${nextState.updatedAt} iteration ${iteration} ${status} (test: ${testStatus})`;
+    nextState.history = [...nextState.history, historyEntry].slice(-50);
+
+    // Phase completion / progression.
+    if (status === "success" && currentPhaseId && parsedTask.phases && parsedTask.phases.length) {
+      const stopOn = phaseStopOn(parsedTask, currentPhaseId);
+      const phaseChecked = isPhaseAllChecked(parseTask(taskAfter || taskText), currentPhaseId);
+      const criteria = stopOn.length ? stopOn : ["all_checked"];
+      const needsAllChecked = criteria.includes("all_checked");
+      const needsTests = criteria.includes("tests_pass");
+      const testsOk = !needsTests || (testStatus !== "n/a" ? /^pass\b/i.test(testStatus) : didTestsPass(nextState));
+      const phaseOk = !needsAllChecked || phaseChecked;
+      const phaseComplete = phaseOk && testsOk;
+
+      if (phaseComplete) {
+        const nextPhase = computeNextPhaseId(parsedTask, currentPhaseId, config);
         nextState.phaseHistory = [...(nextState.phaseHistory || [])].concat([
-          `${nextState.updatedAt} phase advanced: ${currentPhaseId} -> ${nextPhase}`,
+          `${nextState.updatedAt} phase ${currentPhaseId} complete`,
         ]).slice(-100);
+        if (config.phaseOnly) {
+          nextState.lastStatus = "phase-complete";
+        } else if (nextPhase) {
+          nextState.currentPhase = nextPhase;
+          nextState.phaseHistory = [...(nextState.phaseHistory || [])].concat([
+            `${nextState.updatedAt} phase advanced: ${currentPhaseId} -> ${nextPhase}`,
+          ]).slice(-100);
+        }
       }
     }
-  }
 
-  if (status === "failure") {
-    const repeat = detectRepeatFailure(nextState, errorSignature);
-    nextState = repeat.state;
+    if (status === "failure") {
+      const repeat = detectRepeatFailure(nextState, errorSignature);
+      nextState = repeat.state;
 
-    const thrashCheck = detectThrash(nextState, modifiedFiles);
-    nextState = thrashCheck.state;
+      const thrashCheck = detectThrash(nextState, modifiedFiles);
+      nextState = thrashCheck.state;
 
-    let guardrailsUpdated = guardrailsText;
+      let guardrailsUpdated = guardrailsText;
 
-    if (repeat.repeated) {
-      guardrailsUpdated = appendSign(guardrailsUpdated, `Repeated failure signature: ${errorSignature}`);
-      guardrailStopReasons.push("Repeated failure signature (>= 3).");
+      if (repeat.repeated) {
+        guardrailsUpdated = appendSign(guardrailsUpdated, `Repeated failure signature: ${errorSignature}`);
+        guardrailStopReasons.push("Repeated failure signature (>= 3).");
+      }
+
+      if (thrashCheck.thrash) {
+        guardrailsUpdated = appendSign(guardrailsUpdated, `File thrashing detected: ${modifiedFiles.join(", ")}`);
+        guardrailStopReasons.push("File thrashing detected (>= 3).");
+      }
+
+      if (guardrailsUpdated !== guardrailsText) {
+        await writeText(config.guardrailsFile, guardrailsUpdated);
+        bytesWritten += Buffer.byteLength(guardrailsUpdated);
+      }
     }
 
-    if (thrashCheck.thrash) {
-      guardrailsUpdated = appendSign(guardrailsUpdated, `File thrashing detected: ${modifiedFiles.join(", ")}`);
-      guardrailStopReasons.push("File thrashing detected (>= 3).");
+    const guardrailStopReason = guardrailStopReasons.join(" ");
+    if (guardrailStopReason) {
+      nextState.lastStatus = "guardrail-stop";
+      nextState.lastError = guardrailStopReason;
+      printStep(
+        `Guardrail stop (${guardrailStopReason}) (see ${prettyPath(config.cwd, config.guardrailsFile)})`,
+        { iteration, level: "warn", kind: "guardrail" }
+      );
     }
 
-    if (guardrailsUpdated !== guardrailsText) {
-      await writeText(config.guardrailsFile, guardrailsUpdated);
-      bytesWritten += Buffer.byteLength(guardrailsUpdated);
+    if (bytesRead + bytesWritten >= config.rotateBytes) {
+      nextState.rotatePending = true;
     }
-  }
 
-  const guardrailStopReason = guardrailStopReasons.join(" ");
-  if (guardrailStopReason) {
-    nextState.lastStatus = "guardrail-stop";
-    nextState.lastError = guardrailStopReason;
+    const progressPayload = formatProgress(nextState);
+    await writeText(config.progressFile, progressPayload);
+    bytesWritten += Buffer.byteLength(progressPayload);
+
+    const statePayload = JSON.stringify(nextState, null, 2) + "\n";
+    await writeText(config.stateFile, statePayload);
+    bytesWritten += Buffer.byteLength(statePayload);
     printStep(
-      `guardrail: stop (${guardrailStopReason}) (see ${prettyPath(config.cwd, config.guardrailsFile)})`,
-      { iteration, level: "warn" }
+      `State updated ${prettyPath(config.cwd, config.stateFile)} (status: ${nextState.lastStatus}, test: ${nextState.lastTest})`,
+      { iteration, kind: "state" }
     );
+
+    await appendActivity(config.activityLog, [
+      `Iteration ${iteration} ${status}`,
+      `Bytes read/written: ${bytesRead}/${bytesWritten}`,
+    ]);
+
+    if (taskComplete) {
+      await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
+      printStep("Plan complete after iteration", { iteration, kind: "plan" });
+      iterationStatus = status;
+      return { status: "complete", bytes: bytesRead + bytesWritten };
+    }
+
+    if (nextState.lastStatus === "phase-complete") {
+      await appendActivity(config.activityLog, [`Phase complete (${currentPhaseId}); --phase-only stopping.`]);
+      printStep(`Phase ${currentPhaseId} complete; --phase-only stopping`, { iteration, kind: "plan" });
+      iterationStatus = status;
+      return { status: "complete", bytes: bytesRead + bytesWritten };
+    }
+
+    iterationStatus = status;
+    printStep(`Status ${status} (tests: ${testStatus})`, {
+      iteration,
+      kind: "result",
+      level: status === "failure" ? "error" : undefined,
+    });
+    return { status, bytes: bytesRead + bytesWritten, guardrailStopReason };
+  } finally {
+    endIteration({ iteration, status: iterationStatus });
   }
-
-  if (bytesRead + bytesWritten >= config.rotateBytes) {
-    nextState.rotatePending = true;
-  }
-
-  const progressPayload = formatProgress(nextState);
-  await writeText(config.progressFile, progressPayload);
-  bytesWritten += Buffer.byteLength(progressPayload);
-
-  const statePayload = JSON.stringify(nextState, null, 2) + "\n";
-  await writeText(config.stateFile, statePayload);
-  bytesWritten += Buffer.byteLength(statePayload);
-  printStep(
-    `state: updated ${prettyPath(config.cwd, config.stateFile)} (status: ${nextState.lastStatus}, test: ${nextState.lastTest})`,
-    { iteration }
-  );
-
-  await appendActivity(config.activityLog, [
-    `Iteration ${iteration} ${status}`,
-    `Bytes read/written: ${bytesRead}/${bytesWritten}`,
-  ]);
-
-  if (taskComplete) {
-    await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
-    printStep("plan: complete after iteration", { iteration });
-    return { status: "complete", bytes: bytesRead + bytesWritten };
-  }
-
-  if (nextState.lastStatus === "phase-complete") {
-    await appendActivity(config.activityLog, [`Phase complete (${currentPhaseId}); --phase-only stopping.`]);
-    printStep(`phase: ${currentPhaseId} complete; --phase-only stopping`, { iteration });
-    return { status: "complete", bytes: bytesRead + bytesWritten };
-  }
-
-  printStep(`result: ${status} (test: ${testStatus})`, { iteration });
-  return { status, bytes: bytesRead + bytesWritten, guardrailStopReason };
 }
 
 async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
@@ -875,6 +1138,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
   const parsedTask = planText ? parseTask(planText) : { frontMatter: {} };
   let config = mergeConfig(flags, parsedTask.frontMatter);
+  configureSteps({ noColor: config.noColor, noEmoji: config.noEmoji, plain: config.plain });
 
   // `--continue` is a "resume only" mode: don't accept seed prompt updates here.
   if (config.continue && hasOwn(flags, "prompt")) {
@@ -950,7 +1214,8 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   printStep(
-    `loop: start (max iterations: ${config.maxIterations}, max minutes: ${config.maxMinutes}, backoff: ${config.backoffMs}ms)`
+    `Loop start (max iterations: ${config.maxIterations}, max minutes: ${config.maxMinutes}, backoff: ${config.backoffMs}ms)`,
+    { kind: "loop-start" }
   );
 
   // Optional git workspace setup (worktree / branch). This is done once, before the loop.
@@ -974,15 +1239,15 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       }
       effectiveCwd = worktreeAbs;
       await ensureGitRepo(effectiveCwd);
-      printStep(`git worktree: using existing ${prettyPath(baseCwd, effectiveCwd)} (--continue)`, {});
+      printStep(`Git worktree using existing ${prettyPath(baseCwd, effectiveCwd)} (--continue)`, { kind: "git" });
     } else {
       printStep(
-        `git worktree: ensure ${prettyPath(baseCwd, worktreeAbs)}` +
+        `Git worktree ensure ${prettyPath(baseCwd, worktreeAbs)}` +
           (config.gitWorktreeBranch ? ` (branch: ${config.gitWorktreeBranch})` : " (detached)"),
-        {}
+        { kind: "git" }
       );
       effectiveCwd = await ensureGitWorktree(baseCwd, config.gitWorktree, config.gitWorktreeBranch);
-      printStep(`git worktree: using ${prettyPath(baseCwd, effectiveCwd)}`, {});
+      printStep(`Git worktree using ${prettyPath(baseCwd, effectiveCwd)}`, { kind: "git" });
     }
   }
   // If a worktree branch was specified, don't switch away from it via any default/implicit `gitBranch`.
@@ -997,13 +1262,16 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
   if (config.gitBranch) {
     if (config.continue) {
-      printStep(`git branch: skipping switch to ${config.gitBranch} (--continue)`, {});
+      printStep(`Branch ${config.gitBranch} (--continue)`, { kind: "branch" });
     } else {
-      printStep(`git branch: switch to ${config.gitBranch}`, {});
+      printStep(`Git branch switch to ${config.gitBranch}`, { kind: "git" });
       await ensureGitRepo(effectiveCwd);
       await gitSwitchBranch(effectiveCwd, config.gitBranch);
-      printStep(`git branch: now on ${config.gitBranch}`, {});
+      printStep(`Branch ${config.gitBranch}`, { kind: "branch" });
     }
+  }
+  if (!config.gitBranch && config.gitWorktreeBranch) {
+    printStep(`Branch ${config.gitWorktreeBranch}`, { kind: "branch" });
   }
 
   config = materializeConfigPaths(config, effectiveCwd);
@@ -1044,7 +1312,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     const phase = resumeState && resumeState.currentPhase ? `, phase: ${resumeState.currentPhase}` : "";
     const iter = resumeState && resumeState.iteration != null ? resumeState.iteration : 0;
     const last = (resumeState && resumeState.lastStatus) || "n/a";
-    printStep(`resume: iter ${iter}${phase}; last status: ${last}`, {});
+    printStep(`Resume iteration ${iter}${phase}; last status: ${last}`, { kind: "resume" });
     config.taskSeedText = "";
     config.taskSeedSource = "";
   } else {
@@ -1059,7 +1327,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       await appendActivity(config.activityLog, [
         `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
       ]);
-      printStep(`plan: updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, {});
+      printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, { kind: "plan" });
     }
   }
 
@@ -1109,6 +1377,14 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     return next;
   });
 
+  const summaryText = await readText(config.taskFile);
+  const parsedSummary = summaryText ? parseTask(summaryText) : null;
+  const planLines = formatPlanOverviewLines(parsedSummary, { verbose: config.verbose });
+  if (planLines.length) {
+    printBlankLine();
+    printStepLines(planLines, {});
+  }
+
   const start = Date.now();
   let iteration = 0;
 
@@ -1116,14 +1392,17 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     const elapsedMinutes = (Date.now() - start) / 60000;
     if (iteration >= config.maxIterations) {
       await appendActivity(config.activityLog, ["Max iterations reached. Stopping."]);
-      printStep("loop: max iterations reached; stopping");
+      printStep("Max iterations reached; stopping", { kind: "result", level: "warn" });
       break;
     }
     if (elapsedMinutes >= config.maxMinutes) {
       await appendActivity(config.activityLog, [
         `Max wall time reached (${formatDuration(config.maxMinutes)}). Stopping.`,
       ]);
-      printStep(`loop: max wall time reached (${formatDuration(config.maxMinutes)}); stopping`);
+      printStep(`Max wall time reached (${formatDuration(config.maxMinutes)}); stopping`, {
+        kind: "result",
+        level: "warn",
+      });
       break;
     }
 
@@ -1139,7 +1418,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     // forever (and to keep CLI/test behavior fast and predictable).
     if (config.dryRun) {
       await appendActivity(config.activityLog, ["Dry run complete. Stopping."]);
-      printStep("dry run: complete; stopping");
+      printStep("Dry run complete; stopping", { kind: "result", level: "warn" });
       break;
     }
 
@@ -1150,12 +1429,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
     if (stop.stopRequested) {
       await appendActivity(config.activityLog, ["Stop requested. Exiting loop."]);
-      printStep("loop: stop requested; exiting");
+      printStep("Stop requested; exiting", { kind: "result", level: "warn" });
       break;
     }
 
     if (config.backoffMs > 0) {
-      printStep(`loop: sleeping ${config.backoffMs}ms before next iteration`);
+      printStep(`Sleeping ${config.backoffMs}ms before next iteration`, { kind: "sleep" });
     }
     await new Promise((resolve) => setTimeout(resolve, config.backoffMs));
   }
@@ -1174,17 +1453,16 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     await writeText(config.progressFile, progressPayload);
     await writeText(config.stateFile, JSON.stringify(stoppedState, null, 2) + "\n");
     await appendActivity(config.activityLog, ["Final status: stopped."]);
-    printStep("loop: final status stopped");
+    printStep("Loop stopped", { kind: "loop-stop", level: "warn" });
   }
 
   const archiveResult = await archiveCompletedLoop(config);
   if (archiveResult.archived) {
     const prettyArchive = prettyPath(config.cwd, archiveResult.archiveDir);
-    printStep(`loop: archived to ${prettyArchive}`);
+    printStep(`Archive ${prettyArchive}`, { kind: "archive" });
   }
 }
 
 module.exports = {
-  runIteration,
   runLoop,
 };

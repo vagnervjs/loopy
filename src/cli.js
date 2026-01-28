@@ -94,6 +94,10 @@ function printHelp() {
     Output: [
       { label: "--prompt-out <file>", desc: `Prompt output file (default: ${DEFAULTS.promptFile})` },
       { label: "--stream", desc: "Mirror agent stdout/stderr to your terminal" },
+      { label: "--no-color", desc: "Disable ANSI colors (also respects NO_COLOR)" },
+      { label: "--no-emoji", desc: "Disable emoji (use ASCII fallbacks)" },
+      { label: "--plain", desc: "Disable color and emoji (plain text output)" },
+      { label: "--verbose", desc: "Print full task checklists (default: summaries)" },
     ],
     Files: [
       { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },
@@ -448,7 +452,7 @@ async function runCli(argv) {
 
   process.on("SIGINT", async () => {
     stopSignal.stopRequested = true;
-    printStep("signal: SIGINT received; stopping", { level: "warn" });
+    printStep("Signal SIGINT received; stopping", { level: "warn" });
     try {
       await appendActivity(currentActivityLog, ["SIGINT received. Stopping."]);
     } catch (_) {
@@ -458,7 +462,7 @@ async function runCli(argv) {
 
   process.on("SIGTERM", async () => {
     stopSignal.stopRequested = true;
-    printStep("signal: SIGTERM received; stopping", { level: "warn" });
+    printStep("Signal SIGTERM received; stopping", { level: "warn" });
     try {
       await appendActivity(currentActivityLog, ["SIGTERM received. Stopping."]);
     } catch (_) {

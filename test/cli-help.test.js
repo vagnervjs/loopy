@@ -10,6 +10,9 @@ test("`--help` prints usage and exits 0", async () => {
   assert.match(stdout, /Usage:/);
   assert.match(stdout, /\bloopy help\b/);
   assert.match(stdout, /--continue\b/);
+  assert.match(stdout, /--no-emoji\b/);
+  assert.match(stdout, /--plain\b/);
+  assert.match(stdout, /--verbose\b/);
   assertHelpAligned(stdout);
   assert.match(
     stdout,
@@ -31,6 +34,9 @@ test("`help` command prints usage and exits 0", async () => {
   assert.equal(code, 0);
   assert.match(stdout, /Loopy/);
   assertHelpAligned(stdout);
+  assert.match(stdout, /--no-emoji\b/);
+  assert.match(stdout, /--plain\b/);
+  assert.match(stdout, /--verbose\b/);
   assert.match(
     stdout,
     /--git-commit-message <template>\s+Commit message template \(default: loopy: \{change_type\} \{task_summary\}\)/

@@ -72,6 +72,14 @@ function coerceBoolean(value, fallback = false) {
   return Boolean(value);
 }
 
+function resolveNoColor(flags) {
+  const hasFlag = Object.prototype.hasOwnProperty.call(flags || {}, "no-color");
+  if (hasFlag) {
+    return coerceBoolean(flags["no-color"], true);
+  }
+  return Object.prototype.hasOwnProperty.call(process.env, "NO_COLOR");
+}
+
 function clampMin(value, minValue) {
   if (!Number.isFinite(value)) return minValue;
   return value < minValue ? minValue : value;
@@ -91,6 +99,8 @@ function mergeConfig(flags, frontMatter) {
   const promptOutFlag = flags["prompt-out"];
   const gitWorktreeFlag = flags["git-worktree"];
   const gitWorktreeBranchFlag = flags["git-worktree-branch"];
+  const plain = coerceBoolean(flags.plain, false);
+  const noEmoji = coerceBoolean(flags["no-emoji"], false);
   return {
     cwd: process.cwd(),
     continue: coerceBoolean(flags.continue, false),
@@ -167,8 +177,12 @@ function mergeConfig(flags, frontMatter) {
     maxMinutes: clampMin(coerceNumber(flags["max-minutes"] || fm.max_minutes, DEFAULTS.maxMinutes), 1),
     backoffMs: clampMin(coerceNumber(flags["backoff-ms"] || fm.backoff_ms, DEFAULTS.backoffMs), 0),
     rotateBytes: clampMin(coerceNumber(flags["rotate-bytes"] || fm.rotate_bytes, DEFAULTS.rotateBytes), 1024),
+    plain,
+    noEmoji: plain ? true : noEmoji,
+    noColor: plain ? true : resolveNoColor(flags),
     dryRun: Boolean(flags["dry-run"]),
     stream: Boolean(flags.stream),
+    verbose: coerceBoolean(flags.verbose, false),
   };
 }
 
@@ -177,10 +191,6 @@ module.exports = {
   resolveFrom,
   prettyPath,
   materializeConfigPaths,
-  normalizeCommand,
-  coerceNumber,
-  coerceBoolean,
-  clampMin,
   formatDuration,
   mergeConfig,
 };
