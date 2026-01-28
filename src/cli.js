@@ -185,6 +185,7 @@ function printHelp() {
       const labelWidth = maxStringLength(all.map((r) => r.label));
       const out = [];
       for (const [group, rows] of Object.entries(advancedByGroup)) {
+        out.push("");
         out.push(`  ${group}:`);
         out.push(...formatHelpRows(rows, { indent: "    ", labelWidth, gap: 2 }));
       }
