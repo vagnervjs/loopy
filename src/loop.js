@@ -21,7 +21,7 @@ const { formatProgress, ensureGuardrails, appendSign, formatPrompt } = require("
 const { confirm, promptLine, promptSelect } = require("./confirm");
 const { runShellCommand } = require("./shell");
 const { loadState } = require("./state");
-const { configureSteps, endIteration, printBlankLine, printStep, startIteration } = require("./steps");
+const { configureSteps, endIteration, formatDurationMs, printBlankLine, printStep, startIteration } = require("./steps");
 const { getTaskLine, parseTask, toSlug } = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
@@ -821,8 +821,10 @@ async function runIteration(config, { stopSignal } = {}) {
   const parsedTask = parseTask(taskText);
 
   if (parsedTask.allChecked) {
+    const totalDurationMs = (state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+    const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
     await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
-    printStep("Plan complete; stopping loop", { kind: "plan" });
+    printStep(`Plan complete; stopping loop${totalDurationLabel}`, { kind: "plan" });
     return { status: "complete", bytes: 0 };
   }
 
@@ -1114,6 +1116,9 @@ async function runIteration(config, { stopSignal } = {}) {
     }
 
     const modifiedFiles = await getGitModifiedFiles(config.cwd);
+    const iterationEndedAt = new Date();
+    const iterationDurationMs = iterationEndedAt.getTime() - iterationStartedAt.getTime();
+    
     let nextState = {
       ...state,
       iteration,
@@ -1127,6 +1132,7 @@ async function runIteration(config, { stopSignal } = {}) {
       history: state.history || [],
       currentPhase: currentPhaseId || state.currentPhase || "",
       phaseHistory: state.phaseHistory || [],
+      iterationDurations: [...(state.iterationDurations || []), iterationDurationMs],
     };
 
     const historyEntry = `${nextState.updatedAt} iteration ${iteration} ${status} (test: ${testStatus})`;
@@ -1217,8 +1223,10 @@ async function runIteration(config, { stopSignal } = {}) {
     ]);
 
     if (taskComplete) {
+      const totalDurationMs = (nextState.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+      const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
       await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
-      printStep("Plan complete after iteration", { iteration, kind: "plan" });
+      printStep(`Plan complete after iteration${totalDurationLabel}`, { iteration, kind: "plan" });
       iterationStatus = status;
       return { status: "complete", bytes: bytesRead + bytesWritten };
     }
