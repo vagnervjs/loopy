@@ -69,11 +69,13 @@ function printHelp() {
     { label: "--prompt <text>", desc: "Seed prompt (inline) to generate/update the plan before looping" },
     { label: "--prompt @<file>", desc: "Seed prompt from a file to generate/update the plan before looping" },
     { label: "--prompt -", desc: "Seed prompt from stdin to generate/update the plan before looping" },
+    { label: "--plan <text>", desc: "Plan prompt (inline) to generate a PRD + plan before looping" },
+    { label: "--plan @<file>", desc: "Plan prompt from a file to generate a PRD + plan before looping" },
+    { label: "--plan -", desc: "Plan prompt from stdin to generate a PRD + plan before looping" },
     {
       label: "--resume",
       desc: "Resume from saved state (requires existing `.loopy/state.json`); skips git switching",
     },
-    { label: "--plan <file>", desc: `Plan doc (default: ${DEFAULTS.taskFile})` },
     { label: "--agent <command>", desc: "Agent command (e.g. cursor-agent; overrides plan front matter)" },
     { label: "--confirm", desc: "Ask before writing or applying plan updates" },
     { label: "--dry-run", desc: "Build prompt, skip agent execution" },
@@ -100,6 +102,7 @@ function printHelp() {
       { label: "--verbose", desc: "Print full task checklists (default: true; disable with --verbose=false)" },
     ],
     Files: [
+      { label: "--plan-file <file>", desc: `Plan doc path (default: ${DEFAULTS.taskFile})` },
       { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },
       { label: "--guardrails <file>", desc: "Guardrails file (default: .loopy/guardrails.md)" },
       { label: "--activity-log <file>", desc: "Activity log (default: .loopy/activity.log)" },
@@ -333,7 +336,7 @@ async function runInit(flags) {
   const cwd = process.cwd();
   const loopyDir = resolveFrom(cwd, DEFAULTS.loopyDir);
   const hintsFile = resolveFrom(cwd, flags.hints || DEFAULTS.hintsFile);
-  const planFile = resolveFrom(cwd, flags.plan || DEFAULTS.taskFile);
+  const planFile = resolveFrom(cwd, flags["plan-file"] || flags["plan-doc"] || DEFAULTS.taskFile);
 
   await fs.mkdir(loopyDir, { recursive: true });
 

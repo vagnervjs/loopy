@@ -6,6 +6,7 @@ const yaml = require("js-yaml");
 const DEFAULTS = {
   taskFile: ".loopy/LOOPY_PLAN.md",
   promptFile: ".loopy/PROMPT.md",
+  prdFile: ".loopy/PRD.md",
   loopyDir: ".loopy",
   progressFile: ".loopy/progress.md",
   guardrailsFile: ".loopy/guardrails.md",
@@ -77,6 +78,7 @@ function materializeConfigPaths(config, cwd) {
     cwd: nextCwd,
     taskFile: resolveFrom(nextCwd, config.taskFile),
     promptFile: resolveFrom(nextCwd, config.promptFile),
+    prdFile: resolveFrom(nextCwd, config.prdFile || DEFAULTS.prdFile),
     loopyDir: resolveFrom(nextCwd, config.loopyDir || DEFAULTS.loopyDir),
     progressFile: resolveFrom(nextCwd, config.progressFile),
     guardrailsFile: resolveFrom(nextCwd, config.guardrailsFile),
@@ -217,17 +219,23 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const defaultPhaseDefaults = def.phase_defaults || def.phaseDefaults || {};
   const hasPromptSeed = Object.prototype.hasOwnProperty.call(flags, "prompt");
   const promptSeedFlag = hasPromptSeed ? flags.prompt : undefined;
+  const hasPlanSeed = Object.prototype.hasOwnProperty.call(flags, "plan");
+  const planSeedFlag = hasPlanSeed ? flags.plan : undefined;
   const promptOutFlag = flags["prompt-out"];
   const promptOutDefault = pickDefined(def, ["prompt-out", "prompt_out", "promptOut", "promptFile", "prompt_file"]);
   const gitWorktreeFlag = flags["git-worktree"];
   const gitWorktreeBranchFlag = flags["git-worktree-branch"];
+  const planFileFlag = flags["plan-file"] ?? flags["plan-doc"];
   const plain = coerceBoolean(flags.plain ?? pickDefined(def, ["plain"]), false);
   const noEmoji = coerceBoolean(flags["no-emoji"] ?? pickDefined(def, ["no-emoji", "no_emoji", "noEmoji"]), false);
   const streamDefault = pickDefined(def, ["stream"]);
   const verboseDefault = pickDefined(def, ["verbose"]);
   const resumeDefault = pickDefined(def, ["resume"]);
   const confirmDefault = pickDefined(def, ["confirm"]);
-  const taskFileDefault = pickDefined(def, ["plan", "taskFile", "task_file"]) || DEFAULTS.taskFile;
+  const taskFileDefault =
+    pickDefined(def, ["plan_file", "planFile", "plan_doc", "planDoc", "taskFile", "task_file", "plan"]) ||
+    DEFAULTS.taskFile;
+  const prdFileDefault = pickDefined(def, ["prd", "prd_file", "prdFile"]) || DEFAULTS.prdFile;
   const promptOutValue = promptOutFlag === undefined ? promptOutDefault : promptOutFlag;
   const progressDefault = pickDefined(def, ["progress", "progress_file", "progressFile"]) || DEFAULTS.progressFile;
   const guardrailsDefault = pickDefined(def, ["guardrails", "guardrails_file", "guardrailsFile"]) || DEFAULTS.guardrailsFile;
@@ -268,10 +276,11 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     cwd: process.cwd(),
     resume: coerceBoolean(flags.resume ?? resumeDefault, false),
     confirm: coerceBoolean(flags.confirm ?? confirmDefault, DEFAULTS.confirm),
-    // NOTE: `--plan` is the plan doc path. (Internally we still call it `taskFile`.)
-    taskFile: flags.plan || taskFileDefault,
+    // NOTE: `--plan` supplies the plan seed (PRD-first flow). Use `--plan-file` to override the plan doc path.
+    taskFile: planFileFlag || taskFileDefault,
     // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.
     promptFile: (promptOutValue === true ? "" : String(promptOutValue || "")) || DEFAULTS.promptFile,
+    prdFile: prdFileDefault,
     loopyDir: loopyDirDefault,
     progressFile: flags.progress || progressDefault,
     guardrailsFile: flags.guardrails || guardrailsDefault,
@@ -279,6 +288,11 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     agentStreamLog: DEFAULTS.agentStreamLog,
     stateFile: flags.state || stateDefault,
     hintsFile: flags.hints || hintsDefault,
+    // Plan seed entrypoint (for PRD generation):
+    // - `--plan "<inline text>"`
+    // - `--plan @path/to/file`
+    // - `--plan -` (stdin)
+    planSeed: planSeedFlag === true ? "" : String(planSeedFlag || ""),
     // New seed prompt entrypoint (preferred):
     // - `--prompt "<inline text>"`
     // - `--prompt @path/to/file`

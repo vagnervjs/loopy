@@ -26,6 +26,7 @@ const { getTaskLine, parseTask, toSlug } = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
+const { generatePrdWithAgent } = require("./prd");
 const {
   ensureGitRepo,
   ensureGitWorktree,
@@ -353,49 +354,59 @@ async function readStdinText() {
   return streamText;
 }
 
-async function loadTaskSeed(config) {
-  const promptSeedRaw = config.promptSeed == null ? "" : String(config.promptSeed).trim();
+async function loadSeedFromFlag(rawValue, { flagName, cwd, stdinText } = {}) {
+  const isPrompt = flagName === "prompt";
+  const label = isPrompt ? "Seed prompt" : "Plan input";
+  const flag = isPrompt ? "--prompt" : "--plan";
+  const raw = rawValue == null ? "" : String(rawValue).trim();
+  if (!raw) return { seed: "", source: "" };
 
-  // Seed path: `--prompt`
-  if (promptSeedRaw) {
-    if (promptSeedRaw === "-") {
-      const raw = await readStdinText();
-      const seed = normalizeTaskSeedText(raw);
-      if (!seed) throw new Error("Seed prompt from --prompt '-' (stdin) is empty.");
-      return { seed, source: "--prompt" };
-    }
-
-    if (promptSeedRaw.startsWith("@")) {
-      const rawPath = promptSeedRaw.slice(1).trim();
-      if (!rawPath) throw new Error("Missing file path after --prompt @<file>.");
-      const abs = resolveFrom(config.cwd, rawPath);
-      let raw = "";
-      try {
-        raw = await fs.readFile(abs, "utf8");
-      } catch (err) {
-        if (err && err.code === "ENOENT") {
-          throw new Error(`Seed prompt file not found: ${prettyPath(config.cwd, abs)}`);
-        }
-        if (err && err.code === "EISDIR") {
-          throw new Error(`Seed prompt path is a directory: ${prettyPath(config.cwd, abs)}`);
-        }
-        if (err && (err.code === "EACCES" || err.code === "EPERM")) {
-          throw new Error(`Permission denied reading seed prompt file: ${prettyPath(config.cwd, abs)}`);
-        }
-        throw new Error(
-          `Failed to read seed prompt file ${prettyPath(config.cwd, abs)}: ${err && err.message ? err.message : String(err)}`
-        );
-      }
-      const seed = normalizeTaskSeedText(raw);
-      if (!seed) throw new Error(`Seed prompt file is empty: ${prettyPath(config.cwd, abs)}`);
-      return { seed, source: "--prompt" };
-    }
-
-    const seed = normalizeTaskSeedText(promptSeedRaw);
-    if (!seed) throw new Error("Seed prompt from --prompt is empty.");
-    return { seed, source: "--prompt" };
+  if (raw === "-") {
+    const rawText = stdinText !== undefined ? stdinText : await readStdinText();
+    const seed = normalizeTaskSeedText(rawText);
+    if (!seed) throw new Error(`${label} from ${flag} '-' (stdin) is empty.`);
+    return { seed, source: flag };
   }
-  return { seed: "", source: "" };
+
+  if (raw.startsWith("@")) {
+    const rawPath = raw.slice(1).trim();
+    if (!rawPath) throw new Error(`Missing file path after ${flag} @<file>.`);
+    const abs = resolveFrom(cwd, rawPath);
+    let fileRaw = "";
+    try {
+      fileRaw = await fs.readFile(abs, "utf8");
+    } catch (err) {
+      if (err && err.code === "ENOENT") {
+        throw new Error(`${label} file not found: ${prettyPath(cwd, abs)}`);
+      }
+      if (err && err.code === "EISDIR") {
+        throw new Error(`${label} path is a directory: ${prettyPath(cwd, abs)}`);
+      }
+      if (err && (err.code === "EACCES" || err.code === "EPERM")) {
+        throw new Error(`Permission denied reading ${label.toLowerCase()} file: ${prettyPath(cwd, abs)}`);
+      }
+      throw new Error(
+        `Failed to read ${label.toLowerCase()} file ${prettyPath(cwd, abs)}: ${
+          err && err.message ? err.message : String(err)
+        }`
+      );
+    }
+    const seed = normalizeTaskSeedText(fileRaw);
+    if (!seed) throw new Error(`${label} file is empty: ${prettyPath(cwd, abs)}`);
+    return { seed, source: flag };
+  }
+
+  const seed = normalizeTaskSeedText(raw);
+  if (!seed) throw new Error(`${label} from ${flag} is empty.`);
+  return { seed, source: flag };
+}
+
+async function loadTaskSeed(config, { stdinText } = {}) {
+  return loadSeedFromFlag(config.promptSeed, { flagName: "prompt", cwd: config.cwd, stdinText });
+}
+
+async function loadPlanSeed(config, { stdinText } = {}) {
+  return loadSeedFromFlag(config.planSeed, { flagName: "plan", cwd: config.cwd, stdinText });
 }
 
 function pickCurrentPhaseId(parsedTask, state, config) {
@@ -718,6 +729,20 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
   }
 
   return { taskText: existing, rewritten: false };
+}
+
+async function confirmPlanReview(config, { prdGenerated } = {}) {
+  if (!process.stdin.isTTY) return true;
+  const planLabel = prettyPath(config.cwd, config.taskFile);
+  const prdLabel = prdGenerated ? prettyPath(config.cwd, config.prdFile) : "";
+  const question = prdGenerated
+    ? `Review ${planLabel} and ${prdLabel} before continuing. Continue?`
+    : `Review ${planLabel} before continuing. Continue?`;
+  const ok = await confirm(question, { confirm: true, defaultYes: true });
+  if (!ok) {
+    throw new Error("Aborted: plan review not confirmed.");
+  }
+  return true;
 }
 
 async function runIteration(config) {
@@ -1122,6 +1147,8 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const stop = stopSignal || { stopRequested: false };
   const baseCwd = process.cwd();
   const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+  const planSeedProvided = hasOwn(flags, "plan");
+  const promptSeedProvided = hasOwn(flags, "prompt");
   if (command === "run") {
     throw new Error("Unsupported command. For a single iteration, use `loopy --max-iterations 1`.");
   }
@@ -1147,12 +1174,14 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   configureSteps({ noColor: config.noColor, noEmoji: config.noEmoji, plain: config.plain });
 
   // `--resume` is a "resume only" mode: don't accept seed prompt updates here.
-  if (config.resume && hasOwn(flags, "prompt")) {
-    throw new Error("`--resume` cannot be used with `--prompt`. Omit `--prompt` to resume, or run without `--resume`.");
+  if (config.resume && (promptSeedProvided || planSeedProvided)) {
+    throw new Error(
+      "`--resume` cannot be used with `--prompt` or `--plan`. Omit them to resume, or run without `--resume`."
+    );
   }
 
   // Validate seed prompt flag early.
-  if (hasOwn(flags, "prompt")) {
+  if (promptSeedProvided) {
     if (flags.prompt === true) {
       throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
     }
@@ -1163,9 +1192,25 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     }
   }
 
+  // Validate plan seed flag early.
+  if (planSeedProvided) {
+    if (flags.plan === true) {
+      throw new Error("Missing value for --plan (expected text, @<file>, or '-').");
+    }
+    const v = String(flags.plan || "").trim();
+    if (!v) throw new Error("Missing value for --plan (expected text, @<file>, or '-').");
+    if (v.startsWith("@") && !v.slice(1).trim()) {
+      throw new Error("Missing file path after --plan @<file>.");
+    }
+  }
+
   // Validate prompt output flag.
   if (flags["prompt-out"] === true) {
     throw new Error("Missing value for --prompt-out (expected a file path).");
+  }
+
+  if (flags["plan-file"] === true || flags["plan-doc"] === true) {
+    throw new Error("Missing value for --plan-file (expected a file path).");
   }
 
   const fm0 = (parsedTask && parsedTask.frontMatter) || {};
@@ -1315,6 +1360,8 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
   config = materializeConfigPaths(config, effectiveCwd);
   if (onActivityLog) onActivityLog(config.activityLog);
+  let prdGenerated = false;
+  const planReviewRequired = !config.resume && (planSeedProvided || promptSeedProvided);
 
   if (config.resume) {
     // Resume mode: require existing plan + state, but do not create/update the plan doc.
@@ -1355,13 +1402,49 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     config.taskSeedText = "";
     config.taskSeedSource = "";
   } else {
-    // Load the plan seed once so stdin ('-') works and prompts can reuse the content.
-    const loadedSeed = await loadTaskSeed(config);
-    config.taskSeedText = loadedSeed.seed || "";
-    config.taskSeedSource = loadedSeed.source || "";
+    const planSeedRaw = String(config.planSeed || "").trim();
+    const promptSeedRaw = String(config.promptSeed || "").trim();
+    const usesPlanStdin = planSeedRaw === "-";
+    const usesPromptStdin = promptSeedRaw === "-";
+    if (usesPlanStdin && usesPromptStdin) {
+      throw new Error("Cannot read stdin for both --plan and --prompt.");
+    }
+    const stdinText = usesPlanStdin || usesPromptStdin ? await readStdinText() : undefined;
+
+    const loadedPlanSeed = await loadPlanSeed(config, { stdinText });
+    const loadedPromptSeed = await loadTaskSeed(config, { stdinText });
+    let effectiveSeed = loadedPromptSeed;
+
+    if (loadedPlanSeed.seed) {
+      const prdResult = await generatePrdWithAgent(config.agentCommand, loadedPlanSeed.seed, {
+        extraContext: loadedPromptSeed.seed || "",
+        cwd: config.cwd,
+        noColor: config.noColor,
+      });
+      const prdText = prdResult.text;
+      const payload = `${prdText.trimEnd()}\n`;
+      await writeText(config.prdFile, payload);
+      prdGenerated = true;
+
+      const seedSources = [];
+      if (loadedPlanSeed.seed) seedSources.push(loadedPlanSeed.source);
+      if (loadedPromptSeed.seed) seedSources.push(loadedPromptSeed.source);
+      const combinedSource = seedSources.join(" + ");
+      config.taskSeedText = prdText;
+      config.taskSeedSource = combinedSource || loadedPlanSeed.source || "--plan";
+      effectiveSeed = { seed: prdText, source: config.taskSeedSource };
+
+      await appendActivity(config.activityLog, [
+        `PRD generated: ${prettyPath(config.cwd, config.prdFile)}`,
+      ]);
+      printStep(`PRD generated: ${prettyPath(config.cwd, config.prdFile)}`, { kind: "plan" });
+    } else {
+      config.taskSeedText = loadedPromptSeed.seed || "";
+      config.taskSeedSource = loadedPromptSeed.source || "";
+    }
 
     // Plan initialization / auto-phase planning happens once, before looping.
-    const ensured = await ensureTaskBeforeLoop(config, loadedSeed);
+    const ensured = await ensureTaskBeforeLoop(config, effectiveSeed);
     if (ensured.rewritten) {
       await appendActivity(config.activityLog, [
         `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
@@ -1422,6 +1505,9 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   if (planLines.length) {
     printBlankLine();
     printStepLines(planLines, {});
+  }
+  if (planReviewRequired) {
+    await confirmPlanReview(config, { prdGenerated });
   }
 
   const start = Date.now();
