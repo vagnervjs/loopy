@@ -113,9 +113,9 @@ test("prints step status lines to terminal during loop", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /\[loopy\] \[info\] iter 1: start \(rotation: /);
-  assert.match(stdout, /\[loopy\] \[info\] iter 1: agent: run/);
-  assert.match(stdout, /\[loopy\] \[info\] iter 1: state: updated/);
+  assert.match(stdout, /\[loopy\] \[info\s*\] iter 1: start \(rotation: /);
+  assert.match(stdout, /\[loopy\] \[info\s*\] iter 1: agent: run/);
+  assert.match(stdout, /\[loopy\] \[info\s*\] iter 1: state: updated/);
 });
 
 test("`--stream` mirrors agent output to terminal", async () => {
@@ -166,8 +166,8 @@ test("`--dry-run` stops after the first iteration (no backoff loop)", async () =
   );
 
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /\[loopy\] \[info\] iter 1: start \(rotation: /);
-  assert.equal(stdout.includes("[loopy] [info] iter 2: start"), false, stdout);
+  assert.match(stdout, /\[loopy\] \[info\s*\] iter 1: start \(rotation: /);
+  assert.equal(stdout.includes("[loopy] [info ] iter 2: start"), false, stdout);
   assert.equal(stdout.includes("sleeping"), false, stdout);
   assert.match(stdout, /dry run: complete; stopping/i);
 });

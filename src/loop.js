@@ -21,7 +21,7 @@ const { runShellCommand } = require("./shell");
 const { loadState } = require("./state");
 const { endIteration, printStep, startIteration } = require("./steps");
 const { getTaskLine, parseTask, toSlug } = require("./task");
-const { redact, truncate, normalizeTaskSeedText } = require("./text");
+const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const {
   ensureGitRepo,
@@ -832,7 +832,8 @@ async function runIteration(config) {
       await writeText(lastTestOutputPath, testOutput);
       bytesWritten += Buffer.byteLength(testOutput);
       const testOutcome = testResult.code === 0 ? "pass" : "fail";
-      testStatus = `${testOutcome} @ ${new Date().toISOString()}`;
+      const testTimestamp = formatLocalTimestamp(new Date());
+      testStatus = testTimestamp ? `${testOutcome} @ ${testTimestamp}` : `${testOutcome}`;
       if (testOutcome === "fail") {
         printStep(
           `tests: result fail (see ${prettyPath(config.cwd, lastTestOutputPath)})`,

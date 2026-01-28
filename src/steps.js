@@ -1,22 +1,56 @@
+const { formatLocalTimestamp } = require("./text");
+
 let hasWritten = false;
 let lastLineBlank = false;
 let activeIteration = null;
 let activeIterationStartMs = null;
 
-function pad2(value) {
-  return String(value).padStart(2, "0");
+const LEVEL_LABEL_WIDTH = 5;
+const MIN_WRAP_WIDTH = 80;
+const MAX_WRAP_WIDTH = 120;
+const DEFAULT_WRAP_WIDTH = 100;
+
+function formatLevelLabel(level) {
+  const label = level ? String(level).toLowerCase() : "info";
+  return label.padEnd(LEVEL_LABEL_WIDTH, " ");
 }
 
-function formatLocalTimestamp(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(date.getTime())) return "";
-  const year = date.getFullYear();
-  const month = pad2(date.getMonth() + 1);
-  const day = pad2(date.getDate());
-  const hour = pad2(date.getHours());
-  const minute = pad2(date.getMinutes());
-  const second = pad2(date.getSeconds());
-  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+function getWrapWidth() {
+  const columns = Number(process.stdout && process.stdout.columns);
+  if (Number.isFinite(columns) && columns > 0) {
+    return Math.min(MAX_WRAP_WIDTH, Math.max(MIN_WRAP_WIDTH, columns));
+  }
+  return DEFAULT_WRAP_WIDTH;
+}
+
+function wrapWords(words, maxWidth) {
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    if (!current) {
+      current = word;
+      continue;
+    }
+    if (current.length + 1 + word.length <= maxWidth) {
+      current = `${current} ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+function wrapWithPrefix(prefix, message) {
+  const text = message == null ? "" : String(message);
+  const words = text.trim() ? text.trim().split(/\s+/) : [];
+  if (!words.length) return prefix.trimEnd();
+  const maxWidth = getWrapWidth();
+  const available = Math.max(10, maxWidth - prefix.length);
+  const lines = wrapWords(words, available);
+  const indent = " ".repeat(prefix.length);
+  return lines.map((line, index) => (index === 0 ? prefix + line : indent + line)).join("\n");
 }
 
 function formatDurationMs(ms) {
@@ -33,15 +67,17 @@ function formatDurationMs(ms) {
 
 function formatStepLine(message, { iteration, level } = {}) {
   const iterPrefix = iteration != null ? `iter ${iteration}: ` : "";
-  const levelLabel = level ? String(level).toLowerCase() : "info";
+  const levelLabel = formatLevelLabel(level);
   const text = message == null ? "" : String(message);
-  return `[loopy] [${levelLabel}] ${iterPrefix}${text}`;
+  const prefix = `[loopy] [${levelLabel}] ${iterPrefix}`;
+  return wrapWithPrefix(prefix, text);
 }
 
 function writeLine(line) {
-  process.stdout.write(`${line}\n`);
+  const output = line == null ? "" : String(line);
+  process.stdout.write(`${output}\n`);
   hasWritten = true;
-  lastLineBlank = false;
+  lastLineBlank = !output.trim();
 }
 
 function ensureBlankLine() {
