@@ -70,7 +70,7 @@ function printHelp() {
     { label: "--prompt @<file>", desc: "Seed prompt from a file to generate/update the plan before looping" },
     { label: "--prompt -", desc: "Seed prompt from stdin to generate/update the plan before looping" },
     {
-      label: "--continue",
+      label: "--resume",
       desc: "Resume from saved state (requires existing `.loopy/state.json`); skips git switching",
     },
     { label: "--plan <file>", desc: `Plan doc (default: ${DEFAULTS.taskFile})` },
@@ -93,11 +93,11 @@ function printHelp() {
     ],
     Output: [
       { label: "--prompt-out <file>", desc: `Prompt output file (default: ${DEFAULTS.promptFile})` },
-      { label: "--stream", desc: "Mirror agent stdout/stderr to your terminal" },
+      { label: "--stream", desc: "Mirror agent stdout/stderr to your terminal (default: true; disable with --stream=false)" },
       { label: "--no-color", desc: "Disable ANSI colors (also respects NO_COLOR)" },
       { label: "--no-emoji", desc: "Disable emoji (use ASCII fallbacks)" },
       { label: "--plain", desc: "Disable color and emoji (plain text output)" },
-      { label: "--verbose", desc: "Print full task checklists (default: summaries)" },
+      { label: "--verbose", desc: "Print full task checklists (default: true; disable with --verbose=false)" },
     ],
     Files: [
       { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },

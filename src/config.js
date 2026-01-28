@@ -1,4 +1,7 @@
+const fs = require("fs/promises");
+const os = require("os");
 const path = require("path");
+const yaml = require("js-yaml");
 
 const DEFAULTS = {
   taskFile: ".loopy/LOOPY_PLAN.md",
@@ -19,7 +22,11 @@ const DEFAULTS = {
   gitCommitMessage: "loopy: {change_type} {task_summary}",
   autoPhase: true,
   confirm: false,
+  stream: true,
+  verbose: true,
 };
+
+const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
 
 function resolveFrom(cwd, maybePath) {
   if (!maybePath) return maybePath;
@@ -55,6 +62,17 @@ function normalizeCommand(command) {
   return command.trim();
 }
 
+function pickDefined(obj, keys) {
+  const target = obj && typeof obj === "object" ? obj : null;
+  if (!target) return undefined;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(target, key)) {
+      return target[key];
+    }
+  }
+  return undefined;
+}
+
 function coerceNumber(value, fallback) {
   if (value === undefined || value === null || value === "") return fallback;
   const num = Number(value);
@@ -72,10 +90,14 @@ function coerceBoolean(value, fallback = false) {
   return Boolean(value);
 }
 
-function resolveNoColor(flags) {
+function resolveNoColor(flags, defaults) {
   const hasFlag = Object.prototype.hasOwnProperty.call(flags || {}, "no-color");
   if (hasFlag) {
     return coerceBoolean(flags["no-color"], true);
+  }
+  const defaultValue = pickDefined(defaults, ["no-color", "no_color", "noColor"]);
+  if (defaultValue !== undefined) {
+    return coerceBoolean(defaultValue, false);
   }
   return Object.prototype.hasOwnProperty.call(process.env, "NO_COLOR");
 }
@@ -89,52 +111,151 @@ function formatDuration(minutes) {
   return `${minutes}m`;
 }
 
-function mergeConfig(flags, frontMatter) {
+async function loadGlobalConfig() {
+  const configDir = path.join(os.homedir(), ".loopy");
+  for (const filename of GLOBAL_CONFIG_FILES) {
+    const filePath = path.join(configDir, filename);
+    let raw = "";
+    try {
+      raw = await fs.readFile(filePath, "utf8");
+    } catch (err) {
+      if (err && err.code === "ENOENT") continue;
+      throw err;
+    }
+    if (!String(raw || "").trim()) {
+      return { config: {}, path: filePath };
+    }
+    let parsed = null;
+    try {
+      parsed = yaml.load(raw);
+    } catch (err) {
+      throw new Error(`Failed to parse global config at ${filePath}: ${err && err.message ? err.message : String(err)}`);
+    }
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error(`Global config at ${filePath} must be a YAML/JSON object.`);
+    }
+    const config =
+      parsed.defaults && typeof parsed.defaults === "object" && !Array.isArray(parsed.defaults) ? parsed.defaults : parsed;
+    return { config, path: filePath };
+  }
+  return { config: {}, path: "" };
+}
+
+function mergeConfig(flags, frontMatter, defaults = {}) {
   const fm = frontMatter || {};
+  const def = defaults || {};
   const hooks = fm.hooks || {};
+  const defaultHooks = def.hooks || {};
   const git = fm.git || {};
+  const defaultGit = def.git || {};
   const phaseDefaults = fm.phase_defaults || fm.phaseDefaults || {};
+  const defaultPhaseDefaults = def.phase_defaults || def.phaseDefaults || {};
   const hasPromptSeed = Object.prototype.hasOwnProperty.call(flags, "prompt");
   const promptSeedFlag = hasPromptSeed ? flags.prompt : undefined;
   const promptOutFlag = flags["prompt-out"];
+  const promptOutDefault = pickDefined(def, ["prompt-out", "prompt_out", "promptOut", "promptFile", "prompt_file"]);
   const gitWorktreeFlag = flags["git-worktree"];
   const gitWorktreeBranchFlag = flags["git-worktree-branch"];
-  const plain = coerceBoolean(flags.plain, false);
-  const noEmoji = coerceBoolean(flags["no-emoji"], false);
+  const plain = coerceBoolean(flags.plain ?? pickDefined(def, ["plain"]), false);
+  const noEmoji = coerceBoolean(flags["no-emoji"] ?? pickDefined(def, ["no-emoji", "no_emoji", "noEmoji"]), false);
+  const streamDefault = pickDefined(def, ["stream"]);
+  const verboseDefault = pickDefined(def, ["verbose"]);
+  const resumeDefault = pickDefined(def, ["resume"]);
+  const confirmDefault = pickDefined(def, ["confirm"]);
+  const taskFileDefault = pickDefined(def, ["plan", "taskFile", "task_file"]) || DEFAULTS.taskFile;
+  const promptOutValue = promptOutFlag === undefined ? promptOutDefault : promptOutFlag;
+  const progressDefault = pickDefined(def, ["progress", "progress_file", "progressFile"]) || DEFAULTS.progressFile;
+  const guardrailsDefault = pickDefined(def, ["guardrails", "guardrails_file", "guardrailsFile"]) || DEFAULTS.guardrailsFile;
+  const activityLogDefault = pickDefined(def, ["activity_log", "activityLog", "activityLogFile", "activityLogPath"]) || DEFAULTS.activityLog;
+  const stateDefault = pickDefined(def, ["state", "state_file", "stateFile"]) || DEFAULTS.stateFile;
+  const hintsDefault = pickDefined(def, ["hints", "hints_file", "hintsFile"]) || DEFAULTS.hintsFile;
+  const loopyDirDefault = pickDefined(def, ["loopy_dir", "loopyDir"]) || DEFAULTS.loopyDir;
+  const agentCommandDefault = pickDefined(def, ["agent", "agent_command", "agentCommand"]);
+  const testCommandDefault = pickDefined(def, ["test_command", "testCommand"]);
+  const autoPhaseDefault = pickDefined(def, ["auto_phase", "autoPhase"]);
+  const phaseDefault = pickDefined(def, ["phase"]);
+  const phaseOnlyDefault = pickDefined(def, ["phase_only", "phaseOnly"]);
+  const skipPhaseDefault = pickDefined(def, ["skip_phase", "skipPhase"]);
+  const preIterationDefault = pickDefined(def, ["preIteration", "pre_iteration"]);
+  const postIterationDefault = pickDefined(def, ["postIteration", "post_iteration"]);
+  const onFailureDefault = pickDefined(def, ["onFailure", "on_failure"]);
+  const gitBranchDefault =
+    pickDefined(def, ["git_branch", "gitBranch"]) ||
+    pickDefined(defaultGit, ["branch", "git_branch", "gitBranch"]);
+  const gitCommitDefault =
+    pickDefined(def, ["git_commit", "gitCommit"]) ||
+    pickDefined(defaultGit, ["commit", "git_commit", "gitCommit"]);
+  const gitCommitMessageDefault =
+    pickDefined(def, ["git_commit_message", "gitCommitMessage"]) ||
+    pickDefined(defaultGit, ["commit_message", "commitMessage", "git_commit_message", "gitCommitMessage"]);
+  const gitWorktreeDefault =
+    pickDefined(def, ["git_worktree", "gitWorktree"]) ||
+    pickDefined(defaultGit, ["worktree", "git_worktree", "gitWorktree"]);
+  const gitWorktreeBranchDefault =
+    pickDefined(def, ["git_worktree_branch", "gitWorktreeBranch"]) ||
+    pickDefined(defaultGit, ["worktree_branch", "worktreeBranch", "git_worktree_branch", "gitWorktreeBranch"]);
+  const maxIterationsDefault = pickDefined(def, ["max_iterations", "maxIterations"]);
+  const maxMinutesDefault = pickDefined(def, ["max_minutes", "maxMinutes"]);
+  const backoffMsDefault = pickDefined(def, ["backoff_ms", "backoffMs"]);
+  const rotateBytesDefault = pickDefined(def, ["rotate_bytes", "rotateBytes"]);
+  const dryRunDefault = pickDefined(def, ["dry_run", "dryRun"]);
   return {
     cwd: process.cwd(),
-    continue: coerceBoolean(flags.continue, false),
-    confirm: coerceBoolean(flags.confirm, DEFAULTS.confirm),
+    resume: coerceBoolean(flags.resume ?? resumeDefault, false),
+    confirm: coerceBoolean(flags.confirm ?? confirmDefault, DEFAULTS.confirm),
     // NOTE: `--plan` is the plan doc path. (Internally we still call it `taskFile`.)
-    taskFile: flags.plan || DEFAULTS.taskFile,
+    taskFile: flags.plan || taskFileDefault,
     // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.
-    promptFile: (promptOutFlag === true ? "" : String(promptOutFlag || "")) || DEFAULTS.promptFile,
-    loopyDir: DEFAULTS.loopyDir,
-    progressFile: flags.progress || DEFAULTS.progressFile,
-    guardrailsFile: flags.guardrails || DEFAULTS.guardrailsFile,
-    activityLog: flags["activity-log"] || DEFAULTS.activityLog,
+    promptFile: (promptOutValue === true ? "" : String(promptOutValue || "")) || DEFAULTS.promptFile,
+    loopyDir: loopyDirDefault,
+    progressFile: flags.progress || progressDefault,
+    guardrailsFile: flags.guardrails || guardrailsDefault,
+    activityLog: flags["activity-log"] || activityLogDefault,
     agentStreamLog: DEFAULTS.agentStreamLog,
-    stateFile: flags.state || DEFAULTS.stateFile,
-    hintsFile: flags.hints || DEFAULTS.hintsFile,
+    stateFile: flags.state || stateDefault,
+    hintsFile: flags.hints || hintsDefault,
     // New seed prompt entrypoint (preferred):
     // - `--prompt "<inline text>"`
     // - `--prompt @path/to/file`
     // - `--prompt -` (stdin)
     promptSeed: promptSeedFlag === true ? "" : String(promptSeedFlag || ""),
-    agentCommand: normalizeCommand(flags.agent || fm.agent_command || fm.agentCommand || ""),
+    agentCommand: normalizeCommand(flags.agent || fm.agent_command || fm.agentCommand || agentCommandDefault || ""),
     testCommand: normalizeCommand(
-      fm.test_command || fm.testCommand || phaseDefaults.test_command || phaseDefaults.testCommand || ""
+      fm.test_command ||
+        fm.testCommand ||
+        phaseDefaults.test_command ||
+        phaseDefaults.testCommand ||
+        testCommandDefault ||
+        defaultPhaseDefaults.test_command ||
+        defaultPhaseDefaults.testCommand ||
+        ""
     ),
     autoPhase: coerceBoolean(
-      flags["auto-phase"] ?? fm.auto_phase ?? fm.autoPhase,
+      flags["auto-phase"] ?? fm.auto_phase ?? fm.autoPhase ?? autoPhaseDefault,
       DEFAULTS.autoPhase
     ),
-    phase: normalizeCommand(flags.phase || fm.phase || ""),
-    phaseOnly: coerceBoolean(flags["phase-only"], false),
-    skipPhase: normalizeCommand(flags["skip-phase"] || ""),
-    preIteration: normalizeCommand(fm.preIteration || fm.pre_iteration || hooks.preIteration || ""),
-    postIteration: normalizeCommand(fm.postIteration || fm.post_iteration || hooks.postIteration || ""),
-    onFailure: normalizeCommand(fm.onFailure || fm.on_failure || hooks.onFailure || ""),
+    phase: normalizeCommand(flags.phase || fm.phase || phaseDefault || ""),
+    phaseOnly: coerceBoolean(flags["phase-only"] ?? phaseOnlyDefault, false),
+    skipPhase: normalizeCommand(flags["skip-phase"] || skipPhaseDefault || ""),
+    preIteration: normalizeCommand(
+      fm.preIteration ||
+        fm.pre_iteration ||
+        hooks.preIteration ||
+        preIterationDefault ||
+        defaultHooks.preIteration ||
+        ""
+    ),
+    postIteration: normalizeCommand(
+      fm.postIteration ||
+        fm.post_iteration ||
+        hooks.postIteration ||
+        postIterationDefault ||
+        defaultHooks.postIteration ||
+        ""
+    ),
+    onFailure: normalizeCommand(
+      fm.onFailure || fm.on_failure || hooks.onFailure || onFailureDefault || defaultHooks.onFailure || ""
+    ),
     gitBranch:
       flags["git-branch"] ||
       fm.git_branch ||
@@ -142,9 +263,10 @@ function mergeConfig(flags, frontMatter) {
       git.branch ||
       git.git_branch ||
       git.gitBranch ||
+      gitBranchDefault ||
       "",
     gitCommit: coerceBoolean(
-      flags["git-commit"] ?? fm.git_commit ?? fm.gitCommit ?? git.commit ?? git.git_commit,
+      flags["git-commit"] ?? fm.git_commit ?? fm.gitCommit ?? git.commit ?? git.git_commit ?? gitCommitDefault,
       DEFAULTS.gitCommit
     ),
     gitCommitMessage:
@@ -153,6 +275,7 @@ function mergeConfig(flags, frontMatter) {
       fm.gitCommitMessage ||
       git.commit_message ||
       git.commitMessage ||
+      gitCommitMessageDefault ||
       DEFAULTS.gitCommitMessage,
     gitWorktree: normalizeCommand(
       (gitWorktreeFlag === true ? "" : gitWorktreeFlag) ||
@@ -160,6 +283,7 @@ function mergeConfig(flags, frontMatter) {
         fm.gitWorktree ||
         git.worktree ||
         git.git_worktree ||
+        gitWorktreeDefault ||
         ""
     ),
     gitWorktreeBranch: normalizeCommand(
@@ -168,21 +292,28 @@ function mergeConfig(flags, frontMatter) {
         fm.gitWorktreeBranch ||
         git.worktree_branch ||
         git.worktreeBranch ||
+        gitWorktreeBranchDefault ||
         ""
     ),
     maxIterations: clampMin(
-      coerceNumber(flags["max-iterations"] || fm.max_iterations, DEFAULTS.maxIterations),
+      coerceNumber(flags["max-iterations"] || fm.max_iterations || maxIterationsDefault, DEFAULTS.maxIterations),
       1
     ),
-    maxMinutes: clampMin(coerceNumber(flags["max-minutes"] || fm.max_minutes, DEFAULTS.maxMinutes), 1),
-    backoffMs: clampMin(coerceNumber(flags["backoff-ms"] || fm.backoff_ms, DEFAULTS.backoffMs), 0),
-    rotateBytes: clampMin(coerceNumber(flags["rotate-bytes"] || fm.rotate_bytes, DEFAULTS.rotateBytes), 1024),
+    maxMinutes: clampMin(
+      coerceNumber(flags["max-minutes"] || fm.max_minutes || maxMinutesDefault, DEFAULTS.maxMinutes),
+      1
+    ),
+    backoffMs: clampMin(coerceNumber(flags["backoff-ms"] || fm.backoff_ms || backoffMsDefault, DEFAULTS.backoffMs), 0),
+    rotateBytes: clampMin(
+      coerceNumber(flags["rotate-bytes"] || fm.rotate_bytes || rotateBytesDefault, DEFAULTS.rotateBytes),
+      1024
+    ),
     plain,
     noEmoji: plain ? true : noEmoji,
-    noColor: plain ? true : resolveNoColor(flags),
-    dryRun: Boolean(flags["dry-run"]),
-    stream: Boolean(flags.stream),
-    verbose: coerceBoolean(flags.verbose, false),
+    noColor: plain ? true : resolveNoColor(flags, def),
+    dryRun: coerceBoolean(flags["dry-run"] ?? dryRunDefault, false),
+    stream: coerceBoolean(flags.stream ?? streamDefault, DEFAULTS.stream),
+    verbose: coerceBoolean(flags.verbose ?? verboseDefault, DEFAULTS.verbose),
   };
 }
 
@@ -192,5 +323,6 @@ module.exports = {
   prettyPath,
   materializeConfigPaths,
   formatDuration,
+  loadGlobalConfig,
   mergeConfig,
 };

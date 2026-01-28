@@ -18,12 +18,16 @@ async function confirm(question, { confirm = false, defaultYes = false } = {}) {
   }
 }
 
-async function promptLine(question) {
-  if (!process.stdin.isTTY) return "";
+async function promptLine(question, { defaultValue } = {}) {
+  const fallback = defaultValue == null ? "" : String(defaultValue).trim();
+  if (!process.stdin.isTTY) return fallback;
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   try {
-    const answer = await rl.question(question);
-    return String(answer || "").trim();
+    const base = String(question || "").trimEnd();
+    const suffix = fallback ? ` [${fallback}]` : "";
+    const answer = await rl.question(`${base}${suffix} `);
+    const normalized = String(answer || "").trim();
+    return normalized || fallback;
   } finally {
     rl.close();
   }

@@ -9,6 +9,7 @@ const {
   DEFAULTS,
   formatDuration,
   materializeConfigPaths,
+  loadGlobalConfig,
   mergeConfig,
   prettyPath,
   resolveFrom,
@@ -1132,17 +1133,20 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   if (hasOwn(flags, "task-file") || hasOwn(flags, "task-prompt-file"))
     throw new Error("Unsupported legacy seed flag provided. Use `--prompt @<file>` (or `--prompt -`) instead.");
   if (hasOwn(flags, "prompt-file")) throw new Error("Unsupported legacy flag provided. Use `--prompt-out <file>` instead.");
+  if (hasOwn(flags, "continue")) throw new Error("Unsupported legacy flag provided. Use `--resume` instead.");
 
-  const defaultPlanPath = resolveFrom(baseCwd, flags.plan || DEFAULTS.taskFile);
+  const { config: globalDefaults } = await loadGlobalConfig();
+  const preConfig = mergeConfig(flags, {}, globalDefaults);
+  const defaultPlanPath = resolveFrom(baseCwd, preConfig.taskFile || DEFAULTS.taskFile);
   const planText = await readText(defaultPlanPath);
 
   const parsedTask = planText ? parseTask(planText) : { frontMatter: {} };
-  let config = mergeConfig(flags, parsedTask.frontMatter);
+  let config = mergeConfig(flags, parsedTask.frontMatter, globalDefaults);
   configureSteps({ noColor: config.noColor, noEmoji: config.noEmoji, plain: config.plain });
 
-  // `--continue` is a "resume only" mode: don't accept seed prompt updates here.
-  if (config.continue && hasOwn(flags, "prompt")) {
-    throw new Error("`--continue` cannot be used with `--prompt`. Omit `--prompt` to resume, or run without `--continue`.");
+  // `--resume` is a "resume only" mode: don't accept seed prompt updates here.
+  if (config.resume && hasOwn(flags, "prompt")) {
+    throw new Error("`--resume` cannot be used with `--prompt`. Omit `--prompt` to resume, or run without `--resume`.");
   }
 
   // Validate seed prompt flag early.
@@ -1164,6 +1168,10 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
   const fm0 = (parsedTask && parsedTask.frontMatter) || {};
   const fmGit = fm0.git && typeof fm0.git === "object" ? fm0.git : {};
+  const agentCommandExplicit =
+    hasOwn(flags, "agent") ||
+    Object.prototype.hasOwnProperty.call(fm0, "agent_command") ||
+    Object.prototype.hasOwnProperty.call(fm0, "agentCommand");
   const gitCommitExplicit =
     hasOwn(flags, "git-commit") ||
     Object.prototype.hasOwnProperty.call(fm0, "git_commit") ||
@@ -1183,18 +1191,22 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   // Ensure agent command is defined before any planning/execution.
-  if (!config.agentCommand) {
-    const entered = await promptLine('Enter agent command (e.g. "cursor-agent"): ');
-    if (!entered) {
-      throw new Error(
-        `Missing agent_command. Set it in ${prettyPath(baseCwd, resolveFrom(baseCwd, config.taskFile))} front matter or use --agent.`
-      );
+  if (!agentCommandExplicit) {
+    const entered = await promptLine('Enter agent command (e.g. "cursor-agent"):', {
+      defaultValue: config.agentCommand,
+    });
+    if (entered) {
+      config.agentCommand = entered;
     }
-    config.agentCommand = entered;
+  }
+  if (!config.agentCommand) {
+    throw new Error(
+      `Missing agent_command. Set it in ${prettyPath(baseCwd, resolveFrom(baseCwd, config.taskFile))} front matter or use --agent.`
+    );
   }
 
   // Default git branch when missing (only when running inside a git repo).
-  if (!config.continue) {
+  if (!config.resume) {
     const hasGitBranch = Boolean(String(config.gitBranch || "").trim());
     const hasWorktreeBranch = Boolean(String(config.gitWorktreeBranch || "").trim());
     if (!hasGitBranch && !hasWorktreeBranch) {
@@ -1204,7 +1216,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
             "Missing git branch name. Provide --git-branch <name> or set git.branch in the plan front matter."
           );
         }
-        const entered = await promptLine('Enter git branch name (e.g. "loopy/my-task"): ');
+        const entered = await promptLine('Enter git branch name (e.g. "loopy/my-task"):');
         if (!entered) {
           throw new Error("Aborted: git branch name is required.");
         }
@@ -1222,7 +1234,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   let effectiveCwd = baseCwd;
   if (config.gitWorktree) {
     const worktreeAbs = resolveFrom(baseCwd, config.gitWorktree);
-    if (config.continue) {
+    if (config.resume) {
       // Resume mode: use existing worktree path only (don't create/switch).
       try {
         const stat = await fs.stat(worktreeAbs);
@@ -1232,14 +1244,14 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       } catch (err) {
         if (err && err.code === "ENOENT") {
           throw new Error(
-            `Cannot continue: git worktree path not found: ${prettyPath(baseCwd, worktreeAbs)} (run without --continue to create it)`
+            `Cannot resume: git worktree path not found: ${prettyPath(baseCwd, worktreeAbs)} (run without --resume to create it)`
           );
         }
         throw err;
       }
       effectiveCwd = worktreeAbs;
       await ensureGitRepo(effectiveCwd);
-      printStep(`Git worktree using existing ${prettyPath(baseCwd, effectiveCwd)} (--continue)`, { kind: "git" });
+      printStep(`Git worktree using existing ${prettyPath(baseCwd, effectiveCwd)} (--resume)`, { kind: "git" });
     } else {
       printStep(
         `Git worktree ensure ${prettyPath(baseCwd, worktreeAbs)}` +
@@ -1261,8 +1273,8 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     config.gitBranch = "";
   }
   if (config.gitBranch) {
-    if (config.continue) {
-      printStep(`Branch ${config.gitBranch} (--continue)`, { kind: "branch" });
+    if (config.resume) {
+      printStep(`Branch ${config.gitBranch} (--resume)`, { kind: "branch" });
     } else {
       printStep(`Git branch switch to ${config.gitBranch}`, { kind: "git" });
       await ensureGitRepo(effectiveCwd);
@@ -1277,12 +1289,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   config = materializeConfigPaths(config, effectiveCwd);
   if (onActivityLog) onActivityLog(config.activityLog);
 
-  if (config.continue) {
+  if (config.resume) {
     // Resume mode: require existing plan + state, but do not create/update the plan doc.
     const taskTextNow = await readText(config.taskFile);
     if (!taskTextNow) {
       throw new Error(
-        `Cannot continue: missing ${prettyPath(config.cwd, config.taskFile)}. Run \`loopy init\` or run without --continue and provide --prompt.`
+        `Cannot resume: missing ${prettyPath(config.cwd, config.taskFile)}. Run \`loopy init\` or run without --resume and provide --prompt.`
       );
     }
 
@@ -1292,7 +1304,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     } catch (err) {
       if (err && err.code === "ENOENT") {
         throw new Error(
-          `No Loopy state found at ${prettyPath(config.cwd, config.stateFile)}.\nRun \`loopy\` first (without --continue).`
+          `No Loopy state found at ${prettyPath(config.cwd, config.stateFile)}.\nRun \`loopy\` first (without --resume).`
         );
       }
       throw err;
