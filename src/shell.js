@@ -48,6 +48,7 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
   const agentStreamLogPath =
     options && options.agentStreamLogPath ? String(options.agentStreamLogPath) : "";
   const streamToTerminal = Boolean(options && options.streamToTerminal);
+  const stopSignal = options && options.stopSignal ? options.stopSignal : null;
   const hasNoColorOption = Object.prototype.hasOwnProperty.call(options || {}, "noColor");
   const noColor = hasNoColorOption
     ? Boolean(options.noColor)
@@ -57,6 +58,82 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
   // Use a PTY only when it's available (node-pty installed) and streaming was requested.
   // Otherwise fall back to normal pipes (more portable; matches test expectations).
   const pty = streamToTerminal && !noColor ? loadPty() : null;
+
+  if (stopSignal && stopSignal.stopRequested) {
+    return { code: 130, stdout: "", stderr: "", aborted: true, abortReason: "stop" };
+  }
+
+  let aborted = false;
+  let abortReason = "";
+  let stopUnsubscribe = null;
+  let abortTimer = null;
+  let killTimer = null;
+
+  const cleanupStop = () => {
+    if (stopUnsubscribe) {
+      try {
+        stopUnsubscribe();
+      } catch (_) {
+        // ignore
+      }
+      stopUnsubscribe = null;
+    }
+    if (abortTimer) {
+      clearTimeout(abortTimer);
+      abortTimer = null;
+    }
+    if (killTimer) {
+      clearTimeout(killTimer);
+      killTimer = null;
+    }
+  };
+
+  const requestAbort = (child, reason) => {
+    const nextReason = reason == null ? "" : String(reason);
+    if (nextReason && !abortReason) abortReason = nextReason;
+    if (aborted) return;
+    aborted = true;
+    if (!abortReason) abortReason = "stop";
+    if (!child || typeof child.kill !== "function") return;
+    try {
+      child.kill("SIGINT");
+    } catch (_) {
+      // ignore
+    }
+    abortTimer = setTimeout(() => {
+      try {
+        child.kill("SIGTERM");
+      } catch (_) {
+        // ignore
+      }
+    }, 2000);
+    killTimer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch (_) {
+        // ignore
+      }
+    }, 8000);
+  };
+
+  const attachStopListener = (child) => {
+    if (!stopSignal) return;
+    if (stopSignal.stopRequested) {
+      requestAbort(child, "stop");
+      return;
+    }
+    if (typeof stopSignal.onStop === "function") {
+      stopUnsubscribe = stopSignal.onStop((reason) => requestAbort(child, reason));
+      return;
+    }
+    const interval = setInterval(() => {
+      if (stopSignal.stopRequested) {
+        clearInterval(interval);
+        requestAbort(child, "stop");
+      }
+    }, 250);
+    stopUnsubscribe = () => clearInterval(interval);
+  };
 
   let appendQueue = Promise.resolve();
   const appendToLog = (payload) => {
@@ -95,6 +172,7 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
       return new Promise((resolve) => {
         let stdout = "";
 
+        attachStopListener(child);
         child.onData((data) => {
           if (streamToTerminal) process.stdout.write(data);
           if (agentStreamLogPath) appendToLog(redact(data));
@@ -104,8 +182,9 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
         });
 
         child.onExit(({ exitCode }) => {
+          cleanupStop();
           Promise.resolve(appendQueue).finally(() => {
-            resolve({ code: exitCode ?? 1, stdout, stderr: "" });
+            resolve({ code: exitCode ?? 1, stdout, stderr: "", aborted, abortReason });
           });
         });
 
@@ -128,6 +207,7 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
 
     let stdout = "";
     let stderr = "";
+    attachStopListener(child);
     child.stdout.on("data", (chunk) => {
       if (streamToTerminal) process.stdout.write(chunk);
       if (agentStreamLogPath) appendToLog(redact(chunk.toString()));
@@ -145,14 +225,16 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
     });
 
     child.on("error", (err) => {
+      cleanupStop();
       Promise.resolve(appendQueue).finally(() => {
-        resolve({ code: 1, stdout, stderr: stderr + err.message });
+        resolve({ code: 1, stdout, stderr: stderr + err.message, aborted, abortReason });
       });
     });
 
     child.on("close", (code) => {
+      cleanupStop();
       Promise.resolve(appendQueue).finally(() => {
-        resolve({ code: code ?? 1, stdout, stderr });
+        resolve({ code: code ?? 1, stdout, stderr, aborted, abortReason });
       });
     });
 

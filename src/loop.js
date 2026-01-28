@@ -610,11 +610,19 @@ async function archiveCompletedLoop(config) {
   return { archived: true, archiveDir };
 }
 
-async function ensureTaskBeforeLoop(config, loadedSeed) {
+async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   const cwd = config.cwd;
   const taskPath = config.taskFile;
+  const shouldStop = () => Boolean(stopSignal && stopSignal.stopRequested);
+  const phaseAgentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
+  const logPhasePlan = () => {
+    printStep(`Generating phase plan${phaseAgentLabel}`, { kind: "plan" });
+  };
 
   let existing = await readText(taskPath);
+  if (shouldStop()) {
+    return { taskText: existing || "", rewritten: false, aborted: true };
+  }
   if (!existing) {
     const loaded = loadedSeed || (await loadTaskSeed(config));
     let seed = loaded.seed;
@@ -630,7 +638,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     // If auto-phase is on, try to generate phases; otherwise create a minimal legacy task file.
     let nextText = "";
     if (config.autoPhase) {
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
+      logPhasePlan();
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      if (proposed.aborted || shouldStop()) {
+        return { taskText: "", rewritten: false, aborted: true };
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: config.testCommand });
@@ -696,7 +708,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
 
     let nextText = existing;
     if (config.autoPhase) {
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
+      logPhasePlan();
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      if (proposed.aborted || shouldStop()) {
+        return { taskText: existing, rewritten: false, aborted: true };
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || config.testCommand });
@@ -740,7 +756,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     const hasPhases = Boolean(parsed.phases && parsed.phases.length);
     if (!hasPhases) {
       const seed = parsed.body && parsed.body.trim() ? parsed.body.trim() : existing.trim();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
+      logPhasePlan();
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      if (proposed.aborted || shouldStop()) {
+        return { taskText: existing, rewritten: false, aborted: true };
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : null;
@@ -784,7 +804,7 @@ async function confirmPlanReview(config, { prdGenerated } = {}) {
   return true;
 }
 
-async function runIteration(config) {
+async function runIteration(config, { stopSignal } = {}) {
   let bytesRead = 0;
   let bytesWritten = 0;
   const guardrailStopReasons = [];
@@ -831,6 +851,18 @@ async function runIteration(config) {
   const phaseLabel = resolvePhaseLabel(parsedTask, currentPhaseId);
   const iterationStartedAt = new Date();
   startIteration({ iteration, phase: phaseLabel, startedAt: iterationStartedAt });
+  const abortIteration = async (label) => {
+    const suffix = label ? `; ${label}` : "";
+    iterationStatus = "stopped";
+    const message = `Stop requested; aborting iteration${suffix}`;
+    printStep(message, { iteration, kind: "result", level: "warn" });
+    try {
+      await appendActivity(config.activityLog, [message]);
+    } catch (_) {
+      // ignore
+    }
+    return { status: "stopped", bytes: bytesRead + bytesWritten };
+  };
   try {
     printStep(`Rotation ${rotationPending ? "fresh" : "standard"}`, { iteration, kind: "meta" });
 
@@ -883,7 +915,11 @@ async function runIteration(config) {
       const hookResult = await runShellCommand(config.preIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (hookResult.aborted) {
+        return await abortIteration("pre-iteration hook");
+      }
       await appendActivity(config.activityLog, [`preIteration hook exit ${hookResult.code}`]);
       printStep(`Hook pre-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
@@ -913,7 +949,11 @@ async function runIteration(config) {
       agentStreamLogPath,
       streamToTerminal: Boolean(config.stream),
       noColor: config.noColor,
+      stopSignal,
     });
+    if (agentResult.aborted) {
+      return await abortIteration("agent run");
+    }
     const redactedStdout = redact(agentResult.stdout);
     const redactedStderr = redact(agentResult.stderr);
     const combinedOutput = truncate(`${redactedStdout}\n${redactedStderr}`, DEFAULTS.maxOutputBytes);
@@ -950,7 +990,11 @@ async function runIteration(config) {
       const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (testResult.aborted) {
+        return await abortIteration("tests");
+      }
       const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
       await writeText(lastTestOutputPath, testOutput);
       bytesWritten += Buffer.byteLength(testOutput);
@@ -997,7 +1041,11 @@ async function runIteration(config) {
       const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (hookResult.aborted) {
+        return await abortIteration("post-iteration hook");
+      }
       postIterationRan = true;
       await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
       printStep(`Hook post-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
@@ -1041,7 +1089,11 @@ async function runIteration(config) {
       const hookResult = await runShellCommand(config.onFailure, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (hookResult.aborted) {
+        return await abortIteration("on-failure hook");
+      }
       await appendActivity(config.activityLog, [`onFailure hook exit ${hookResult.code}`]);
       printStep(`Hook on-failure exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
@@ -1051,7 +1103,11 @@ async function runIteration(config) {
       const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (hookResult.aborted) {
+        return await abortIteration("post-iteration hook");
+      }
       await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
       printStep(`Hook post-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
@@ -1406,6 +1462,15 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   if (onActivityLog) onActivityLog(config.activityLog);
   let prdGenerated = false;
   const planReviewRequired = !config.resume && (planSeedProvided || promptSeedProvided);
+  const stopBeforeLoop = async (message) => {
+    const note = message || "Stop requested; exiting before loop";
+    printStep(note, { kind: "result", level: "warn" });
+    try {
+      await appendActivity(config.activityLog, [note]);
+    } catch (_) {
+      // ignore
+    }
+  };
 
   if (config.resume) {
     // Resume mode: require existing plan + state, but do not create/update the plan doc.
@@ -1460,11 +1525,18 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     let effectiveSeed = loadedPromptSeed;
 
     if (loadedPlanSeed.seed) {
+      const agentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
+      printStep(`Generating PRD${agentLabel}`, { kind: "plan" });
       const prdResult = await generatePrdWithAgent(config.agentCommand, loadedPlanSeed.seed, {
         extraContext: loadedPromptSeed.seed || "",
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal: stop,
       });
+      if (prdResult.aborted || stop.stopRequested) {
+        await stopBeforeLoop("PRD generation aborted; exiting before loop");
+        return;
+      }
       const prdText = prdResult.text;
       const payload = `${prdText.trimEnd()}\n`;
       await writeText(config.prdFile, payload);
@@ -1488,7 +1560,14 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     }
 
     // Plan initialization / auto-phase planning happens once, before looping.
-    const ensured = await ensureTaskBeforeLoop(config, effectiveSeed);
+    if (planReviewRequired) {
+      printStep("Preparing plan doc from seed", { kind: "plan" });
+    }
+    const ensured = await ensureTaskBeforeLoop(config, effectiveSeed, { stopSignal: stop });
+    if (ensured.aborted || stop.stopRequested) {
+      await stopBeforeLoop("Stop requested; exiting before loop");
+      return;
+    }
     if (ensured.rewritten) {
       await appendActivity(config.activityLog, [
         `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
@@ -1575,7 +1654,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       break;
     }
 
-    const result = await runIteration(config);
+    const result = await runIteration(config, { stopSignal: stop });
     iteration += 1;
 
     if (result.status === "complete") {

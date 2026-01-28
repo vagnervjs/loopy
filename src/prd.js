@@ -97,11 +97,14 @@ function buildPrdPrompt(seedText, extraContext) {
   return sections.join("\n");
 }
 
-async function generatePrdWithAgent(agentCommand, seedText, { extraContext, cwd, noColor } = {}) {
+async function generatePrdWithAgent(agentCommand, seedText, { extraContext, cwd, noColor, stopSignal } = {}) {
   const cmd = String(agentCommand || "").trim();
   if (!cmd) throw new Error("Missing agent command for PRD generation.");
   const prompt = buildPrdPrompt(seedText, extraContext);
-  const result = await runShellCommand(cmd, prompt, DEFAULTS.maxOutputBytes, { cwd, noColor });
+  const result = await runShellCommand(cmd, prompt, DEFAULTS.maxOutputBytes, { cwd, noColor, stopSignal });
+  if (result.aborted) {
+    return { aborted: true, text: "", raw: "" };
+  }
   const stdout = normalizeTaskSeedText(result.stdout || "");
   const stderr = normalizeTaskSeedText(result.stderr || "");
   const output = stdout || stderr;
@@ -112,7 +115,7 @@ async function generatePrdWithAgent(agentCommand, seedText, { extraContext, cwd,
   if (!output) throw new Error("PRD generation returned empty output.");
   const cleaned = normalizeTaskSeedText(stripMarkdownFence(output));
   if (!cleaned) throw new Error("PRD generation returned empty output.");
-  return { text: cleaned, raw: output };
+  return { text: cleaned, raw: output, aborted: false };
 }
 
 module.exports = {

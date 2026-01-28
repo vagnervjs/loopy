@@ -20,6 +20,30 @@ function getLoopyVersion() {
   }
 }
 
+function createStopSignal() {
+  const listeners = new Set();
+  const signal = {
+    stopRequested: false,
+    onStop: (listener) => {
+      if (typeof listener !== "function") return () => {};
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    requestStop: (reason) => {
+      if (signal.stopRequested) return;
+      signal.stopRequested = true;
+      for (const listener of Array.from(listeners)) {
+        try {
+          listener(reason);
+        } catch (_) {
+          // ignore
+        }
+      }
+    },
+  };
+  return signal;
+}
+
 function maxStringLength(values) {
   let max = 0;
   for (const v of values || []) {
@@ -450,27 +474,26 @@ async function runCli(argv) {
     return;
   }
 
-  const stopSignal = { stopRequested: false };
+  const stopSignal = createStopSignal();
   let currentActivityLog = DEFAULTS.activityLog;
 
-  process.on("SIGINT", async () => {
-    stopSignal.stopRequested = true;
-    printStep("Signal SIGINT received; stopping", { level: "warn" });
+  const handleStop = async (signalName) => {
+    if (stopSignal.stopRequested) return;
+    stopSignal.requestStop(signalName);
+    printStep(`Signal ${signalName} received; stopping`, { level: "warn" });
     try {
-      await appendActivity(currentActivityLog, ["SIGINT received. Stopping."]);
+      await appendActivity(currentActivityLog, [`${signalName} received. Stopping.`]);
     } catch (_) {
       // ignore
     }
+  };
+
+  process.on("SIGINT", () => {
+    void handleStop("SIGINT");
   });
 
-  process.on("SIGTERM", async () => {
-    stopSignal.stopRequested = true;
-    printStep("Signal SIGTERM received; stopping", { level: "warn" });
-    try {
-      await appendActivity(currentActivityLog, ["SIGTERM received. Stopping."]);
-    } catch (_) {
-      // ignore
-    }
+  process.on("SIGTERM", () => {
+    void handleStop("SIGTERM");
   });
 
   await runLoop("loop", flags, {
