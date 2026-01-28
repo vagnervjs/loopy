@@ -29,6 +29,7 @@ const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
 const { generatePrdWithAgent } = require("./prd");
 const {
   ensureGitRepo,
+  getCurrentBranch,
   ensureGitWorktree,
   getGitModifiedFiles,
   gitCommitIfNeeded,
@@ -1387,7 +1388,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
             "Missing git branch name. Provide --git-branch <name> or set git.branch in the plan front matter."
           );
         }
-        const entered = await promptLine('Enter git branch name (e.g. "loopy/my-task"):');
+        const currentBranch = await getCurrentBranch(baseCwd);
+        const defaultBranch = currentBranch || "";
+        const promptMsg = currentBranch
+          ? `Enter git branch name (default: ${currentBranch}):`
+          : 'Enter git branch name (e.g. "loopy/my-task"):';
+        const entered = await promptLine(promptMsg, { defaultValue: defaultBranch });
         if (!entered) {
           throw new Error("Aborted: git branch name is required.");
         }
