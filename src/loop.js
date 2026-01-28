@@ -31,6 +31,9 @@ const {
   gitSwitchBranch,
 } = require("./git");
 
+const ARCHIVE_DIRNAME = "archive";
+const LEGACY_ARCHIVE_DIRNAME = "completed_loops";
+
 function parseSkipPhaseList(value) {
   const raw = String(value || "").trim();
   if (!raw) return [];
@@ -435,6 +438,16 @@ function isPathInside(baseDir, targetPath) {
   return rel && !rel.startsWith("..") && !path.isAbsolute(rel);
 }
 
+async function pathExists(targetPath) {
+  try {
+    await fs.stat(targetPath);
+    return true;
+  } catch (err) {
+    if (err && err.code === "ENOENT") return false;
+    throw err;
+  }
+}
+
 async function movePath(sourcePath, destinationPath) {
   try {
     await fs.rm(destinationPath, { recursive: true, force: true });
@@ -487,7 +500,12 @@ async function archiveCompletedLoop(config) {
     String(fmGit.branch || fmGit.git_branch || fmGit.gitBranch || "").trim();
 
   const baseDir = config.loopyDir || path.dirname(taskPath);
-  const archiveDir = path.join(baseDir, "completed_loops", archiveLoopFolderName(branch));
+  const legacyArchiveRoot = path.join(baseDir, LEGACY_ARCHIVE_DIRNAME);
+  const archiveRoot = path.join(baseDir, ARCHIVE_DIRNAME);
+  if ((await pathExists(legacyArchiveRoot)) && !(await pathExists(archiveRoot))) {
+    await movePath(legacyArchiveRoot, archiveRoot);
+  }
+  const archiveDir = path.join(archiveRoot, archiveLoopFolderName(branch));
   await fs.mkdir(archiveDir, { recursive: true });
 
   const prettyArchive = prettyPath(config.cwd, archiveDir);
@@ -495,7 +513,7 @@ async function archiveCompletedLoop(config) {
 
   const entries = await fs.readdir(baseDir);
   for (const entry of entries) {
-    if (entry === "completed_loops") continue;
+    if (entry === ARCHIVE_DIRNAME || entry === LEGACY_ARCHIVE_DIRNAME) continue;
     const sourcePath = path.join(baseDir, entry);
     const destinationPath = path.join(archiveDir, entry);
     await movePath(sourcePath, destinationPath);
