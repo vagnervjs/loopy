@@ -44,6 +44,12 @@ loopy --agent "cursor-agent" --prompt @./task.txt
 cat ./task.txt | loopy --agent "cursor-agent" --prompt -
 ```
 
+### Plan seed from a file or stdin (PRD-first)
+```bash
+loopy --agent "cursor-agent" --plan @./problem.md
+cat ./problem.md | loopy --agent "cursor-agent" --plan -
+```
+
 ## Common workflows
 
 Start a new loop:
@@ -53,9 +59,9 @@ loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 
 Resume a previous run (requires `.loopy/state.json`):
 ```bash
-loopy --continue
+loopy --resume
 ```
-Note: `--continue` is resume-only and cannot be combined with `--prompt`.
+Note: `--resume` is resume-only and cannot be combined with `--prompt` or `--plan`.
 
 Run a single iteration:
 ```bash
@@ -77,7 +83,11 @@ loopy hint --reset
 
 Stream agent output to your terminal:
 ```bash
-loopy --agent "cursor-agent" --prompt @examples/PRD.md --stream
+loopy --agent "cursor-agent" --prompt @examples/PRD.md
+```
+Disable streaming when you only want logs:
+```bash
+loopy --agent "cursor-agent" --prompt @examples/PRD.md --stream=false
 ```
 
 Help and version:
@@ -92,7 +102,7 @@ Loopy prints timestamped lines (local time) with a compact icon + message. Defau
 - Use `--no-emoji` for ASCII icons.
 - Use `--plain` for no color and no emoji.
 - Set `NO_COLOR=1` to disable ANSI color (emoji remain).
-- Use `--verbose` to print full checklist details in the plan summary.
+- Use `--verbose=false` to hide full checklist details in the plan summary.
 - Stable markers: `Iteration <n> start` and `Iteration <n> complete`.
 
 Example (plain mode):
@@ -113,20 +123,21 @@ Example (plain mode):
 
 ## How Loopy works
 1. Loopy reads a plan doc (default: `.loopy/LOOPY_PLAN.md`) on every iteration.
-2. If you provide a seed prompt, Loopy generates or updates the plan doc before looping.
-3. Each iteration runs the agent, optional tests, and updates logs/state.
-4. The loop stops when all plan checkboxes are checked or when guardrails stop it.
-5. On completion, Loopy archives `.loopy` artifacts to `.loopy/archive/<branch>/` and starts fresh.
+2. If you provide a seed prompt (`--prompt`) or plan seed (`--plan`), Loopy generates/updates the plan doc before looping.
+3. When run interactively with a seed, Loopy pauses for plan review before starting iterations.
+4. Each iteration runs the agent, optional tests, and updates logs/state.
+5. The loop stops when all plan checkboxes are checked or when guardrails stop it.
+6. On completion, Loopy archives `.loopy` artifacts to `.loopy/archive/<branch>/` and starts fresh.
 
 ## Core concepts
 
-### Plan doc (`--plan`, default `.loopy/LOOPY_PLAN.md`)
+### Plan doc (`--plan-file`, default `.loopy/LOOPY_PLAN.md`)
 The plan doc is the durable source of truth for the loop. It contains:
 
 - YAML front matter (agent command, test command, loop limits, git settings, phases)
 - The checklist(s) that represent progress and completion
 
-You can point Loopy at any path via `--plan <file>`.
+You can point Loopy at any path via `--plan-file <file>`.
 
 Example:
 ```md
@@ -153,6 +164,18 @@ hooks:
 You can also pass `--agent` to override the plan front matter.
 See `examples/LOOPY_PLAN.md` for a starter template.
 
+### Plan seed (`--plan`)
+The plan seed is a raw problem statement. Loopy uses it to generate a PRD (`.loopy/PRD.md`) via the agent, then uses the PRD as the seed for the plan doc.
+
+How to provide it:
+- `--plan "<text>"`: inline text
+- `--plan @<path>`: read text from a file (any extension; `.md` recommended)
+- `--plan -`: read text from stdin
+
+Notes:
+- If you also provide `--prompt`, Loopy passes it as extra context during PRD generation.
+- When run in a TTY, Loopy pauses for plan review after updating files.
+
 ### Seed prompt (`--prompt`)
 The seed prompt is a PRD-style requirements/implementation notes document. Loopy uses it to generate or update the plan doc before looping, and it also includes the seed in `.loopy/PROMPT.md` for agent context.
 
@@ -166,6 +189,7 @@ When it is used:
 - If the plan doc exists and you provide a seed prompt, Loopy updates it automatically.
 - If provided, Loopy includes the seed prompt in `.loopy/PROMPT.md` under `## Plan seed (PRD)`.
 - Use `--confirm` to require confirmation before writing or applying plan updates.
+- When run in a TTY, Loopy pauses for plan review after updating files.
 
 ### Phases (auto-phase)
 Loopy supports phased execution via front matter:
@@ -216,12 +240,30 @@ Disable auto-phase and use the legacy single-checklist behavior:
 loopy --auto-phase=false
 ```
 
+### Global defaults (`~/.loopy/config.yml`)
+You can set defaults that apply across repos:
+
+```yaml
+defaults:
+  agent: "cursor-agent"
+  stream: true
+  verbose: true
+  max_iterations: 20
+  git:
+    commit: true
+```
+
+Notes:
+- You can place keys at the top level or under `defaults:`.
+- Loopy persists a selected agent command here when you choose one interactively.
+
 ### Configuration and precedence
 Loopy resolves settings from highest priority to lowest:
 
 1. CLI flags (`loopy --...`)
-2. Plan doc front matter (YAML in `--plan`, default `.loopy/LOOPY_PLAN.md`)
-3. Built-in defaults
+2. Plan doc front matter (YAML in `--plan-file`, default `.loopy/LOOPY_PLAN.md`)
+3. Global defaults (`~/.loopy/config.{yml,yaml,json}`)
+4. Built-in defaults
 
 Notes:
 - `--agent` overrides `agent_command` in front matter.
@@ -238,7 +280,7 @@ Core loop:
 - `--phase <id>` start/resume at phase id
 - `--phase-only` stop after current phase completes
 - `--skip-phase <ids>` comma-separated phase ids to skip
-- `--continue` resume from existing `.loopy/state.json`
+- `--resume` resume from existing `.loopy/state.json`
 - `--max-iterations <n>` max iterations (default: 50)
 - `--max-minutes <n>` max wall time in minutes (default: 120)
 - `--backoff-ms <n>` delay between iterations (default: 5000)
@@ -246,7 +288,8 @@ Core loop:
 - `--dry-run` build prompt only, skip agent execution
 
 Input/output paths:
-- `--plan <file>` plan doc path (default: `.loopy/LOOPY_PLAN.md`)
+- `--plan <text|@file|->` plan seed to generate PRD + plan before looping
+- `--plan-file <file>` plan doc path (default: `.loopy/LOOPY_PLAN.md`)
 - `--prompt <text|@file|->` seed prompt to generate/update the plan doc before looping
 - `--prompt-out <file>` prompt output file (default: `.loopy/PROMPT.md`)
 - `--progress <file>` progress file (default: `.loopy/progress.md`)
@@ -256,11 +299,11 @@ Input/output paths:
 - `--hints <file>` hints file (default: `.loopy/hints.md`)
 
 Output/utility:
-- `--stream` mirror agent stdout/stderr to your terminal
+- `--stream` mirror agent stdout/stderr to your terminal (default: true; disable with `--stream=false`)
 - `--no-color` disable ANSI colors (also honors `NO_COLOR`)
 - `--no-emoji` disable emoji icons (ASCII fallback)
 - `--plain` disable color and emoji
-- `--verbose` print full checklist details in the plan summary
+- `--verbose` print full checklist details in the plan summary (default: true; disable with `--verbose=false`)
 - `--version` print version and exit
 
 ## Files created
@@ -273,6 +316,7 @@ Output/utility:
 - `.loopy/agent_stream.log` live agent stdout/stderr stream (redacted)
 - `.loopy/last_test_output.txt` most recent test output (redacted)
 - `.loopy/PROMPT.md` generated prompt input for each iteration
+- `.loopy/PRD.md` generated PRD (when using `--plan`)
 
 ## Streaming progress
 Tail logs in a separate terminal for live progress:
@@ -331,7 +375,7 @@ Safety notes:
 - If you do not set `--git-branch` (or `git.branch` in the plan) and you are in a git repo, Loopy prompts for a branch name when starting a new loop.
 - Non-interactive runs must pass `--git-branch` (or set `git.branch`) to avoid the branch prompt.
 - If `--git-branch` is set, Loopy refuses to switch branches when there are uncommitted changes.
-- With `--continue`, Loopy does not switch branches/worktrees (resume-only), so staged/dirty files will not block resuming.
+- With `--resume`, Loopy does not switch branches/worktrees (resume-only), so staged/dirty files will not block resuming.
 - Auto-commit runs `git add -A` and then `git commit -m "<rendered message>"`.
 - Git commits require an author/committer identity (via repo config or environment variables).
 
@@ -346,11 +390,11 @@ Safety notes:
 - There is no explicit max size cap today; very large prompts can degrade planning quality.
 
 ## Troubleshooting
-- Missing plan doc: run `loopy init` or provide `--prompt` (or use `--plan <file>`).
+- Missing plan doc: run `loopy init` or provide `--prompt` (or use `--plan-file <file>`).
 - Agent exits immediately: verify `agent_command` is correct and accepts stdin.
 - Loop stops early: check `.loopy/progress.md` and `.loopy/activity.log` for caps or completion.
 - Guardrails growing: repeated failures or file thrashing were detected.
-- Resume errors: `--continue` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt`.
+- Resume errors: `--resume` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt` or `--plan`.
 - Flag errors: `--prompt` requires a value (`"<text>"`, `@<file>`, or `-`); `--prompt-out` requires a file path value.
 - Resetting state: delete `.loopy/state.json` (and optionally `.loopy/progress.md`) to force a fresh run; delete the whole `.loopy/` directory for a full reset.
 

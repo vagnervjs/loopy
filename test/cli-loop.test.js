@@ -140,7 +140,7 @@ test("NO_COLOR disables ANSI formatting in logs", async () => {
   assert.ok(!/\x1b\[[0-9;]*m/.test(stdout));
 });
 
-test("`--verbose` prints full checklist details", async () => {
+test("default `--verbose` prints full checklist details", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-verbose-plan-"));
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
@@ -151,12 +151,65 @@ test("`--verbose` prints full checklist details", async () => {
 
   const agentCmd = 'node -e "process.exit(0)"';
   const { code, stdout, stderr } = await runNodeCli(
-    [CLI_PATH, "--agent", agentCmd, "--max-minutes", "1", "--dry-run", "--verbose", "--auto-phase=false"],
+    [CLI_PATH, "--agent", agentCmd, "--max-minutes", "1", "--dry-run", "--auto-phase=false"],
     { cwd: tmp }
   );
   assert.equal(code, 0, stderr);
   assert.match(stdout, /Plan details/);
   assert.match(stdout, /\[ \] do something/);
+});
+
+test("`--verbose=false` hides checklist details", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-verbose-off-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do something", ""].join("\n"),
+    "utf8"
+  );
+
+  const agentCmd = 'node -e "process.exit(0)"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [CLI_PATH, "--agent", agentCmd, "--max-minutes", "1", "--dry-run", "--verbose=false", "--auto-phase=false"],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+  assert.ok(!stdout.includes("Plan details"), stdout);
+  assert.ok(!/\[ \] do something/.test(stdout), stdout);
+  assert.match(stdout, /Plan 1 task/);
+});
+
+test("default `--stream` mirrors agent output to terminal", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-default-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do something", ""].join(
+      "\n"
+    ),
+    "utf8"
+  );
+
+  const agentCmd = 'node -e "console.log(\\"STREAM_OUT\\"); console.error(\\"STREAM_ERR\\")"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--agent",
+      agentCmd,
+      "--auto-phase=false",
+      "--max-iterations",
+      "1",
+      "--backoff-ms",
+      "0",
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0);
+  const combined = `${stdout}\n${stderr}`;
+  assert.match(combined, /STREAM_OUT/);
+  assert.match(combined, /STREAM_ERR/);
 });
 
 test("`--stream` mirrors agent output to terminal", async () => {
