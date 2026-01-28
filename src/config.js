@@ -391,7 +391,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     noEmoji: plain ? true : noEmoji,
     noColor: plain ? true : resolveNoColor(flags, def),
     dryRun: coerceBoolean(flags["dry-run"] ?? dryRunDefault, false),
-    stream: coerceBoolean(flags.stream ?? streamDefault, DEFAULTS.stream),
+    stream: flags["no-stream"] !== undefined ? !coerceBoolean(flags["no-stream"], false) : coerceBoolean(streamDefault, DEFAULTS.stream),
     verbose: coerceBoolean(flags.verbose ?? verboseDefault, DEFAULTS.verbose),
   };
 }

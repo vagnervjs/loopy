@@ -179,7 +179,7 @@ test("`--verbose=false` hides checklist details", async () => {
   assert.match(stdout, /Plan 1 task/);
 });
 
-test("default `--stream` mirrors agent output to terminal", async () => {
+test("default streaming mirrors agent output to terminal", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-default-"));
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
@@ -208,11 +208,12 @@ test("default `--stream` mirrors agent output to terminal", async () => {
   );
   assert.equal(code, 0);
   const combined = `${stdout}\n${stderr}`;
-  assert.match(combined, /STREAM_OUT/);
-  assert.match(combined, /STREAM_ERR/);
+  // Check that output appears as standalone lines (streaming enabled)
+  assert.match(combined, /^STREAM_OUT$/m);
+  assert.match(combined, /^STREAM_ERR$/m);
 });
 
-test("`--stream` mirrors agent output to terminal", async () => {
+test("default streaming mirrors agent output to terminal", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-terminal-"));
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
@@ -229,7 +230,6 @@ test("`--stream` mirrors agent output to terminal", async () => {
       CLI_PATH,
       "--agent",
       agentCmd,
-      "--stream",
       "--max-minutes",
       "1",
     ],
@@ -237,8 +237,39 @@ test("`--stream` mirrors agent output to terminal", async () => {
   );
   assert.equal(code, 0);
   const combined = `${stdout}\n${stderr}`;
-  assert.match(combined, /\bout\b/);
-  assert.match(combined, /\berr\b/);
+  // Check that output appears as standalone lines (streaming enabled)
+  assert.match(combined, /^out$/m);
+  assert.match(combined, /^err$/m);
+});
+
+test("`--no-stream` disables mirroring agent output to terminal", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-no-stream-"));
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] do something", ""].join(
+      "\n"
+    ),
+    "utf8"
+  );
+
+  const agentCmd = 'node -e "console.log(\\"streamtest\\"); console.error(\\"errortest\\")"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--agent",
+      agentCmd,
+      "--no-stream",
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0);
+  const combined = `${stdout}\n${stderr}`;
+  // Check that the output does NOT appear as standalone lines (streaming disabled)
+  assert.doesNotMatch(combined, /^streamtest$/m);
+  assert.doesNotMatch(combined, /^errortest$/m);
 });
 
 test("`--dry-run` stops after the first iteration (no backoff loop)", async () => {

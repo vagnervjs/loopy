@@ -119,7 +119,7 @@ function printHelp() {
     ],
     Output: [
       { label: "--prompt-out <file>", desc: `Prompt output file (default: ${DEFAULTS.promptFile})` },
-      { label: "--stream", desc: "Mirror agent stdout/stderr to your terminal (default: true; disable with --stream=false)" },
+      { label: "--no-stream", desc: "Disable mirroring agent stdout/stderr to your terminal" },
       { label: "--no-color", desc: "Disable ANSI colors (also respects NO_COLOR)" },
       { label: "--no-emoji", desc: "Disable emoji (use ASCII fallbacks)" },
       { label: "--plain", desc: "Disable color and emoji (plain text output)" },
