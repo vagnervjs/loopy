@@ -177,10 +177,6 @@ module.exports = {
   resolveFrom,
   prettyPath,
   materializeConfigPaths,
-  normalizeCommand,
-  coerceNumber,
-  coerceBoolean,
-  clampMin,
   formatDuration,
   mergeConfig,
 };

@@ -176,10 +176,7 @@ async function getGitModifiedFiles(cwd) {
 }
 
 module.exports = {
-  git,
   ensureGitRepo,
-  gitStatusPorcelain,
-  gitBranchExistsLocal,
   gitSwitchBranch,
   ensureGitWorktree,
   gitCommitIfNeeded,

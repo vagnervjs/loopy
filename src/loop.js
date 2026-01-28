@@ -1375,6 +1375,5 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 }
 
 module.exports = {
-  runIteration,
   runLoop,
 };
