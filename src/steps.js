@@ -272,6 +272,7 @@ function printStep(message, options = {}) {
 module.exports = {
   configureSteps,
   endIteration,
+  formatDurationMs,
   printBlankLine,
   printStep,
   startIteration,

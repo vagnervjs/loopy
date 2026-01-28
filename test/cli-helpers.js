@@ -101,7 +101,7 @@ function assertHelpAligned(helpText) {
   assert.ok(commonCols.length >= 2, "expected at least two common option rows");
   assert.equal(new Set(commonCols).size, 1, `common option descriptions misaligned: ${commonCols.join(", ")}`);
 
-  const advancedCols = extractHelpDescriptionColumns(helpText, "    ");
+  const advancedCols = extractHelpDescriptionColumns(helpText, "  ");
   assert.ok(advancedCols.length >= 2, "expected at least two advanced option rows");
   assert.equal(new Set(advancedCols).size, 1, `advanced option descriptions misaligned: ${advancedCols.join(", ")}`);
 }

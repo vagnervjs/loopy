@@ -27,6 +27,20 @@ async function gitStatusPorcelain(cwd) {
   return res.stdout;
 }
 
+async function getCurrentBranch(cwd) {
+  try {
+    const res = await git(["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+    if (res.code === 0) {
+      const branch = res.stdout.trim();
+      // Return null for detached HEAD state
+      return branch === "HEAD" ? null : branch;
+    }
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
 async function gitBranchExistsLocal(cwd, branch) {
   if (!branch) return false;
   const res = await git(["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd });
@@ -177,6 +191,7 @@ async function getGitModifiedFiles(cwd) {
 
 module.exports = {
   ensureGitRepo,
+  getCurrentBranch,
   gitSwitchBranch,
   ensureGitWorktree,
   gitCommitIfNeeded,

@@ -98,11 +98,11 @@ test("`--git-worktree` runs loop inside worktree path", async () => {
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8"));
 });
 
-test("`--continue` resumes even with staged changes", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-continue-staged-"));
+test("`--resume` resumes even with staged changes", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-resume-staged-"));
   const gitEnv = await initGitRepo(tmp);
 
-  // Create a pending state (required for --continue).
+  // Create a pending state (required for --resume).
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "state.json"),
@@ -110,30 +110,31 @@ test("`--continue` resumes even with staged changes", async () => {
     "utf8"
   );
 
-  // Stage a change (should not block in --continue mode).
+  // Stage a change (should not block in --resume mode).
   await fs.writeFile(path.join(tmp, "dirty.txt"), "hi\n", "utf8");
   await runCmd("git", ["add", "-A"], { cwd: tmp, env: gitEnv });
 
   const agentCmd = 'node -e "process.exit(0)"';
   const { code, stdout, stderr } = await runNodeCli(
-    [CLI_PATH, "--continue", "--dry-run", "--agent", agentCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
+    [CLI_PATH, "--resume", "--dry-run", "--agent", agentCmd, "--max-iterations", "1", "--backoff-ms", "0", "--max-minutes", "1"],
     { cwd: tmp, env: gitEnv }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /resume: iter/);
-  assert.match(stdout, /\[loopy\] \[info\] iter \d+: start/);
+  assert.match(stdout, /Resume iteration 3/i);
+  assert.match(stdout, /Iteration 4 start/);
 });
 
-test("`--continue` rejects `--prompt`", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-continue-prompt-"));
+test("`--resume` rejects `--prompt`", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-resume-prompt-"));
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(path.join(tmp, ".loopy", "state.json"), "{}\n", "utf8");
   await fs.writeFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] x", ""].join("\n"), "utf8");
 
-  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "--continue", "--prompt", "seed", "--agent", 'node -e "process.exit(0)"'], {
+  const { code, stdout, stderr } = await runNodeCli([CLI_PATH, "--resume", "--prompt", "seed", "--agent", 'node -e "process.exit(0)"'], {
     cwd: tmp,
   });
   assert.equal(code, 1);
   assert.equal(stdout, "");
-  assert.match(stderr, /--continue.*--prompt/i);
+  assert.match(stderr, /--resume.*--prompt/i);
+  assert.match(stderr, /--plan/i);
 });

@@ -20,6 +20,30 @@ function getLoopyVersion() {
   }
 }
 
+function createStopSignal() {
+  const listeners = new Set();
+  const signal = {
+    stopRequested: false,
+    onStop: (listener) => {
+      if (typeof listener !== "function") return () => {};
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    requestStop: (reason) => {
+      if (signal.stopRequested) return;
+      signal.stopRequested = true;
+      for (const listener of Array.from(listeners)) {
+        try {
+          listener(reason);
+        } catch (_) {
+          // ignore
+        }
+      }
+    },
+  };
+  return signal;
+}
+
 function maxStringLength(values) {
   let max = 0;
   for (const v of values || []) {
@@ -61,7 +85,7 @@ function printHelp() {
       label: 'hint "<text>"',
       desc: "Save a hint for the next prompt\nAppends to `.loopy/hints.md` (included in the next prompt under \"Hints\")\nUse --reset to clear all hints, --pop to remove the last hint",
     },
-    { label: "init", desc: "Initialize `.loopy/` files if missing\nCreates `.loopy/LOOPY_PLAN.md` and `.loopy/hints.md`" },
+    { label: "reset", desc: "Archive all files from `.loopy/` to `.loopy/archive/reset-<timestamp>/`\nClears loop state for a fresh start" },
     { label: "help", desc: "Show help" },
   ];
 
@@ -69,11 +93,13 @@ function printHelp() {
     { label: "--prompt <text>", desc: "Seed prompt (inline) to generate/update the plan before looping" },
     { label: "--prompt @<file>", desc: "Seed prompt from a file to generate/update the plan before looping" },
     { label: "--prompt -", desc: "Seed prompt from stdin to generate/update the plan before looping" },
+    { label: "--plan <text>", desc: "Plan prompt (inline) to generate a PRD + plan before looping" },
+    { label: "--plan @<file>", desc: "Plan prompt from a file to generate a PRD + plan before looping" },
+    { label: "--plan -", desc: "Plan prompt from stdin to generate a PRD + plan before looping" },
     {
-      label: "--continue",
+      label: "--resume",
       desc: "Resume from saved state (requires existing `.loopy/state.json`); skips git switching",
     },
-    { label: "--plan <file>", desc: `Plan doc (default: ${DEFAULTS.taskFile})` },
     { label: "--agent <command>", desc: "Agent command (e.g. cursor-agent; overrides plan front matter)" },
     { label: "--confirm", desc: "Ask before writing or applying plan updates" },
     { label: "--dry-run", desc: "Build prompt, skip agent execution" },
@@ -93,13 +119,14 @@ function printHelp() {
     ],
     Output: [
       { label: "--prompt-out <file>", desc: `Prompt output file (default: ${DEFAULTS.promptFile})` },
-      { label: "--stream", desc: "Mirror agent stdout/stderr to your terminal" },
+      { label: "--no-stream", desc: "Disable mirroring agent stdout/stderr to your terminal" },
       { label: "--no-color", desc: "Disable ANSI colors (also respects NO_COLOR)" },
       { label: "--no-emoji", desc: "Disable emoji (use ASCII fallbacks)" },
       { label: "--plain", desc: "Disable color and emoji (plain text output)" },
-      { label: "--verbose", desc: "Print full task checklists (default: summaries)" },
+      { label: "--verbose", desc: "Print full task checklists (default: true; disable with --verbose=false)" },
     ],
     Files: [
+      { label: "--plan-file <file>", desc: `Plan doc path (default: ${DEFAULTS.taskFile})` },
       { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },
       { label: "--guardrails <file>", desc: "Guardrails file (default: .loopy/guardrails.md)" },
       { label: "--activity-log <file>", desc: "Activity log (default: .loopy/activity.log)" },
@@ -137,7 +164,7 @@ function printHelp() {
     "  loopy [options]",
     "  loopy status",
     '  loopy hint "<text>"',
-    "  loopy init",
+    "  loopy reset",
     "  loopy help",
     "  loopy --help, -h",
     "  loopy --version",
@@ -158,8 +185,9 @@ function printHelp() {
       const labelWidth = maxStringLength(all.map((r) => r.label));
       const out = [];
       for (const [group, rows] of Object.entries(advancedByGroup)) {
-        out.push(`  ${group}:`);
-        out.push(...formatHelpRows(rows, { indent: "    ", labelWidth, gap: 2 }));
+        out.push("");
+        out.push(`${group}:`);
+        out.push(...formatHelpRows(rows, { indent: "  ", labelWidth, gap: 2 }));
       }
       return out;
     })(),
@@ -329,71 +357,62 @@ async function runHint(flags) {
   console.log(`Hint saved to ${path.relative(cwd, hintsFile) || hintsFile}`);
 }
 
-async function runInit(flags) {
+async function runReset(flags) {
   const cwd = process.cwd();
   const loopyDir = resolveFrom(cwd, DEFAULTS.loopyDir);
-  const hintsFile = resolveFrom(cwd, flags.hints || DEFAULTS.hintsFile);
-  const planFile = resolveFrom(cwd, flags.plan || DEFAULTS.taskFile);
 
-  await fs.mkdir(loopyDir, { recursive: true });
-
-  const created = [];
-
-  // Hints file (append-only).
-  const existingHints = await readText(hintsFile);
-  if (!existingHints) {
-    await writeText(hintsFile, "# Loopy Hints\n\n");
-    created.push(path.relative(cwd, hintsFile) || hintsFile);
+  // Check if .loopy directory exists
+  try {
+    await fs.access(loopyDir);
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      console.error(`No .loopy directory found at ${path.relative(cwd, loopyDir) || loopyDir}`);
+      process.exitCode = 1;
+      return;
+    }
+    throw err;
   }
 
-  // Plan file scaffold (do not overwrite).
-  const existingPlan = await readText(planFile);
-  if (!existingPlan) {
-    const template = [
-      "---",
-      "agent_command: \"cursor-agent\"",
-      "test_command: \"npm test\"",
-      "max_iterations: 10",
-      "max_minutes: 60",
-      "backoff_ms: 5000",
-      "rotate_bytes: 150000",
-      "phase_defaults:",
-      "  stop_on: all_checked",
-      "  test_command: \"npm test\"",
-      "phases:",
-      "  - id: plan",
-      "    title: Plan",
-      "  - id: implement",
-      "    title: Implement",
-      "  - id: verify",
-      "    title: Verify",
-      "    stop_on: [all_checked, tests_pass]",
-      "    test_command: \"npm test\"",
-      "---",
-      "",
-      "# Plan",
-      "",
-      "## Phase: plan",
-      "<!-- loopy:phase plan -->",
-      "- [ ] Describe the goal and constraints.",
-      "",
-      "## Phase: implement",
-      "<!-- loopy:phase implement -->",
-      "- [ ] Implement the requested changes.",
-      "",
-      "## Phase: verify",
-      "<!-- loopy:phase verify -->",
-      "- [ ] Run tests and validate behavior.",
-      "",
-    ].join("\n");
-    await writeText(planFile, template);
-    created.push(path.relative(cwd, planFile) || planFile);
+  // Create archive directory with timestamp
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const archiveDir = path.join(loopyDir, "archive", `reset-${timestamp}`);
+  await fs.mkdir(archiveDir, { recursive: true });
+
+  // Move all files except archive directory
+  const entries = await fs.readdir(loopyDir);
+  const moved = [];
+  
+  for (const entry of entries) {
+    if (entry === "archive") continue;
+    
+    const sourcePath = path.join(loopyDir, entry);
+    const destinationPath = path.join(archiveDir, entry);
+    
+    try {
+      await fs.rename(sourcePath, destinationPath);
+      moved.push(entry);
+    } catch (err) {
+      if (err && err.code === "EXDEV") {
+        // Cross-device move - copy then delete
+        const stat = await fs.stat(sourcePath);
+        if (stat.isDirectory()) {
+          await fs.cp(sourcePath, destinationPath, { recursive: true });
+        } else {
+          await fs.copyFile(sourcePath, destinationPath);
+        }
+        await fs.rm(sourcePath, { recursive: true, force: true });
+        moved.push(entry);
+      } else {
+        throw err;
+      }
+    }
   }
 
-  if (created.length) {
-    console.log(["Initialized:", ...created.map((p) => `- ${p}`)].join("\n"));
+  const relArchive = path.relative(cwd, archiveDir) || archiveDir;
+  if (moved.length) {
+    console.log(`Reset complete. Moved ${moved.length} item(s) to ${relArchive}`);
   } else {
-    console.log("Nothing to init (files already exist).");
+    console.log(`Reset complete. Nothing to archive (already clean).`);
   }
 }
 
@@ -429,8 +448,8 @@ async function runCli(argv) {
     return;
   }
 
-  if (command === "init") {
-    await runInit(flags);
+  if (command === "reset") {
+    await runReset(flags);
     return;
   }
 
@@ -447,27 +466,26 @@ async function runCli(argv) {
     return;
   }
 
-  const stopSignal = { stopRequested: false };
+  const stopSignal = createStopSignal();
   let currentActivityLog = DEFAULTS.activityLog;
 
-  process.on("SIGINT", async () => {
-    stopSignal.stopRequested = true;
-    printStep("Signal SIGINT received; stopping", { level: "warn" });
+  const handleStop = async (signalName) => {
+    if (stopSignal.stopRequested) return;
+    stopSignal.requestStop(signalName);
+    printStep(`Signal ${signalName} received; stopping`, { level: "warn" });
     try {
-      await appendActivity(currentActivityLog, ["SIGINT received. Stopping."]);
+      await appendActivity(currentActivityLog, [`${signalName} received. Stopping.`]);
     } catch (_) {
       // ignore
     }
+  };
+
+  process.on("SIGINT", () => {
+    void handleStop("SIGINT");
   });
 
-  process.on("SIGTERM", async () => {
-    stopSignal.stopRequested = true;
-    printStep("Signal SIGTERM received; stopping", { level: "warn" });
-    try {
-      await appendActivity(currentActivityLog, ["SIGTERM received. Stopping."]);
-    } catch (_) {
-      // ignore
-    }
+  process.on("SIGTERM", () => {
+    void handleStop("SIGTERM");
   });
 
   await runLoop("loop", flags, {

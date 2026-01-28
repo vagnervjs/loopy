@@ -36,8 +36,8 @@ The previous CLI flow required too many flags and manual steps to start a loop. 
   - `loopy hint --reset` clears all hints (and related state where applicable).
 - **Status command**:
   - `loopy status` prints iteration, current phase, last error/test, and hint summary.
-- **Init command**:
-  - `loopy init` scaffolds `.loopy/LOOPY_PLAN.md` and `.loopy/hints.md`.
+- **Reset command**:
+  - `loopy reset` archives all `.loopy/` files to `.loopy/archive/reset-<timestamp>/` for a clean start.
 - **Help output**:
   - Reorganized with a minimal “happy path” and an advanced flags section.
 - **Backward compatibility**:
@@ -54,7 +54,7 @@ The previous CLI flow required too many flags and manual steps to start a loop. 
    - `--prompt` accepts inline text or a file reference (e.g., `--prompt @path/to/prompt.md`)
    - `loopy status` (iteration, phase, last error, hints)
    - `loopy hint "..."` (mid‑loop context injection)
-   - `loopy init` (scaffold `.loopy/LOOPY_PLAN.md` + `.loopy/` + example)
+   - `loopy reset` (archive `.loopy/ files to clean state)
    - Advanced flags (`--phase`, `--phase-only`, `--skip-phase`, `--auto-phase`) live in an “Advanced” section.
    - No subcommand runs iterations by default, and this is documented in help.
 2) **Refactor CLI surface + remove redundancy**
@@ -74,10 +74,10 @@ The previous CLI flow required too many flags and manual steps to start a loop. 
    - `loopy --prompt @file` works the same.
    - `loopy status` output covers iteration, phase, last error, hints.
    - `loopy hint` appends and is reflected in next prompt.
-   - `loopy init` scaffolds expected files.
+   - `loopy reset` archives `.loopy/` files and provides clean state.
 6) **Docs**
    - README quickstart (one‑command flow).
-   - Document status, hint, init.
+   - Document status, hint, reset.
    - Explain plan file location + migration.
    - Advanced flags section.
 

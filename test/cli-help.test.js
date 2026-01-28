@@ -9,7 +9,7 @@ test("`--help` prints usage and exits 0", async () => {
   assert.equal(stderr, "");
   assert.match(stdout, /Usage:/);
   assert.match(stdout, /\bloopy help\b/);
-  assert.match(stdout, /--continue\b/);
+  assert.match(stdout, /--resume\b/);
   assert.match(stdout, /--no-emoji\b/);
   assert.match(stdout, /--plain\b/);
   assert.match(stdout, /--verbose\b/);

@@ -9,6 +9,8 @@ const {
   DEFAULTS,
   formatDuration,
   materializeConfigPaths,
+  loadGlobalConfig,
+  persistGlobalAgentCommand,
   mergeConfig,
   prettyPath,
   resolveFrom,
@@ -16,15 +18,18 @@ const {
 const { readText, writeText } = require("./fs");
 const { detectRepeatFailure, detectThrash } = require("./guardrails");
 const { formatProgress, ensureGuardrails, appendSign, formatPrompt } = require("./prompt");
-const { confirm, promptLine } = require("./confirm");
+const { confirm, promptLine, promptSelect } = require("./confirm");
 const { runShellCommand } = require("./shell");
 const { loadState } = require("./state");
-const { configureSteps, endIteration, printBlankLine, printStep, startIteration } = require("./steps");
+const { configureSteps, endIteration, formatDurationMs, printBlankLine, printStep, startIteration } = require("./steps");
 const { getTaskLine, parseTask, toSlug } = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
+const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
+const { generatePrdWithAgent } = require("./prd");
 const {
   ensureGitRepo,
+  getCurrentBranch,
   ensureGitWorktree,
   getGitModifiedFiles,
   gitCommitIfNeeded,
@@ -350,52 +355,62 @@ async function readStdinText() {
   return streamText;
 }
 
-async function loadTaskSeed(config) {
-  const promptSeedRaw = config.promptSeed == null ? "" : String(config.promptSeed).trim();
+async function loadSeedFromFlag(rawValue, { flagName, cwd, stdinText } = {}) {
+  const isPrompt = flagName === "prompt";
+  const label = isPrompt ? "Seed prompt" : "Plan input";
+  const flag = isPrompt ? "--prompt" : "--plan";
+  const raw = rawValue == null ? "" : String(rawValue).trim();
+  if (!raw) return { seed: "", source: "" };
 
-  // Seed path: `--prompt`
-  if (promptSeedRaw) {
-    if (promptSeedRaw === "-") {
-      const raw = await readStdinText();
-      const seed = normalizeTaskSeedText(raw);
-      if (!seed) throw new Error("Seed prompt from --prompt '-' (stdin) is empty.");
-      return { seed, source: "--prompt" };
-    }
-
-    if (promptSeedRaw.startsWith("@")) {
-      const rawPath = promptSeedRaw.slice(1).trim();
-      if (!rawPath) throw new Error("Missing file path after --prompt @<file>.");
-      const abs = resolveFrom(config.cwd, rawPath);
-      let raw = "";
-      try {
-        raw = await fs.readFile(abs, "utf8");
-      } catch (err) {
-        if (err && err.code === "ENOENT") {
-          throw new Error(`Seed prompt file not found: ${prettyPath(config.cwd, abs)}`);
-        }
-        if (err && err.code === "EISDIR") {
-          throw new Error(`Seed prompt path is a directory: ${prettyPath(config.cwd, abs)}`);
-        }
-        if (err && (err.code === "EACCES" || err.code === "EPERM")) {
-          throw new Error(`Permission denied reading seed prompt file: ${prettyPath(config.cwd, abs)}`);
-        }
-        throw new Error(
-          `Failed to read seed prompt file ${prettyPath(config.cwd, abs)}: ${err && err.message ? err.message : String(err)}`
-        );
-      }
-      const seed = normalizeTaskSeedText(raw);
-      if (!seed) throw new Error(`Seed prompt file is empty: ${prettyPath(config.cwd, abs)}`);
-      return { seed, source: "--prompt" };
-    }
-
-    const seed = normalizeTaskSeedText(promptSeedRaw);
-    if (!seed) throw new Error("Seed prompt from --prompt is empty.");
-    return { seed, source: "--prompt" };
+  if (raw === "-") {
+    const rawText = stdinText !== undefined ? stdinText : await readStdinText();
+    const seed = normalizeTaskSeedText(rawText);
+    if (!seed) throw new Error(`${label} from ${flag} '-' (stdin) is empty.`);
+    return { seed, source: flag };
   }
-  return { seed: "", source: "" };
+
+  if (raw.startsWith("@")) {
+    const rawPath = raw.slice(1).trim();
+    if (!rawPath) throw new Error(`Missing file path after ${flag} @<file>.`);
+    const abs = resolveFrom(cwd, rawPath);
+    let fileRaw = "";
+    try {
+      fileRaw = await fs.readFile(abs, "utf8");
+    } catch (err) {
+      if (err && err.code === "ENOENT") {
+        throw new Error(`${label} file not found: ${prettyPath(cwd, abs)}`);
+      }
+      if (err && err.code === "EISDIR") {
+        throw new Error(`${label} path is a directory: ${prettyPath(cwd, abs)}`);
+      }
+      if (err && (err.code === "EACCES" || err.code === "EPERM")) {
+        throw new Error(`Permission denied reading ${label.toLowerCase()} file: ${prettyPath(cwd, abs)}`);
+      }
+      throw new Error(
+        `Failed to read ${label.toLowerCase()} file ${prettyPath(cwd, abs)}: ${
+          err && err.message ? err.message : String(err)
+        }`
+      );
+    }
+    const seed = normalizeTaskSeedText(fileRaw);
+    if (!seed) throw new Error(`${label} file is empty: ${prettyPath(cwd, abs)}`);
+    return { seed, source: flag };
+  }
+
+  const seed = normalizeTaskSeedText(raw);
+  if (!seed) throw new Error(`${label} from ${flag} is empty.`);
+  return { seed, source: flag };
 }
 
-function pickCurrentPhaseId(parsedTask, state, config) {
+async function loadTaskSeed(config, { stdinText } = {}) {
+  return loadSeedFromFlag(config.promptSeed, { flagName: "prompt", cwd: config.cwd, stdinText });
+}
+
+async function loadPlanSeed(config, { stdinText } = {}) {
+  return loadSeedFromFlag(config.planSeed, { flagName: "plan", cwd: config.cwd, stdinText });
+}
+
+function pickCurrentPhaseId(parsedTask, state, config, options = {}) {
   const phases = (parsedTask && parsedTask.phases) || [];
   if (!phases.length) return "";
   const ids = phases.map((p) => p.id);
@@ -404,11 +419,28 @@ function pickCurrentPhaseId(parsedTask, state, config) {
   const preferred = toSlug(config.phase) || String(config.phase || "").trim() || String(state.currentPhase || "").trim();
   const preferredId = toSlug(preferred) || preferred;
   const start = preferredId && ids.includes(preferredId) ? preferredId : ids[0];
+  const startIdx = Math.max(0, ids.indexOf(start));
+  const phaseLocked = Boolean(options && options.phaseExplicit) || Boolean(config.phaseOnly);
 
-  // Walk forward until we find a non-skipped phase.
-  let idx = Math.max(0, ids.indexOf(start));
+  if (phaseLocked) {
+    for (let i = 0; i < ids.length; i += 1) {
+      const candidate = ids[(startIdx + i) % ids.length];
+      if (!skip.has(candidate)) return candidate;
+    }
+    return start;
+  }
+
+  // Prefer the next incomplete phase in plan order.
   for (let i = 0; i < ids.length; i += 1) {
-    const candidate = ids[(idx + i) % ids.length];
+    const candidate = ids[(startIdx + i) % ids.length];
+    if (skip.has(candidate)) continue;
+    if (isPhaseComplete(parsedTask, candidate, state)) continue;
+    return candidate;
+  }
+
+  // All phases are complete or skipped; fall back to the next available.
+  for (let i = 0; i < ids.length; i += 1) {
+    const candidate = ids[(startIdx + i) % ids.length];
     if (!skip.has(candidate)) return candidate;
   }
   return start;
@@ -419,6 +451,11 @@ function phaseStopOn(parsedTask, phaseId) {
   const phase = (parsedTask.phases || []).find((p) => p.id === phaseId);
   const raw = phase && Array.isArray(phase.stopOn) ? phase.stopOn : phase && phase.stopOn ? [phase.stopOn] : [];
   return raw.map((s) => String(s || "").trim()).filter(Boolean);
+}
+
+function phaseCriteria(parsedTask, phaseId) {
+  const stopOn = phaseStopOn(parsedTask, phaseId);
+  return stopOn.length ? stopOn : ["all_checked"];
 }
 
 function phaseTestCommand(parsedTask, phaseId) {
@@ -432,6 +469,11 @@ function phaseTestCommand(parsedTask, phaseId) {
   return fromPhase || fromDefaults || fromGlobal || "";
 }
 
+function hasPhase(parsedTask, phaseId) {
+  if (!phaseId) return false;
+  return Boolean((parsedTask.phases || []).find((p) => p.id === phaseId));
+}
+
 function isPhaseAllChecked(parsedTask, phaseId) {
   if (!phaseId) return false;
   const sec = parsedTask.phaseSections && parsedTask.phaseSections[phaseId];
@@ -441,6 +483,18 @@ function isPhaseAllChecked(parsedTask, phaseId) {
 function didTestsPass(state) {
   const last = String((state && state.lastTest) || "");
   return /^pass\b/i.test(last.trim());
+}
+
+function isPhaseComplete(parsedTask, phaseId, state, { testStatus } = {}) {
+  if (!hasPhase(parsedTask, phaseId)) return false;
+  const criteria = phaseCriteria(parsedTask, phaseId);
+  const needsAllChecked = criteria.includes("all_checked");
+  const needsTests = criteria.includes("tests_pass");
+  const phaseChecked = isPhaseAllChecked(parsedTask, phaseId);
+  const hasTestStatus = typeof testStatus === "string" && testStatus.trim() && testStatus !== "n/a";
+  const testsOk = !needsTests || (hasTestStatus ? /^pass\b/i.test(testStatus.trim()) : didTestsPass(state));
+  const phaseOk = !needsAllChecked || phaseChecked;
+  return phaseOk && testsOk;
 }
 
 function computeNextPhaseId(parsedTask, currentPhaseId, config) {
@@ -557,11 +611,19 @@ async function archiveCompletedLoop(config) {
   return { archived: true, archiveDir };
 }
 
-async function ensureTaskBeforeLoop(config, loadedSeed) {
+async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   const cwd = config.cwd;
   const taskPath = config.taskFile;
+  const shouldStop = () => Boolean(stopSignal && stopSignal.stopRequested);
+  const phaseAgentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
+  const logPhasePlan = () => {
+    printStep(`Generating phase plan${phaseAgentLabel}`, { kind: "plan" });
+  };
 
   let existing = await readText(taskPath);
+  if (shouldStop()) {
+    return { taskText: existing || "", rewritten: false, aborted: true };
+  }
   if (!existing) {
     const loaded = loadedSeed || (await loadTaskSeed(config));
     let seed = loaded.seed;
@@ -577,7 +639,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     // If auto-phase is on, try to generate phases; otherwise create a minimal legacy task file.
     let nextText = "";
     if (config.autoPhase) {
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
+      logPhasePlan();
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      if (proposed.aborted || shouldStop()) {
+        return { taskText: "", rewritten: false, aborted: true };
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: config.testCommand });
@@ -643,7 +709,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
 
     let nextText = existing;
     if (config.autoPhase) {
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
+      logPhasePlan();
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      if (proposed.aborted || shouldStop()) {
+        return { taskText: existing, rewritten: false, aborted: true };
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || config.testCommand });
@@ -687,7 +757,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
     const hasPhases = Boolean(parsed.phases && parsed.phases.length);
     if (!hasPhases) {
       const seed = parsed.body && parsed.body.trim() ? parsed.body.trim() : existing.trim();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor });
+      logPhasePlan();
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      if (proposed.aborted || shouldStop()) {
+        return { taskText: existing, rewritten: false, aborted: true };
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : null;
@@ -717,7 +791,21 @@ async function ensureTaskBeforeLoop(config, loadedSeed) {
   return { taskText: existing, rewritten: false };
 }
 
-async function runIteration(config) {
+async function confirmPlanReview(config, { prdGenerated } = {}) {
+  if (!process.stdin.isTTY) return true;
+  const planLabel = prettyPath(config.cwd, config.taskFile);
+  const prdLabel = prdGenerated ? prettyPath(config.cwd, config.prdFile) : "";
+  const question = prdGenerated
+    ? `Review ${planLabel} and ${prdLabel} before continuing. Continue?`
+    : `Review ${planLabel} before continuing. Continue?`;
+  const ok = await confirm(question, { confirm: true, defaultYes: true });
+  if (!ok) {
+    throw new Error("Aborted: plan review not confirmed.");
+  }
+  return true;
+}
+
+async function runIteration(config, { stopSignal } = {}) {
   let bytesRead = 0;
   let bytesWritten = 0;
   const guardrailStopReasons = [];
@@ -733,8 +821,10 @@ async function runIteration(config) {
   const parsedTask = parseTask(taskText);
 
   if (parsedTask.allChecked) {
+    const totalDurationMs = (state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+    const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
     await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
-    printStep("Plan complete; stopping loop", { kind: "plan" });
+    printStep(`Plan complete; stopping loop${totalDurationLabel}`, { kind: "plan" });
     return { status: "complete", bytes: 0 };
   }
 
@@ -758,10 +848,24 @@ async function runIteration(config) {
   const iteration = (state.iteration || 0) + 1;
   const rotationPending = Boolean(state.rotatePending);
 
-  const currentPhaseId = pickCurrentPhaseId(parsedTask, state || {}, config);
+  const currentPhaseId = pickCurrentPhaseId(parsedTask, state || {}, config, {
+    phaseExplicit: Boolean(config.phaseExplicit),
+  });
   const phaseLabel = resolvePhaseLabel(parsedTask, currentPhaseId);
   const iterationStartedAt = new Date();
   startIteration({ iteration, phase: phaseLabel, startedAt: iterationStartedAt });
+  const abortIteration = async (label) => {
+    const suffix = label ? `; ${label}` : "";
+    iterationStatus = "stopped";
+    const message = `Stop requested; aborting iteration${suffix}`;
+    printStep(message, { iteration, kind: "result", level: "warn" });
+    try {
+      await appendActivity(config.activityLog, [message]);
+    } catch (_) {
+      // ignore
+    }
+    return { status: "stopped", bytes: bytesRead + bytesWritten };
+  };
   try {
     printStep(`Rotation ${rotationPending ? "fresh" : "standard"}`, { iteration, kind: "meta" });
 
@@ -814,7 +918,11 @@ async function runIteration(config) {
       const hookResult = await runShellCommand(config.preIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (hookResult.aborted) {
+        return await abortIteration("pre-iteration hook");
+      }
       await appendActivity(config.activityLog, [`preIteration hook exit ${hookResult.code}`]);
       printStep(`Hook pre-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
@@ -844,7 +952,11 @@ async function runIteration(config) {
       agentStreamLogPath,
       streamToTerminal: Boolean(config.stream),
       noColor: config.noColor,
+      stopSignal,
     });
+    if (agentResult.aborted) {
+      return await abortIteration("agent run");
+    }
     const redactedStdout = redact(agentResult.stdout);
     const redactedStderr = redact(agentResult.stderr);
     const combinedOutput = truncate(`${redactedStdout}\n${redactedStderr}`, DEFAULTS.maxOutputBytes);
@@ -871,13 +983,21 @@ async function runIteration(config) {
       printStep(`Agent exit ${agentResult.code}`, { iteration, kind: "agent" });
     }
 
-    const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTask, currentPhaseId) : config.testCommand;
+    const taskAfter = await readText(config.taskFile);
+    bytesRead += Buffer.byteLength(taskAfter);
+    const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
+
+    const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTaskAfter, currentPhaseId) : config.testCommand;
     if (status === "success" && effectiveTestCommand) {
       printStep(`Tests run ${redact(effectiveTestCommand)}`, { iteration, kind: "tests" });
       const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (testResult.aborted) {
+        return await abortIteration("tests");
+      }
       const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
       await writeText(lastTestOutputPath, testOutput);
       bytesWritten += Buffer.byteLength(testOutput);
@@ -898,10 +1018,6 @@ async function runIteration(config) {
         errorSignature = `${effectiveTestCommand}::${lastError}`;
       }
     }
-
-    const taskAfter = await readText(config.taskFile);
-    bytesRead += Buffer.byteLength(taskAfter);
-    const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
     const taskComplete = Boolean(parsedTaskAfter.allChecked);
     const completedSections = findNewlyCompletedTasks(parsedTask, parsedTaskAfter);
     printStepLines(formatCompletedTaskLines(completedSections), { iteration });
@@ -928,7 +1044,11 @@ async function runIteration(config) {
       const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (hookResult.aborted) {
+        return await abortIteration("post-iteration hook");
+      }
       postIterationRan = true;
       await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
       printStep(`Hook post-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
@@ -972,7 +1092,11 @@ async function runIteration(config) {
       const hookResult = await runShellCommand(config.onFailure, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (hookResult.aborted) {
+        return await abortIteration("on-failure hook");
+      }
       await appendActivity(config.activityLog, [`onFailure hook exit ${hookResult.code}`]);
       printStep(`Hook on-failure exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
@@ -982,12 +1106,19 @@ async function runIteration(config) {
       const hookResult = await runShellCommand(config.postIteration, "", DEFAULTS.maxOutputBytes, {
         cwd: config.cwd,
         noColor: config.noColor,
+        stopSignal,
       });
+      if (hookResult.aborted) {
+        return await abortIteration("post-iteration hook");
+      }
       await appendActivity(config.activityLog, [`postIteration hook exit ${hookResult.code}`]);
       printStep(`Hook post-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
 
     const modifiedFiles = await getGitModifiedFiles(config.cwd);
+    const iterationEndedAt = new Date();
+    const iterationDurationMs = iterationEndedAt.getTime() - iterationStartedAt.getTime();
+    
     let nextState = {
       ...state,
       iteration,
@@ -1001,24 +1132,17 @@ async function runIteration(config) {
       history: state.history || [],
       currentPhase: currentPhaseId || state.currentPhase || "",
       phaseHistory: state.phaseHistory || [],
+      iterationDurations: [...(state.iterationDurations || []), iterationDurationMs],
     };
 
     const historyEntry = `${nextState.updatedAt} iteration ${iteration} ${status} (test: ${testStatus})`;
     nextState.history = [...nextState.history, historyEntry].slice(-50);
 
     // Phase completion / progression.
-    if (status === "success" && currentPhaseId && parsedTask.phases && parsedTask.phases.length) {
-      const stopOn = phaseStopOn(parsedTask, currentPhaseId);
-      const phaseChecked = isPhaseAllChecked(parseTask(taskAfter || taskText), currentPhaseId);
-      const criteria = stopOn.length ? stopOn : ["all_checked"];
-      const needsAllChecked = criteria.includes("all_checked");
-      const needsTests = criteria.includes("tests_pass");
-      const testsOk = !needsTests || (testStatus !== "n/a" ? /^pass\b/i.test(testStatus) : didTestsPass(nextState));
-      const phaseOk = !needsAllChecked || phaseChecked;
-      const phaseComplete = phaseOk && testsOk;
-
+    if (status === "success" && currentPhaseId && parsedTaskAfter.phases && parsedTaskAfter.phases.length) {
+      const phaseComplete = isPhaseComplete(parsedTaskAfter, currentPhaseId, nextState, { testStatus });
       if (phaseComplete) {
-        const nextPhase = computeNextPhaseId(parsedTask, currentPhaseId, config);
+        const nextPhase = computeNextPhaseId(parsedTaskAfter, currentPhaseId, config);
         nextState.phaseHistory = [...(nextState.phaseHistory || [])].concat([
           `${nextState.updatedAt} phase ${currentPhaseId} complete`,
         ]).slice(-100);
@@ -1030,6 +1154,15 @@ async function runIteration(config) {
             `${nextState.updatedAt} phase advanced: ${currentPhaseId} -> ${nextPhase}`,
           ]).slice(-100);
         }
+      }
+    }
+
+    if (!config.phaseOnly && parsedTaskAfter.phases && parsedTaskAfter.phases.length) {
+      const syncedPhase = pickCurrentPhaseId(parsedTaskAfter, nextState, config, {
+        phaseExplicit: Boolean(config.phaseExplicit),
+      });
+      if (syncedPhase && syncedPhase !== nextState.currentPhase) {
+        nextState.currentPhase = syncedPhase;
       }
     }
 
@@ -1090,8 +1223,10 @@ async function runIteration(config) {
     ]);
 
     if (taskComplete) {
+      const totalDurationMs = (nextState.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+      const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
       await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
-      printStep("Plan complete after iteration", { iteration, kind: "plan" });
+      printStep(`Plan complete after iteration${totalDurationLabel}`, { iteration, kind: "plan" });
       iterationStatus = status;
       return { status: "complete", bytes: bytesRead + bytesWritten };
     }
@@ -1119,6 +1254,9 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const stop = stopSignal || { stopRequested: false };
   const baseCwd = process.cwd();
   const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+  const planSeedProvided = hasOwn(flags, "plan");
+  const promptSeedProvided = hasOwn(flags, "prompt");
+  const phaseExplicit = hasOwn(flags, "phase") && flags.phase !== true;
   if (command === "run") {
     throw new Error("Unsupported command. For a single iteration, use `loopy --max-iterations 1`.");
   }
@@ -1132,21 +1270,26 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   if (hasOwn(flags, "task-file") || hasOwn(flags, "task-prompt-file"))
     throw new Error("Unsupported legacy seed flag provided. Use `--prompt @<file>` (or `--prompt -`) instead.");
   if (hasOwn(flags, "prompt-file")) throw new Error("Unsupported legacy flag provided. Use `--prompt-out <file>` instead.");
+  if (hasOwn(flags, "continue")) throw new Error("Unsupported legacy flag provided. Use `--resume` instead.");
 
-  const defaultPlanPath = resolveFrom(baseCwd, flags.plan || DEFAULTS.taskFile);
+  const { config: globalDefaults } = await loadGlobalConfig();
+  const preConfig = mergeConfig(flags, {}, globalDefaults);
+  const defaultPlanPath = resolveFrom(baseCwd, preConfig.taskFile || DEFAULTS.taskFile);
   const planText = await readText(defaultPlanPath);
 
   const parsedTask = planText ? parseTask(planText) : { frontMatter: {} };
-  let config = mergeConfig(flags, parsedTask.frontMatter);
+  let config = mergeConfig(flags, parsedTask.frontMatter, globalDefaults);
   configureSteps({ noColor: config.noColor, noEmoji: config.noEmoji, plain: config.plain });
 
-  // `--continue` is a "resume only" mode: don't accept seed prompt updates here.
-  if (config.continue && hasOwn(flags, "prompt")) {
-    throw new Error("`--continue` cannot be used with `--prompt`. Omit `--prompt` to resume, or run without `--continue`.");
+  // `--resume` is a "resume only" mode: don't accept seed prompt updates here.
+  if (config.resume && (promptSeedProvided || planSeedProvided)) {
+    throw new Error(
+      "`--resume` cannot be used with `--prompt` or `--plan`. Omit them to resume, or run without `--resume`."
+    );
   }
 
   // Validate seed prompt flag early.
-  if (hasOwn(flags, "prompt")) {
+  if (promptSeedProvided) {
     if (flags.prompt === true) {
       throw new Error("Missing value for --prompt (expected text, @<file>, or '-').");
     }
@@ -1157,13 +1300,33 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     }
   }
 
+  // Validate plan seed flag early.
+  if (planSeedProvided) {
+    if (flags.plan === true) {
+      throw new Error("Missing value for --plan (expected text, @<file>, or '-').");
+    }
+    const v = String(flags.plan || "").trim();
+    if (!v) throw new Error("Missing value for --plan (expected text, @<file>, or '-').");
+    if (v.startsWith("@") && !v.slice(1).trim()) {
+      throw new Error("Missing file path after --plan @<file>.");
+    }
+  }
+
   // Validate prompt output flag.
   if (flags["prompt-out"] === true) {
     throw new Error("Missing value for --prompt-out (expected a file path).");
   }
 
+  if (flags["plan-file"] === true || flags["plan-doc"] === true) {
+    throw new Error("Missing value for --plan-file (expected a file path).");
+  }
+
   const fm0 = (parsedTask && parsedTask.frontMatter) || {};
   const fmGit = fm0.git && typeof fm0.git === "object" ? fm0.git : {};
+  const agentCommandExplicit =
+    hasOwn(flags, "agent") ||
+    Object.prototype.hasOwnProperty.call(fm0, "agent_command") ||
+    Object.prototype.hasOwnProperty.call(fm0, "agentCommand");
   const gitCommitExplicit =
     hasOwn(flags, "git-commit") ||
     Object.prototype.hasOwnProperty.call(fm0, "git_commit") ||
@@ -1183,18 +1346,47 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   // Ensure agent command is defined before any planning/execution.
-  if (!config.agentCommand) {
-    const entered = await promptLine('Enter agent command (e.g. "cursor-agent"): ');
-    if (!entered) {
-      throw new Error(
-        `Missing agent_command. Set it in ${prettyPath(baseCwd, resolveFrom(baseCwd, config.taskFile))} front matter or use --agent.`
-      );
+  if (!agentCommandExplicit) {
+    const initialAgentCommand = config.agentCommand;
+    if (process.stdin.isTTY) {
+      const availableAgents = await detectAvailableAgents();
+      const { options, defaultValue } = buildAgentChoiceOptions(availableAgents, initialAgentCommand, {
+        includeCustom: true,
+      });
+      let selected = "";
+      if (options.length) {
+        selected = await promptSelect("Select agent command:", options, { defaultValue });
+        if (selected === "__custom__") {
+          selected = await promptLine('Enter agent command (e.g. "cursor-agent"):', {
+            defaultValue: initialAgentCommand,
+          });
+        }
+      } else {
+        selected = await promptLine('Enter agent command (e.g. "cursor-agent"):', {
+          defaultValue: initialAgentCommand,
+        });
+      }
+      if (selected) {
+        config.agentCommand = selected;
+      }
+      if (selected && selected !== initialAgentCommand) {
+        try {
+          await persistGlobalAgentCommand(selected);
+        } catch (err) {
+          const message = err && err.message ? err.message : String(err);
+          printStep(`Global config update failed: ${message}`, { level: "warn" });
+        }
+      }
     }
-    config.agentCommand = entered;
+  }
+  if (!config.agentCommand) {
+    throw new Error(
+      `Missing agent_command. Set it in ${prettyPath(baseCwd, resolveFrom(baseCwd, config.taskFile))} front matter or use --agent.`
+    );
   }
 
   // Default git branch when missing (only when running inside a git repo).
-  if (!config.continue) {
+  if (!config.resume) {
     const hasGitBranch = Boolean(String(config.gitBranch || "").trim());
     const hasWorktreeBranch = Boolean(String(config.gitWorktreeBranch || "").trim());
     if (!hasGitBranch && !hasWorktreeBranch) {
@@ -1204,7 +1396,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
             "Missing git branch name. Provide --git-branch <name> or set git.branch in the plan front matter."
           );
         }
-        const entered = await promptLine('Enter git branch name (e.g. "loopy/my-task"): ');
+        const currentBranch = await getCurrentBranch(baseCwd);
+        const defaultBranch = currentBranch || "";
+        const promptMsg = currentBranch
+          ? `Enter git branch name (default: ${currentBranch}):`
+          : 'Enter git branch name (e.g. "loopy/my-task"):';
+        const entered = await promptLine(promptMsg, { defaultValue: defaultBranch });
         if (!entered) {
           throw new Error("Aborted: git branch name is required.");
         }
@@ -1222,7 +1419,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   let effectiveCwd = baseCwd;
   if (config.gitWorktree) {
     const worktreeAbs = resolveFrom(baseCwd, config.gitWorktree);
-    if (config.continue) {
+    if (config.resume) {
       // Resume mode: use existing worktree path only (don't create/switch).
       try {
         const stat = await fs.stat(worktreeAbs);
@@ -1232,14 +1429,14 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       } catch (err) {
         if (err && err.code === "ENOENT") {
           throw new Error(
-            `Cannot continue: git worktree path not found: ${prettyPath(baseCwd, worktreeAbs)} (run without --continue to create it)`
+            `Cannot resume: git worktree path not found: ${prettyPath(baseCwd, worktreeAbs)} (run without --resume to create it)`
           );
         }
         throw err;
       }
       effectiveCwd = worktreeAbs;
       await ensureGitRepo(effectiveCwd);
-      printStep(`Git worktree using existing ${prettyPath(baseCwd, effectiveCwd)} (--continue)`, { kind: "git" });
+      printStep(`Git worktree using existing ${prettyPath(baseCwd, effectiveCwd)} (--resume)`, { kind: "git" });
     } else {
       printStep(
         `Git worktree ensure ${prettyPath(baseCwd, worktreeAbs)}` +
@@ -1261,8 +1458,8 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     config.gitBranch = "";
   }
   if (config.gitBranch) {
-    if (config.continue) {
-      printStep(`Branch ${config.gitBranch} (--continue)`, { kind: "branch" });
+    if (config.resume) {
+      printStep(`Branch ${config.gitBranch} (--resume)`, { kind: "branch" });
     } else {
       printStep(`Git branch switch to ${config.gitBranch}`, { kind: "git" });
       await ensureGitRepo(effectiveCwd);
@@ -1275,14 +1472,26 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   config = materializeConfigPaths(config, effectiveCwd);
+  config.phaseExplicit = phaseExplicit;
   if (onActivityLog) onActivityLog(config.activityLog);
+  let prdGenerated = false;
+  const planReviewRequired = !config.resume && (planSeedProvided || promptSeedProvided);
+  const stopBeforeLoop = async (message) => {
+    const note = message || "Stop requested; exiting before loop";
+    printStep(note, { kind: "result", level: "warn" });
+    try {
+      await appendActivity(config.activityLog, [note]);
+    } catch (_) {
+      // ignore
+    }
+  };
 
-  if (config.continue) {
+  if (config.resume) {
     // Resume mode: require existing plan + state, but do not create/update the plan doc.
     const taskTextNow = await readText(config.taskFile);
     if (!taskTextNow) {
       throw new Error(
-        `Cannot continue: missing ${prettyPath(config.cwd, config.taskFile)}. Run \`loopy init\` or run without --continue and provide --prompt.`
+        `Cannot resume: missing ${prettyPath(config.cwd, config.taskFile)}. Run \`loopy init\` or run without --resume and provide --prompt.`
       );
     }
 
@@ -1292,7 +1501,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     } catch (err) {
       if (err && err.code === "ENOENT") {
         throw new Error(
-          `No Loopy state found at ${prettyPath(config.cwd, config.stateFile)}.\nRun \`loopy\` first (without --continue).`
+          `No Loopy state found at ${prettyPath(config.cwd, config.stateFile)}.\nRun \`loopy\` first (without --resume).`
         );
       }
       throw err;
@@ -1316,13 +1525,63 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     config.taskSeedText = "";
     config.taskSeedSource = "";
   } else {
-    // Load the plan seed once so stdin ('-') works and prompts can reuse the content.
-    const loadedSeed = await loadTaskSeed(config);
-    config.taskSeedText = loadedSeed.seed || "";
-    config.taskSeedSource = loadedSeed.source || "";
+    const planSeedRaw = String(config.planSeed || "").trim();
+    const promptSeedRaw = String(config.promptSeed || "").trim();
+    const usesPlanStdin = planSeedRaw === "-";
+    const usesPromptStdin = promptSeedRaw === "-";
+    if (usesPlanStdin && usesPromptStdin) {
+      throw new Error("Cannot read stdin for both --plan and --prompt.");
+    }
+    const stdinText = usesPlanStdin || usesPromptStdin ? await readStdinText() : undefined;
+
+    const loadedPlanSeed = await loadPlanSeed(config, { stdinText });
+    const loadedPromptSeed = await loadTaskSeed(config, { stdinText });
+    let effectiveSeed = loadedPromptSeed;
+
+    if (loadedPlanSeed.seed) {
+      const agentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
+      printStep(`Generating PRD${agentLabel}`, { kind: "plan" });
+      const prdResult = await generatePrdWithAgent(config.agentCommand, loadedPlanSeed.seed, {
+        extraContext: loadedPromptSeed.seed || "",
+        cwd: config.cwd,
+        noColor: config.noColor,
+        stopSignal: stop,
+      });
+      if (prdResult.aborted || stop.stopRequested) {
+        await stopBeforeLoop("PRD generation aborted; exiting before loop");
+        return;
+      }
+      const prdText = prdResult.text;
+      const payload = `${prdText.trimEnd()}\n`;
+      await writeText(config.prdFile, payload);
+      prdGenerated = true;
+
+      const seedSources = [];
+      if (loadedPlanSeed.seed) seedSources.push(loadedPlanSeed.source);
+      if (loadedPromptSeed.seed) seedSources.push(loadedPromptSeed.source);
+      const combinedSource = seedSources.join(" + ");
+      config.taskSeedText = prdText;
+      config.taskSeedSource = combinedSource || loadedPlanSeed.source || "--plan";
+      effectiveSeed = { seed: prdText, source: config.taskSeedSource };
+
+      await appendActivity(config.activityLog, [
+        `PRD generated: ${prettyPath(config.cwd, config.prdFile)}`,
+      ]);
+      printStep(`PRD generated: ${prettyPath(config.cwd, config.prdFile)}`, { kind: "plan" });
+    } else {
+      config.taskSeedText = loadedPromptSeed.seed || "";
+      config.taskSeedSource = loadedPromptSeed.source || "";
+    }
 
     // Plan initialization / auto-phase planning happens once, before looping.
-    const ensured = await ensureTaskBeforeLoop(config, loadedSeed);
+    if (planReviewRequired) {
+      printStep("Preparing plan doc from seed", { kind: "plan" });
+    }
+    const ensured = await ensureTaskBeforeLoop(config, effectiveSeed, { stopSignal: stop });
+    if (ensured.aborted || stop.stopRequested) {
+      await stopBeforeLoop("Stop requested; exiting before loop");
+      return;
+    }
     if (ensured.rewritten) {
       await appendActivity(config.activityLog, [
         `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
@@ -1384,6 +1643,9 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     printBlankLine();
     printStepLines(planLines, {});
   }
+  if (planReviewRequired) {
+    await confirmPlanReview(config, { prdGenerated });
+  }
 
   const start = Date.now();
   let iteration = 0;
@@ -1406,7 +1668,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       break;
     }
 
-    const result = await runIteration(config);
+    const result = await runIteration(config, { stopSignal: stop });
     iteration += 1;
 
     if (result.status === "complete") {
