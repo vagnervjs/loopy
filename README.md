@@ -1,13 +1,10 @@
 # Loopy
 
-Loopy is a Node.js CLI that runs a durable coding-agent loop with guardrails, logs, and optional phases. It drives any agent CLI that accepts prompt text on stdin.
+Loopy is a lightweight Node.js CLI for running Ralph style coding agent loops with durable state, guardrails, and logs.
 
-## Why Loopy
-- Durable plan + state per iteration
-- Guardrails for repeated failures and file thrashing
-- Optional phases with per-phase testing
-- Optional git branch/worktree and auto-commit
-- Logs for auditing and debugging
+It is built for developers who want agent runs that feel predictable and debuggable instead of fragile or opaque. Loopy wraps any coding agent CLI that accepts prompt text via standard input and adds structure around the loop without turning it into a framework.
+
+Each iteration keeps a durable plan and state, applies guardrails to avoid repeated failures and uncontrolled file churn, and records clear logs for later inspection. Optional phases allow you to break work into steps, run tests per phase, and, if desired, operate on an isolated git branch or worktree with automatic commits.
 
 ## Quickstart
 
@@ -32,6 +29,21 @@ node bin/loopy.js --help
 ```
 
 ### Run your first loop
+
+**The easiest way to get started:**
+
+Just run the `loopy` command — no flags required! The tool will interactively prompt you for everything it needs:
+
+```bash
+loopy
+```
+
+Loopy will ask you to:
+1. Select or enter your agent command (e.g., "cursor-agent", "copilot")
+2. Enter a plan description or task prompt
+3. Optionally choose a git branch
+
+**Advanced: provide everything via flags:**
 ```bash
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 loopy status
@@ -51,7 +63,15 @@ cat ./problem.md | loopy --agent "cursor-agent" --plan -
 
 ## Common workflows
 
-Start a new loop:
+**Start a new loop (interactive — recommended for first-time users):**
+
+Simply run `loopy` with no arguments. The tool will prompt you for everything it needs (agent command, task description, git branch).
+
+```bash
+loopy
+```
+
+Start a new loop (non-interactive):
 ```bash
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 ```

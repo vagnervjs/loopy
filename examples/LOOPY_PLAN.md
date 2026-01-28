@@ -32,14 +32,21 @@ hooks:
 
 > Intended location: `.loopy/LOOPY_PLAN.md`
 >
-> Quickstart: to autogenerate this file, run:
->   loopy --prompt "Short description of the change"
+> **Getting started is simple:** Just run `loopy` with no arguments.
 >
-> If you don't pass --prompt, you can create/edit this plan file manually and run:
+> The tool will interactively prompt you for:
+>   - Agent command (e.g., "cursor-agent", "copilot")
+>   - Plan description or task prompt
+>   - Git branch (optional)
+>
+> Advanced: autogenerate this file by providing flags:
+>   loopy --agent "cursor-agent" --prompt "Short description of the change"
+>
+> If you already have this plan file, just run:
 >   loopy
 >
 > Tip: if the loop is interrupted, resume with:
->   loopy --continue
+>   loopy --resume
 
 <!-- loopy:seed -->
 <!-- The initial prompt seed is stored here when you use --prompt. Loopy auto-generates this plan from that seed. -->
