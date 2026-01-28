@@ -2,15 +2,15 @@
 
 Loopy is a lightweight Node.js CLI for running Ralph style coding agent loops with durable state, guardrails, and logs.
 
-It is built for developers who want agent runs that feel predictable and debuggable instead of fragile or opaque. Loopy wraps any coding agent CLI that accepts prompt text via standard input and adds structure around the loop without turning it into a framework.
+It wraps any coding agent CLI that reads prompts from standard input and adds predictable iteration, failure protection, and clear visibility into what the agent is doing.
 
-Each iteration keeps a durable plan and state, applies guardrails to avoid repeated failures and uncontrolled file churn, and records clear logs for later inspection. Optional phases allow you to break work into steps, run tests per phase, and, if desired, operate on an isolated git branch or worktree with automatic commits.
+It turns fragile one off agent runs into a controlled, repeatable loop.
 
 ## Quickstart
 
 ### Requirements
 - Node.js 18+
-- A git repo (recommended)
+- A git repo
 - An agent CLI that accepts prompt input via stdin
 
 ### Install
@@ -18,14 +18,9 @@ Each iteration keeps a durable plan and state, applies guardrails to avoid repea
 npm install
 ```
 
-Optional: install the `loopy` binary on your PATH:
+Add the `loopy` binary on your PATH:
 ```bash
 npm link
-```
-
-Or run from the repo without linking:
-```bash
-node bin/loopy.js --help
 ```
 
 ### Run your first loop
@@ -47,8 +42,7 @@ Everything you need will be requested as you go — no config files required to 
 
 **Advanced users: provide everything via flags:**
 ```bash
-loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
-loopy status
+loopy --agent "cursor-agent" --prompt "Add OAuth login to the app" --git-branch "loopy/oauth-login"
 ```
 
 ### Prompt from a file or stdin
@@ -59,7 +53,10 @@ cat ./task.txt | loopy --agent "cursor-agent" --prompt -
 
 ### Plan seed from a file or stdin (PRD-first)
 ```bash
+# file
 loopy --agent "cursor-agent" --plan @./problem.md
+
+# stdin
 cat ./problem.md | loopy --agent "cursor-agent" --plan -
 ```
 
@@ -107,10 +104,6 @@ loopy hint --pop
 loopy hint --reset
 ```
 
-Stream agent output to your terminal:
-```bash
-loopy --agent "cursor-agent" --prompt @examples/PRD.md
-```
 Disable streaming when you only want logs:
 ```bash
 loopy --agent "cursor-agent" --prompt @examples/PRD.md --stream=false
@@ -130,22 +123,6 @@ Loopy prints timestamped lines (local time) with a compact icon + message. Defau
 - Set `NO_COLOR=1` to disable ANSI color (emoji remain).
 - Use `--verbose=false` to hide full checklist details in the plan summary.
 - Stable markers: `Iteration <n> start` and `Iteration <n> complete`.
-
-Example (plain mode):
-```
-2026-01-27 01:22:00  >> Loop start (max iterations: 50, max minutes: 120, backoff: 5s)
-2026-01-27 01:22:00  br Branch     loopy/plan-progress-ux
-
-2026-01-27 01:22:01  pl Plan       3 phases, 7 tasks
-2026-01-27 01:22:01    > Locate legacy archive usage (2)
-2026-01-27 01:22:01    > Remove legacy compatibility (3)
-2026-01-27 01:22:01    > Update tests and docs (2)
-
-2026-01-27 01:22:02  it Iteration 1 start - Locate legacy archive usage
-2026-01-27 01:22:02    pm Prompt saved to .loopy/PROMPT.md
-2026-01-27 01:22:02    ag Agent run cursor-agent
-2026-01-27 01:22:46  ok Iteration 1 complete - Duration 0m 44s
-```
 
 ## How Loopy works
 1. Loopy reads a plan doc (default: `.loopy/LOOPY_PLAN.md`) on every iteration.
@@ -344,20 +321,7 @@ Output/utility:
 - `.loopy/PROMPT.md` generated prompt input for each iteration
 - `.loopy/PRD.md` generated PRD (when using `--plan`)
 
-## Streaming progress
-Tail logs in a separate terminal for live progress:
-
-```bash
-tail -f .loopy/activity.log
-```
-
-For live agent output (stdout/stderr), tail the stream log:
-
-```bash
-tail -f .loopy/agent_stream.log
-```
-
-## Git integration (default-on in git repos)
+## Git integration
 Loopy can:
 
 - create/switch a branch before running (prompts by default when in a git repo)
