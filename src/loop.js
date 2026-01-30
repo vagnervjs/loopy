@@ -1053,8 +1053,8 @@ async function runIteration(config, { stopSignal } = {}) {
     bytesRead += Buffer.byteLength(taskAfter);
     const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
 
-    // Check for multi-task completion violation
-    if (status === "success") {
+    // Check for multi-task completion violation (only when single-task mode is enabled)
+    if (status === "success" && config.singleTaskMode) {
       const multiTaskDetected = detectMultiTaskCompletion(taskText, taskAfter);
       if (multiTaskDetected) {
         status = "failure";
