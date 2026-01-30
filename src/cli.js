@@ -156,6 +156,7 @@ function printHelp() {
       { label: "--rotate-bytes <n>", desc: "Bytes threshold for rotation (default: 150000)" },
       { label: "--guardrail-repeat-limit <n>", desc: "Repeated failure threshold before cooldown (default: 20)" },
       { label: "--guardrail-cooldown-ms <n>", desc: "Extra backoff when guardrail triggers (default: 60000)" },
+      { label: "--single-task", desc: "Enforce single-task mode (default: false; enable with --single-task)" },
     ],
   };
 

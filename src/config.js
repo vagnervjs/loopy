@@ -27,6 +27,7 @@ const DEFAULTS = {
   confirm: false,
   stream: true,
   verbose: true,
+  singleTaskMode: false,
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -286,6 +287,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     "cooldownMs",
   ]);
   const dryRunDefault = pickDefined(def, ["dry_run", "dryRun"]);
+  const singleTaskModeDefault = pickDefined(def, ["single_task_mode", "singleTaskMode", "singleTask"]);
   return {
     cwd: process.cwd(),
     resume: coerceBoolean(flags.resume ?? resumeDefault, false),
@@ -427,6 +429,10 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     dryRun: coerceBoolean(flags["dry-run"] ?? dryRunDefault, false),
     stream: flags["no-stream"] !== undefined ? !coerceBoolean(flags["no-stream"], false) : coerceBoolean(streamDefault, DEFAULTS.stream),
     verbose: coerceBoolean(flags.verbose ?? verboseDefault, DEFAULTS.verbose),
+    singleTaskMode: coerceBoolean(
+      flags["single-task"] ?? fm.single_task_mode ?? fm.singleTaskMode ?? singleTaskModeDefault,
+      DEFAULTS.singleTaskMode
+    ),
   };
 }
 
