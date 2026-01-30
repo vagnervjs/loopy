@@ -1824,17 +1824,19 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     printStep("Loop stopped", { kind: "loop-stop", level: "warn" });
   }
 
+  // Load state before archiving (archiving moves the state file)
+  const finalState = await loadState(config.stateFile);
+  const totalDurationMs = (finalState.state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+
   const archiveResult = await archiveCompletedLoop(config);
   if (archiveResult.archived) {
     const prettyArchive = prettyPath(config.cwd, archiveResult.archiveDir);
     printStep(`Archive ${prettyArchive}`, { kind: "archive" });
   }
 
-  // Log total duration after archival
-  const finalState = await loadState(config.stateFile);
-  const totalDurationMs = (finalState.state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+  // Log celebration and total duration after archival
+  printStep(`All tasks complete! :tada:`, { kind: "plan" });
   if (totalDurationMs > 0) {
-    printStep(`All tasks complete! :tada:`, { kind: "plan" });
     printStep(`Total duration :clock: ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
   }
 }
