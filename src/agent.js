@@ -6,6 +6,7 @@ const KNOWN_AGENT_COMMANDS = [
   "cursor-agent",
   "aider",
   "claude",
+  "copilot",
   "codex",
   "opencode",
   "openai",
