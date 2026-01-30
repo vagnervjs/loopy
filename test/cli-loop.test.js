@@ -27,7 +27,7 @@ test("no subcommand runs the default loop", async () => {
   assert.match(prompt, /Loopy Loop Prompt/);
 });
 
-test("loop stops on repeated failure signature guardrail", async () => {
+test("repeated failure signature triggers guardrail sign and cooldown", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-test-"));
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   const taskPath = path.join(tmp, ".loopy", "LOOPY_PLAN.md");
@@ -59,6 +59,10 @@ test("loop stops on repeated failure signature guardrail", async () => {
       "10",
       "--backoff-ms",
       "0",
+      "--guardrail-repeat-limit",
+      "3",
+      "--guardrail-cooldown-ms",
+      "1",
       "--max-minutes",
       "1",
     ],
@@ -68,8 +72,9 @@ test("loop stops on repeated failure signature guardrail", async () => {
   assert.equal(code, 0);
 
   const progress = await fs.readFile(path.join(tmp, ".loopy", "progress.md"), "utf8");
-  assert.match(progress, /Last status:\s+guardrail-stop/);
-  assert.match(progress, /Repeated failure signature/);
+  assert.doesNotMatch(progress, /Last status:\s+guardrail-stop/);
+  const guardrails = await fs.readFile(path.join(tmp, ".loopy", "guardrails.md"), "utf8");
+  assert.match(guardrails, /Repeated failure signature/);
 });
 
 test("agent output streams to `.loopy/agent_stream.log`", async () => {

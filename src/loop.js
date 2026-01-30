@@ -868,6 +868,7 @@ async function runIteration(config, { stopSignal } = {}) {
   let bytesRead = 0;
   let bytesWritten = 0;
   const guardrailStopReasons = [];
+  let guardrailCooldownMs = 0;
   let iterationStatus = "failure";
   let testStatus = "n/a";
 
@@ -1232,7 +1233,7 @@ async function runIteration(config, { stopSignal } = {}) {
     }
 
     if (status === "failure") {
-      const repeat = detectRepeatFailure(nextState, errorSignature);
+      const repeat = detectRepeatFailure(nextState, errorSignature, config.guardrailRepeatLimit);
       nextState = repeat.state;
 
       const thrashCheck = detectThrash(nextState, modifiedFiles);
@@ -1241,8 +1242,11 @@ async function runIteration(config, { stopSignal } = {}) {
       let guardrailsUpdated = guardrailsText;
 
       if (repeat.repeated) {
-        guardrailsUpdated = appendSign(guardrailsUpdated, `Repeated failure signature: ${errorSignature}`);
-        guardrailStopReasons.push("Repeated failure signature (>= 3).");
+        guardrailsUpdated = appendSign(
+          guardrailsUpdated,
+          `Repeated failure signature (>= ${config.guardrailRepeatLimit}): ${errorSignature}`
+        );
+        guardrailCooldownMs = Math.max(guardrailCooldownMs, config.guardrailCooldownMs);
       }
 
       if (thrashCheck.thrash) {
@@ -1264,6 +1268,15 @@ async function runIteration(config, { stopSignal } = {}) {
         `Guardrail stop (${guardrailStopReason}) (see ${prettyPath(config.cwd, config.guardrailsFile)})`,
         { iteration, level: "warn", kind: "guardrail" }
       );
+    } else if (guardrailCooldownMs > 0) {
+      nextState.lastStatus = status;
+      printStep(
+        `Guardrail cooldown (repeated failure signature). Backing off ${guardrailCooldownMs}ms`,
+        { iteration, level: "warn", kind: "guardrail" }
+      );
+      await appendActivity(config.activityLog, [
+        `Guardrail cooldown triggered: repeated failure signature (>= ${config.guardrailRepeatLimit}).`,
+      ]);
     }
 
     if (bytesRead + bytesWritten >= config.rotateBytes) {
@@ -1309,7 +1322,7 @@ async function runIteration(config, { stopSignal } = {}) {
       kind: "result",
       level: status === "failure" ? "error" : undefined,
     });
-    return { status, bytes: bytesRead + bytesWritten, guardrailStopReason };
+    return { status, bytes: bytesRead + bytesWritten, guardrailStopReason, guardrailCooldownMs };
   } finally {
     endIteration({ iteration, status: iterationStatus });
   }
@@ -1760,10 +1773,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       break;
     }
 
-    if (config.backoffMs > 0) {
-      printStep(`Sleeping ${config.backoffMs}ms before next iteration`, { kind: "sleep" });
+    const sleepMs =
+      result.guardrailCooldownMs && result.guardrailCooldownMs > 0 ? result.guardrailCooldownMs : config.backoffMs;
+    if (sleepMs > 0) {
+      printStep(`Sleeping ${sleepMs}ms before next iteration`, { kind: "sleep" });
     }
-    await new Promise((resolve) => setTimeout(resolve, config.backoffMs));
+    await new Promise((resolve) => setTimeout(resolve, sleepMs));
   }
 
   if (stop.stopRequested) {

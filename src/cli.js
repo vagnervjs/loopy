@@ -154,6 +154,8 @@ function printHelp() {
       { label: "--max-minutes <n>", desc: "Max wall time in minutes (default: 120)" },
       { label: "--backoff-ms <n>", desc: "Backoff between iterations (default: 5000)" },
       { label: "--rotate-bytes <n>", desc: "Bytes threshold for rotation (default: 150000)" },
+      { label: "--guardrail-repeat-limit <n>", desc: "Repeated failure threshold before cooldown (default: 20)" },
+      { label: "--guardrail-cooldown-ms <n>", desc: "Extra backoff when guardrail triggers (default: 60000)" },
     ],
   };
 
@@ -499,4 +501,3 @@ async function runCli(argv) {
 module.exports = {
   runCli,
 };
-

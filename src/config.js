@@ -14,6 +14,8 @@ const DEFAULTS = {
   agentStreamLog: ".loopy/agent_stream.log",
   stateFile: ".loopy/state.json",
   hintsFile: ".loopy/hints.md",
+  guardrailRepeatLimit: 20,
+  guardrailCooldownMs: 60000,
   maxIterations: 50,
   maxMinutes: 120,
   backoffMs: 5000,
@@ -271,6 +273,18 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const maxMinutesDefault = pickDefined(def, ["max_minutes", "maxMinutes"]);
   const backoffMsDefault = pickDefined(def, ["backoff_ms", "backoffMs"]);
   const rotateBytesDefault = pickDefined(def, ["rotate_bytes", "rotateBytes"]);
+  const guardrailRepeatLimitDefault = pickDefined(def, [
+    "guardrail_repeat_limit",
+    "guardrailRepeatLimit",
+    "repeat_limit",
+    "repeatLimit",
+  ]);
+  const guardrailCooldownMsDefault = pickDefined(def, [
+    "guardrail_cooldown_ms",
+    "guardrailCooldownMs",
+    "cooldown_ms",
+    "cooldownMs",
+  ]);
   const dryRunDefault = pickDefined(def, ["dry_run", "dryRun"]);
   return {
     cwd: process.cwd(),
@@ -386,6 +400,26 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     rotateBytes: clampMin(
       coerceNumber(flags["rotate-bytes"] || fm.rotate_bytes || rotateBytesDefault, DEFAULTS.rotateBytes),
       1024
+    ),
+    guardrailRepeatLimit: clampMin(
+      coerceNumber(
+        flags["guardrail-repeat-limit"] ||
+          fm.guardrail_repeat_limit ||
+          fm.guardrailRepeatLimit ||
+          guardrailRepeatLimitDefault,
+        DEFAULTS.guardrailRepeatLimit
+      ),
+      0
+    ),
+    guardrailCooldownMs: clampMin(
+      coerceNumber(
+        flags["guardrail-cooldown-ms"] ||
+          fm.guardrail_cooldown_ms ||
+          fm.guardrailCooldownMs ||
+          guardrailCooldownMsDefault,
+        DEFAULTS.guardrailCooldownMs
+      ),
+      0
     ),
     plain,
     noEmoji: plain ? true : noEmoji,
