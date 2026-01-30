@@ -190,4 +190,75 @@ test('Guardrail sign appending: writes violation to guardrails file', async () =
   assert.ok(/^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(violationLine), 'Should have ISO timestamp');
 });
 
+test('Flag toggling: singleTaskMode=true enforces single-task, singleTaskMode=false allows multi-task', () => {
+  const taskTextBefore = `
+- [ ] Task 1
+- [ ] Task 2
+- [ ] Task 3
+`;
+  
+  const taskTextAfter = `
+- [x] Task 1
+- [x] Task 2
+- [ ] Task 3
+`;
+
+  // Scenario 1: singleTaskMode = true (enforcement enabled)
+  {
+    const config = { singleTaskMode: true };
+    let status = "success";
+    let lastError = null;
+    
+    const multiTaskDetected = detectMultiTaskCompletion(taskTextBefore, taskTextAfter);
+    
+    // Apply enforcement logic (simulating loop.js behavior)
+    if (config.singleTaskMode && status === "success" && multiTaskDetected) {
+      status = "failure";
+      lastError = "Multiple tasks completed in single iteration (single-task mode enforced)";
+    }
+    
+    assert.equal(multiTaskDetected, true, 'Should detect multi-task completion');
+    assert.equal(status, "failure", 'Status should be failure when singleTaskMode=true');
+    assert.equal(lastError, "Multiple tasks completed in single iteration (single-task mode enforced)", 'Error should be set');
+  }
+
+  // Scenario 2: singleTaskMode = false (enforcement disabled)
+  {
+    const config = { singleTaskMode: false };
+    let status = "success";
+    let lastError = null;
+    
+    const multiTaskDetected = detectMultiTaskCompletion(taskTextBefore, taskTextAfter);
+    
+    // Apply enforcement logic (simulating loop.js behavior)
+    if (config.singleTaskMode && status === "success" && multiTaskDetected) {
+      status = "failure";
+      lastError = "Multiple tasks completed in single iteration (single-task mode enforced)";
+    }
+    
+    assert.equal(multiTaskDetected, true, 'Should detect multi-task completion');
+    assert.equal(status, "success", 'Status should remain success when singleTaskMode=false');
+    assert.equal(lastError, null, 'Error should not be set when singleTaskMode=false');
+  }
+
+  // Scenario 3: singleTaskMode = undefined (defaults to false, no enforcement)
+  {
+    const config = {};
+    let status = "success";
+    let lastError = null;
+    
+    const multiTaskDetected = detectMultiTaskCompletion(taskTextBefore, taskTextAfter);
+    
+    // Apply enforcement logic (simulating loop.js behavior)
+    if (config.singleTaskMode && status === "success" && multiTaskDetected) {
+      status = "failure";
+      lastError = "Multiple tasks completed in single iteration (single-task mode enforced)";
+    }
+    
+    assert.equal(multiTaskDetected, true, 'Should detect multi-task completion');
+    assert.equal(status, "success", 'Status should remain success when singleTaskMode is undefined');
+    assert.equal(lastError, null, 'Error should not be set when singleTaskMode is undefined');
+  }
+});
+
 
