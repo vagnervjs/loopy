@@ -37,6 +37,7 @@ const {
 } = require("./git");
 
 const ARCHIVE_DIRNAME = "archive";
+const PLAN_OUTPUT_FILE = "last_plan_output.txt";
 
 function parseSkipPhaseList(value) {
   const raw = String(value || "").trim();
@@ -46,6 +47,23 @@ function parseSkipPhaseList(value) {
     .map((s) => toSlug(s) || s.trim())
     .map((s) => String(s || "").trim())
     .filter(Boolean);
+}
+
+async function recordPlanGenerationFailure(config, { output, error, seedSource }) {
+  const logPath = path.join(config.loopyDir, PLAN_OUTPUT_FILE);
+  const header = [
+    "# Loopy Plan Generation Output",
+    "",
+    `Timestamp: ${new Date().toISOString()}`,
+    `Error: ${error || "unknown"}`,
+    `Seed source: ${seedSource || "unknown"}`,
+    "",
+  ].join("\n");
+  const payload = header + (output ? truncate(String(output), DEFAULTS.maxOutputBytes) : "(no output)") + "\n";
+  await writeText(logPath, payload);
+  await appendActivity(config.activityLog, [
+    `plan generation failed: ${error || "unknown"} (see ${prettyPath(config.cwd, logPath)})`,
+  ]);
 }
 
 function normalizeChecklistItems(items) {
@@ -627,6 +645,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   if (!existing) {
     const loaded = loadedSeed || (await loadTaskSeed(config));
     let seed = loaded.seed;
+    const seedSource = loaded.source || "interactive";
     if (!seed) {
       seed = await promptLine(`Enter a short plan description for ${prettyPath(cwd, taskPath)}: `);
     }
@@ -643,6 +662,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
       if (proposed.aborted || shouldStop()) {
         return { taskText: "", rewritten: false, aborted: true };
+      }
+      if (!proposed.ok) {
+        await recordPlanGenerationFailure(config, {
+          output: proposed.output,
+          error: proposed.error,
+          seedSource,
+        });
       }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
@@ -714,6 +740,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       if (proposed.aborted || shouldStop()) {
         return { taskText: existing, rewritten: false, aborted: true };
       }
+      if (!proposed.ok) {
+        await recordPlanGenerationFailure(config, {
+          output: proposed.output,
+          error: proposed.error,
+          seedSource: loaded.source || "--prompt",
+        });
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || config.testCommand });
@@ -761,6 +794,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
       if (proposed.aborted || shouldStop()) {
         return { taskText: existing, rewritten: false, aborted: true };
+      }
+      if (!proposed.ok) {
+        await recordPlanGenerationFailure(config, {
+          output: proposed.output,
+          error: proposed.error,
+          seedSource: "plan-doc",
+        });
       }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
