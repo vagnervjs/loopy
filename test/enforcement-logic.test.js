@@ -123,26 +123,71 @@ test('detectMultiTaskCompletion - returns false when task is unchecked (not a co
 });
 
 // Integration tests for loop.js behavior
-test('Multi-task enforcement should mark iteration as failure', async () => {
-  // This is a documentation test - the actual integration is tested
-  // via the loop.js logic which:
-  // 1. Detects multi-task completion using detectMultiTaskCompletion
-  // 2. Sets status = "failure"
-  // 3. Sets lastError = "Multiple tasks completed in single iteration (single-task mode enforced)"
-  // 4. Sets errorSignature = "multi-task-violation"
-  // This test documents the expected behavior
-  assert.ok(true, 'Integration documented');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+
+test('Multi-task enforcement: iteration fails correctly on multi-task scenario', async () => {
+  // Simulate the loop.js behavior when multi-task completion is detected
+  const taskTextBefore = `
+- [ ] Task 1
+- [ ] Task 2
+- [ ] Task 3
+`;
+  
+  const taskTextAfter = `
+- [x] Task 1
+- [x] Task 2
+- [ ] Task 3
+`;
+
+  // Step 1: Detect multi-task completion
+  const multiTaskDetected = detectMultiTaskCompletion(taskTextBefore, taskTextAfter);
+  assert.equal(multiTaskDetected, true, 'Should detect multi-task completion');
+
+  // Step 2: Verify iteration would be marked as failure
+  let status = "success"; // Initial status after agent execution
+  let lastError = null;
+  let errorSignature = null;
+  
+  if (status === "success" && multiTaskDetected) {
+    status = "failure";
+    lastError = "Multiple tasks completed in single iteration (single-task mode enforced)";
+    errorSignature = "multi-task-violation";
+  }
+  
+  assert.equal(status, "failure", 'Status should be set to failure');
+  assert.equal(lastError, "Multiple tasks completed in single iteration (single-task mode enforced)", 'Error message should be set');
+  assert.equal(errorSignature, "multi-task-violation", 'Error signature should be multi-task-violation');
 });
 
-test('Guardrail sign should be appended when multi-task violation detected', async () => {
-  // This is a documentation test - the actual integration is tested
-  // via the loop.js logic which:
-  // 1. Detects multi-task completion using detectMultiTaskCompletion
-  // 2. Reads the current guardrails file
-  // 3. Appends a sign with the violation message using appendSign
-  // 4. Writes the updated guardrails back to the file
-  // This test documents the expected behavior
-  assert.ok(true, 'Guardrail appending integration documented');
+test('Guardrail sign appending: writes violation to guardrails file', async () => {
+  const { appendSign } = require('../src/prompt');
+  
+  // Step 1: Create initial guardrails content
+  const guardrailsTextBefore = `# Loopy Guardrails
+
+## Signs
+- 2026-01-30T01:00:00.000Z Previous violation message
+`;
+
+  // Step 2: Append multi-task violation sign
+  const iteration = 5;
+  const guardrailsTextAfter = appendSign(
+    guardrailsTextBefore,
+    `Multi-task violation detected in iteration ${iteration}: Single-task mode enforced`
+  );
+
+  // Step 3: Verify sign was appended
+  assert.notEqual(guardrailsTextAfter, guardrailsTextBefore, 'Guardrails should be updated');
+  assert.ok(guardrailsTextAfter.includes('Multi-task violation detected in iteration 5'), 'Should contain violation message');
+  assert.ok(guardrailsTextAfter.includes('Single-task mode enforced'), 'Should contain enforcement message');
+  
+  // Step 4: Verify timestamp format
+  const lines = guardrailsTextAfter.split('\n');
+  const violationLine = lines.find(line => line.includes('Multi-task violation'));
+  assert.ok(violationLine, 'Should have violation line');
+  assert.ok(/^- \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(violationLine), 'Should have ISO timestamp');
 });
 
 
