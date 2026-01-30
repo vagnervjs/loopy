@@ -73,9 +73,14 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "You are Loopy's planning assistant.",
     "Given a task description, propose a phase plan.",
     "",
-    "Return ONLY valid YAML (no code fences, no extra text) with this schema:",
+    "Return ONLY valid YAML wrapped between these exact markers (no extra text before/after):",
+    "BEGIN_LOOPY_PLAN",
+    "<YAML>",
+    "END_LOOPY_PLAN",
     "Do NOT include markdown fences (```), headings, or commentary.",
     "If you add any extra text, the plan will be rejected.",
+    "",
+    "YAML schema:",
     "phase_defaults:",
     "  stop_on: all_checked",
     "  test_command: <optional>",
@@ -116,7 +121,7 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
 
   let parsed = null;
   try {
-    output = stripYamlFences(output);
+    output = normalizePlannerYaml(output);
     parsed = yaml.load(output) || {};
   } catch (err) {
     return { ok: false, error: "invalid-yaml", output };
@@ -140,6 +145,28 @@ function stripYamlFences(text) {
   const fenceMatch = raw.match(/```(?:yaml)?\s*([\s\S]*?)\s*```/i);
   if (fenceMatch) return fenceMatch[1].trim();
   return raw;
+}
+
+function normalizePlannerYaml(text) {
+  let raw = stripYamlFences(text);
+  if (!raw) return raw;
+
+  const marker = raw.match(/BEGIN_LOOPY_PLAN\s*([\s\S]*?)\s*END_LOOPY_PLAN/i);
+  if (marker) {
+    raw = marker[1].trim();
+  }
+
+  const yamlStart = raw.search(/(^|\n)phase_defaults:\s*/);
+  if (yamlStart >= 0) {
+    raw = raw.slice(yamlStart).trim();
+  }
+
+  const cutoff = raw.search(/\nTotal usage|\nAPI time spent|\nBreakdown by AI model|\nTotal session time/);
+  if (cutoff >= 0) {
+    raw = raw.slice(0, cutoff).trim();
+  }
+
+  return raw.trim();
 }
 
 function renderTaskMarkdown({
