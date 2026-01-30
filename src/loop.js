@@ -1055,7 +1055,7 @@ async function runIteration(config, { stopSignal } = {}) {
 
     // Check for multi-task completion violation (only when single-task mode is enabled)
     if (status === "success" && config.singleTaskMode) {
-      const multiTaskDetected = detectMultiTaskCompletion(taskText, taskAfter);
+      const multiTaskDetected = detectMultiTaskCompletion(taskText, taskAfter, parsedTask, parsedTaskAfter);
       if (multiTaskDetected) {
         status = "failure";
         lastError = "Multiple tasks completed in single iteration (single-task mode enforced)";
