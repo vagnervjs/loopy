@@ -91,7 +91,7 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "    test_command: <optional>",
     "phase_tasks:",
     "  <phase id>:",
-    "    - <checklist item text>",
+    "    - \"<checklist item text>\"",
     "",
     "Break work into JIRA-sized tasks (as if assigning to a junior engineer):",
     "- Atomic: exactly ONE outcome per task (no compound items).",
@@ -99,6 +99,7 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "- Scoped: small enough for < 1 day of work.",
     "- Clear: start with a strong verb (add/implement/update/remove/verify).",
     "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
+    "- Quote every checklist item in YAML.",
     "- Prefer 5-10 tasks per phase.",
     "",
     "Keep phases small (3-6). Prefer stable ids. Ensure every phase has at least 1 checklist item.",
@@ -124,7 +125,14 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     output = normalizePlannerYaml(output);
     parsed = yaml.load(output) || {};
   } catch (err) {
-    return { ok: false, error: "invalid-yaml", output };
+    try {
+      const recovered = quotePhaseTasks(output);
+      parsed = yaml.load(recovered) || {};
+      output = recovered;
+    } catch (err2) {
+      const msg = err && err.message ? err.message : "invalid-yaml";
+      return { ok: false, error: `invalid-yaml: ${msg}`, output };
+    }
   }
 
   const normalized = normalizePhaseOutput(parsed);
@@ -167,6 +175,31 @@ function normalizePlannerYaml(text) {
   }
 
   return raw.trim();
+}
+
+function quotePhaseTasks(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  let inPhaseTasks = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*phase_tasks:\s*$/.test(line)) {
+      inPhaseTasks = true;
+      continue;
+    }
+    if (inPhaseTasks && /^\S/.test(line)) {
+      inPhaseTasks = false;
+    }
+    if (!inPhaseTasks) continue;
+
+    const match = line.match(/^(\s*-\s+)(.+)$/);
+    if (!match) continue;
+    const prefix = match[1];
+    const value = match[2].trim();
+    if (value.startsWith('"') || value.startsWith("'")) continue;
+    const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    lines[i] = `${prefix}"${escaped}"`;
+  }
+  return lines.join("\n");
 }
 
 function renderTaskMarkdown({
