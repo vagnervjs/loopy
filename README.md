@@ -1,87 +1,250 @@
-# Loopy
+<div align="center">
 
-Loopy is a lightweight Node.js CLI for running Ralph-style coding agent loops with durable state, guardrails, and logs.
+# 🔄 Loopy
 
-It wraps any agent CLI that reads prompts from standard input and adds predictable iteration, failure protection, and clear visibility into what the agent is doing.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org/)
+[![npm version](https://img.shields.io/npm/v/loopy.svg)](https://www.npmjs.com/package/loopy)
 
-It turns fragile single run agent executions into a controlled, repeatable loop.
+**A lightweight Node.js CLI for running Ralph-style coding agent loops with durable state, guardrails, and logs.**
 
-Use Loopy when you want to run a coding agent repeatedly on a non-trivial task and keep progress, safety, and visibility across iterations.
+Transform fragile single-run agent executions into controlled, repeatable loops.
 
-## What Loopy does not do
-- Does not manage credentials
-- Does not push to git remotes
-- Does not replace agent tools, only orchestrates them
+[Quick Start](#-quick-start) •
+[Key Features](#-key-features) •
+[Documentation](./docs/REFERENCE.md) •
+[Examples](./examples)
 
-## Quickstart
+</div>
 
-### Run your first loop
+---
 
-**🚀 Just run `loopy` — that's it!**
+## 📋 Table of Contents
 
-No configuration needed upfront. Simply run:
+- [Why Loopy?](#-why-loopy)
+- [Key Features](#-key-features)
+- [Installation](#-installation)
+- [Quick Start](#-quick-start)
+- [Common Workflows](#-common-workflows)
+- [How It Works](#-how-it-works)
+- [Documentation & Examples](#-documentation--examples)
+- [Contributing](#-contributing)
+- [License](#-license)
+
+---
+
+## 🤔 Why Loopy?
+
+Running coding agents on complex tasks can be unpredictable. They might stop mid-task, fail unexpectedly, or lose track of progress. Loopy solves this by wrapping any agent CLI and providing:
+
+- 🔁 **Automatic iteration control** — Run your agent repeatedly until the task is complete
+- 💾 **Durable state management** — Never lose progress, resume anytime
+- 🛡️ **Built-in guardrails** — Detect and prevent infinite loops, drift, and errors
+- 📊 **Complete visibility** — Full logs, status tracking, and progress monitoring
+- 🌿 **Git integration** — Automatic branching and commits with meaningful messages
+
+**Perfect for:** Feature development, refactoring, bug fixes, test writing, and any multi-step coding task that benefits from agent persistence.
+
+---
+
+## ✨ Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **Zero-Config Start** | Run `loopy` and answer prompts — no setup files required |
+| **Plan-Driven Execution** | Track progress with markdown checklists |
+| **Failure Recovery** | Resume from where you left off, even after crashes |
+| **Phase Management** | Organize work into plan → implement → verify phases |
+| **Smart Rotation** | Automatically rotate context to prevent token bloat |
+| **Test Integration** | Run tests between iterations to validate progress |
+| **Git Automation** | Auto-commit with semantic messages, branch management |
+| **Agent Agnostic** | Works with any CLI that accepts stdin prompts |
+
+---
+
+## 📦 Installation
+
+### Install from npm (Recommended)
+
+```bash
+npm install -g loopy
+```
+
+### Install from source
+
+```bash
+git clone https://github.com/yourusername/loopy.git
+cd loopy
+npm install
+npm link
+```
+
+**Requirements:**
+- Node.js 18+
+- A git repository (for your project)
+- An agent CLI that accepts prompts via stdin (e.g., `cursor-agent`, `copilot`)
+
+---
+
+## 🚀 Quick Start
+
+### Your First Loop
+
+**Just run `loopy` — that's it!** No configuration files needed upfront.
 
 ```bash
 loopy
 ```
 
-The tool will interactively guide you through setup, prompting you to:
-1. **Select or enter your agent command** (e.g., "cursor-agent", "copilot")
-2. **Enter your task or plan description** (what you want to build/fix)
-3. **Choose a git branch** (optional)
+Loopy will interactively guide you through:
+1. 🤖 **Agent command** — Select or enter your agent CLI (e.g., `cursor-agent`, `copilot --allow-all`)
+2. 📝 **Task description** — Describe what you want to build or fix
+3. 🌿 **Git branch** — Choose a branch name (optional but recommended)
 
-Everything you need will be requested as you go — no config files required to get started!
+That's all you need to get started!
 
-**Advanced users: provide everything via flags:**
+### Advanced: Skip the Prompts
+
+Provide everything via command-line flags for automation or scripting:
+
 ```bash
-loopy --agent "cursor-agent" --prompt "Add OAuth login to the app" --git-branch "loopy/oauth-login"
+loopy \
+  --agent "copilot --allow-all" \
+  --prompt "Add authentication middleware with JWT support" \
+  --git-branch "loopy/add-auth"
 ```
 
-If `loopy` isn't on your PATH yet, install it below.
+## 📖 Common Workflows
 
-### Install
+### Start a New Task
+
 ```bash
-npm install
-npm link
+# Feature development
+loopy --agent "copilot --allow-all" \
+      --prompt "Add OAuth2 authentication with Google provider"
+
+# Bug fix
+loopy --agent "cursor-agent" \
+      --prompt "Fix memory leak in the WebSocket handler"
+
+# Refactoring
+loopy --agent "copilot" \
+      --prompt "Convert all class components to functional components with hooks"
 ```
 
-### Requirements
-- Node.js 18+
-- A git repo
-- An agent CLI that accepts prompt input via stdin
+### Resume After Interruption
 
-## Common workflows
-
-**Start a new loop (non-interactive):**
-```bash
-loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
-```
-
-Resume a previous run (requires `.loopy/state.json`):
 ```bash
 loopy --resume
 ```
-Note: `--resume` is resume-only and cannot be combined with `--prompt` or `--plan`.
 
-Run a single iteration:
+> Picks up exactly where you left off using `.loopy/state.json`. Perfect for continuing after crashes, breaks, or manual stops.
+
+### Run Limited Iterations
+
 ```bash
-loopy --max-iterations 1 --agent "cursor-agent"
+# Test with a single iteration
+loopy --max-iterations 1
+
+# Run 5 iterations then pause
+loopy --max-iterations 5 --resume
 ```
 
-Check status:
+### Monitor Progress
+
 ```bash
 loopy status
 ```
-Status shows: iteration, current phase, last status, last test, last error, last hint + hint count, last bytes, updated at.
 
-More workflows and input examples live in `docs/REFERENCE.md`.
+Displays: iteration count, current phase, last status, test results, errors, output size, and timestamps.
 
-## Mental model
-Loopy treats a markdown plan doc as the source of truth.
-Each iteration reads the plan doc, runs the agent, applies guardrails, and updates state.
-Completion is driven by checked items, not by agent confidence.
+### Use a Predefined Plan
 
-## Full reference and examples
-See [`docs/REFERENCE.md`](./docs/REFERENCE.md) for the complete CLI reference, core concepts, git integration, and troubleshooting.
+```bash
+loopy --plan examples/feature-prd.md
+```
 
-Browse the [`examples`](./examples) folder for sample PRDs, prompts, and plan document templates.
+Start with a pre-written plan document instead of a simple prompt.
+
+> 📚 More workflows and real-world examples in [`docs/REFERENCE.md`](./docs/REFERENCE.md)
+
+---
+
+## 🧠 How It Works
+
+Loopy treats a **markdown plan document** as the source of truth and orchestrates your agent through structured iterations:
+
+```
+┌─────────────────────────────────────────┐
+│  1. Read Plan (LOOPY_PLAN.md)           │
+│     ↓                                   │
+│  2. Prepare Agent Prompt                │
+│     ↓                                   │
+│  3. Execute Agent CLI                   │
+│     ↓                                   │
+│  4. Capture Output & State              │
+│     ↓                                   │
+│  5. Apply Guardrails                    │
+│     ↓                                   │
+│  6. Update Plan & State                 │
+│     ↓                                   │
+│  7. Commit Changes (if enabled)         │
+│     ↓                                   │
+│  8. Check Completion → Loop or Exit     │
+└─────────────────────────────────────────┘
+```
+
+### Key Principles
+
+- **Plan-Driven**: Progress is tracked via markdown checkboxes `- [ ]` → `- [x]`
+- **Stateful**: Every iteration updates `.loopy/state.json` with progress, errors, and metrics
+- **Recoverable**: Crashes or interruptions don't lose progress — just `--resume`
+- **Observable**: Full logs in `.loopy/history/` for every iteration
+- **Controlled**: Guardrails detect loops, drift, and repetitive errors automatically
+
+**Completion criteria:** All checkboxes in the current phase are checked, or max iterations reached.
+
+---
+
+## 📚 Documentation & Examples
+
+| Resource | Description |
+|----------|-------------|
+| **[Complete Reference](./docs/REFERENCE.md)** | Full CLI reference, configuration options, git integration, and troubleshooting |
+| **[Examples](./examples)** | Sample PRDs, prompts, and plan templates for common use cases |
+| **[API Documentation](./docs/API.md)** | Internal architecture for contributors |
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Here's how you can help:
+
+1. **Report bugs** — Open an issue with details and reproduction steps
+2. **Suggest features** — Share your ideas for improvements
+3. **Submit PRs** — Fix bugs or add features (please open an issue first for major changes)
+
+### Development Setup
+
+```bash
+git clone https://github.com/yourusername/loopy.git
+cd loopy
+npm install
+npm link
+npm test
+```
+
+### Guidelines
+
+- Follow existing code style
+- Add tests for new features
+- Update documentation for user-facing changes
+- Keep commits focused and descriptive
+
+---
+
+## 📄 License
+
+MIT License — see [LICENSE](./LICENSE) for details.
+
+Copyright (c) 2026 Vagner Santana
