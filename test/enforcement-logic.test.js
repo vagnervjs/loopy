@@ -330,4 +330,60 @@ test('Verify multi-task scenario triggers enforcement correctly', () => {
     'Should set appropriate error message');
 });
 
+test('Same-phase multi-task: allows 2+ tasks in same phase', () => {
+  const { parseTask } = require('../src/task');
+  
+  // Create plan with 3 tasks in same phase
+  const beforePlan = `
+<!-- loopy:phase test-validation -->
+- [ ] test: First test
+- [ ] test: Second test  
+- [ ] test: Third test
+`;
+  
+  const afterPlan = `
+<!-- loopy:phase test-validation -->
+- [x] test: First test
+- [x] test: Second test  
+- [ ] test: Third test
+`;
+  
+  const parsedBefore = parseTask(beforePlan);
+  const parsedAfter = parseTask(afterPlan);
+  
+  // Should NOT detect violation - all tasks in same phase
+  const multiTaskDetected = detectMultiTaskCompletion(beforePlan, afterPlan, parsedBefore, parsedAfter);
+  
+  assert.equal(multiTaskDetected, false, 'Should allow multiple tasks in same phase');
+});
+
+test('Same-phase multi-task: allows 3 tasks in same phase', () => {
+  const { parseTask } = require('../src/task');
+  
+  // Create plan with 4 tasks in same phase, checking 3
+  const beforePlan = `
+<!-- loopy:phase implement-changes -->
+- [ ] implement: Feature A
+- [ ] implement: Feature B  
+- [ ] implement: Feature C
+- [ ] implement: Feature D
+`;
+  
+  const afterPlan = `
+<!-- loopy:phase implement-changes -->
+- [x] implement: Feature A
+- [x] implement: Feature B  
+- [x] implement: Feature C
+- [ ] implement: Feature D
+`;
+  
+  const parsedBefore = parseTask(beforePlan);
+  const parsedAfter = parseTask(afterPlan);
+  
+  // Should NOT detect violation - all tasks in same phase
+  const multiTaskDetected = detectMultiTaskCompletion(beforePlan, afterPlan, parsedBefore, parsedAfter);
+  
+  assert.equal(multiTaskDetected, false, 'Should allow 3 tasks in same phase');
+});
+
 
