@@ -74,6 +74,8 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "Given a task description, propose a phase plan.",
     "",
     "Return ONLY valid YAML (no code fences, no extra text) with this schema:",
+    "Do NOT include markdown fences (```), headings, or commentary.",
+    "If you add any extra text, the plan will be rejected.",
     "phase_defaults:",
     "  stop_on: all_checked",
     "  test_command: <optional>",
@@ -107,13 +109,14 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
   if (result.aborted) {
     return { ok: false, aborted: true, error: "aborted", output: "" };
   }
-  const output = `${result.stdout || ""}\n${result.stderr || ""}`.trim();
+  let output = `${result.stdout || ""}\n${result.stderr || ""}`.trim();
   if (result.code !== 0) {
     return { ok: false, error: `agent-exit-${result.code}`, output };
   }
 
   let parsed = null;
   try {
+    output = stripYamlFences(output);
     parsed = yaml.load(output) || {};
   } catch (err) {
     return { ok: false, error: "invalid-yaml", output };
@@ -129,6 +132,14 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
   }
 
   return { ok: true, ...normalized, output };
+}
+
+function stripYamlFences(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return raw;
+  const fenceMatch = raw.match(/```(?:yaml)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) return fenceMatch[1].trim();
+  return raw;
 }
 
 function renderTaskMarkdown({
