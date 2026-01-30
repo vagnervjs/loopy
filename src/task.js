@@ -366,6 +366,37 @@ function compareCheckboxDiffs(before, after) {
  */
 function detectMultiTaskCompletion(beforePlan, afterPlan, parsedTaskBefore = null, parsedTaskAfter = null) {
   const newlyChecked = compareCheckboxDiffs(beforePlan, afterPlan);
+  
+  // If less than 2 tasks checked, no multi-task completion
+  if (newlyChecked.length < 2) {
+    return false;
+  }
+  
+  // If phase information is available, check if tasks cross phase boundaries
+  if (parsedTaskBefore && parsedTaskAfter) {
+    const uncheckedBefore = parsedTaskBefore.unchecked || [];
+    const uncheckedAfter = parsedTaskAfter.unchecked || [];
+    
+    // Get the phases of unchecked tasks before changes
+    const phasesBefore = new Set(
+      uncheckedBefore
+        .filter(task => task.phase)
+        .map(task => task.phase)
+    );
+    
+    // Get the phases of unchecked tasks after changes
+    const phasesAfter = new Set(
+      uncheckedAfter
+        .filter(task => task.phase)
+        .map(task => task.phase)
+    );
+    
+    // Only trigger if tasks cross phase boundaries
+    // (i.e., unchecked tasks span multiple phases before OR after)
+    return phasesBefore.size > 1 || phasesAfter.size > 1;
+  }
+  
+  // Fallback: if no phase info, use the original behavior
   return newlyChecked.length >= 2;
 }
 
