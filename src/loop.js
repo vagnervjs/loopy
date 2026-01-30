@@ -22,7 +22,7 @@ const { confirm, promptLine, promptSelect } = require("./confirm");
 const { runShellCommand } = require("./shell");
 const { loadState } = require("./state");
 const { configureSteps, endIteration, formatDurationMs, printBlankLine, printStep, startIteration } = require("./steps");
-const { getTaskLine, parseTask, toSlug, getCurrentTask, getCurrentPhaseSection } = require("./task");
+const { getTaskLine, parseTask, toSlug, getCurrentTask, getCurrentPhaseSection, detectMultiTaskCompletion } = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
@@ -1052,6 +1052,21 @@ async function runIteration(config, { stopSignal } = {}) {
     const taskAfter = await readText(config.taskFile);
     bytesRead += Buffer.byteLength(taskAfter);
     const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
+
+    // Check for multi-task completion violation
+    if (status === "success") {
+      const multiTaskDetected = detectMultiTaskCompletion(taskText, taskAfter);
+      if (multiTaskDetected) {
+        status = "failure";
+        lastError = "Multiple tasks completed in single iteration (single-task mode enforced)";
+        errorSignature = "multi-task-violation";
+        printStep(
+          `Multi-task violation: ${lastError}`,
+          { iteration, level: "error", kind: "enforcement" }
+        );
+        await appendActivity(config.activityLog, [`Multi-task violation detected in iteration ${iteration}`]);
+      }
+    }
 
     const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTaskAfter, currentPhaseId) : config.testCommand;
     if (status === "success" && effectiveTestCommand) {
