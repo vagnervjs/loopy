@@ -296,4 +296,38 @@ test('Run 100 single-task iterations and confirm zero false positives', () => {
   assert.equal(falsePositives, 0, `Expected zero false positives, but got ${falsePositives} out of ${iterations} iterations`);
 });
 
+test('Verify multi-task scenario triggers enforcement correctly', () => {
+  // Create a plan with multiple tasks where 2 tasks are checked
+  const beforePlan = `
+- [ ] Task 1: First task
+- [ ] Task 2: Second task
+- [ ] Task 3: Third task
+`;
+  
+  const afterPlan = `
+- [x] Task 1: First task
+- [x] Task 2: Second task
+- [ ] Task 3: Third task
+`;
+  
+  // Simulate single-task mode enabled
+  const config = { singleTaskMode: true };
+  let status = "success";
+  let lastError = null;
+  
+  const multiTaskDetected = detectMultiTaskCompletion(beforePlan, afterPlan);
+  
+  // Apply enforcement logic (simulating loop.js behavior)
+  if (config.singleTaskMode && status === "success" && multiTaskDetected) {
+    status = "failure";
+    lastError = "Multiple tasks completed in single iteration (single-task mode enforced)";
+  }
+  
+  // Assertions
+  assert.equal(multiTaskDetected, true, 'Should detect multi-task completion when 2 tasks are checked');
+  assert.equal(status, "failure", 'Status should be failure when singleTaskMode is enabled and multi-task detected');
+  assert.equal(lastError, "Multiple tasks completed in single iteration (single-task mode enforced)", 
+    'Should set appropriate error message');
+});
+
 
