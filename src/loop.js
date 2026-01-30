@@ -20,6 +20,7 @@ const { detectRepeatFailure, detectThrash } = require("./guardrails");
 const { formatProgress, ensureGuardrails, appendSign, formatPrompt } = require("./prompt");
 const { confirm, promptLine, promptSelect } = require("./confirm");
 const { runShellCommand } = require("./shell");
+const { Spinner } = require("./spinner");
 const { loadState } = require("./state");
 const { configureSteps, endIteration, formatDurationMs, printBlankLine, printStep, startIteration } = require("./steps");
 const { getTaskLine, parseTask, toSlug, getCurrentTask, getCurrentPhaseSection, detectMultiTaskCompletion } = require("./task");
@@ -1021,9 +1022,14 @@ async function runIteration(config, { stopSignal } = {}) {
       { iteration, kind: "agent" }
     );
     
-    // Set agent running state to true before request
+    // Set agent running state to true before request and show spinner
     const agentRunningState = { ...state, isAgentRunning: true };
     await writeText(config.stateFile, JSON.stringify(agentRunningState, null, 2) + "\n");
+    
+    const spinner = new Spinner('Agent request in progress...');
+    if (!config.stream) {
+      spinner.start();
+    }
     
     const agentResult = await runShellCommand(config.agentCommand, prompt, DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
@@ -1032,7 +1038,9 @@ async function runIteration(config, { stopSignal } = {}) {
       noColor: config.noColor,
       stopSignal,
     });
-    // Set agent running state to false after request completes
+    
+    // Set agent running state to false after request completes and hide spinner
+    spinner.stop();
     const agentCompletedState = { ...state, isAgentRunning: false };
     await writeText(config.stateFile, JSON.stringify(agentCompletedState, null, 2) + "\n");
     
