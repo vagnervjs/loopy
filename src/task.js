@@ -355,6 +355,11 @@ function compareCheckboxDiffs(before, after) {
   return newlyChecked;
 }
 
+function detectMultiTaskCompletion(beforePlan, afterPlan) {
+  const newlyChecked = compareCheckboxDiffs(beforePlan, afterPlan);
+  return newlyChecked.length >= 2;
+}
+
 module.exports = {
   parseTask,
   getTaskLine,
@@ -363,4 +368,5 @@ module.exports = {
   toSlug,
   parseCheckboxes,
   compareCheckboxDiffs,
+  detectMultiTaskCompletion,
 };
