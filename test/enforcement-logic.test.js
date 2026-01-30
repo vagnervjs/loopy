@@ -386,4 +386,35 @@ test('Same-phase multi-task: allows 3 tasks in same phase', () => {
   assert.equal(multiTaskDetected, false, 'Should allow 3 tasks in same phase');
 });
 
+test('Multi-phase violation: detects tasks from 2+ phases checked', () => {
+  const { parseTask } = require('../src/task');
+  
+  // Create plan with tasks in different phases
+  const beforePlan = `
+<!-- loopy:phase phase-a -->
+- [ ] task: Last task of phase A
+
+<!-- loopy:phase phase-b -->
+- [ ] task: First task of phase B
+- [ ] task: Second task of phase B
+`;
+  
+  const afterPlan = `
+<!-- loopy:phase phase-a -->
+- [x] task: Last task of phase A
+
+<!-- loopy:phase phase-b -->
+- [x] task: First task of phase B
+- [ ] task: Second task of phase B
+`;
+  
+  const parsedBefore = parseTask(beforePlan);
+  const parsedAfter = parseTask(afterPlan);
+  
+  // Should detect violation - tasks from 2 different phases
+  const multiTaskDetected = detectMultiTaskCompletion(beforePlan, afterPlan, parsedBefore, parsedAfter);
+  
+  assert.equal(multiTaskDetected, true, 'Should detect violation when tasks from 2+ phases are checked');
+});
+
 
