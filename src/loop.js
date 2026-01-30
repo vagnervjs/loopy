@@ -1835,7 +1835,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const totalDurationMs = (finalState.state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
   if (totalDurationMs > 0) {
     printStep(`All tasks complete! :tada:`, { kind: "plan" });
-    printStep(`Total duration ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
+    printStep(`Total duration :clock: ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
   }
 }
 
