@@ -372,32 +372,43 @@ function detectMultiTaskCompletion(beforePlan, afterPlan, parsedTaskBefore = nul
     return false;
   }
   
-  // If phase information is available, check if tasks cross phase boundaries
-  if (parsedTaskBefore && parsedTaskAfter) {
-    const uncheckedBefore = parsedTaskBefore.unchecked || [];
-    const uncheckedAfter = parsedTaskAfter.unchecked || [];
-    
-    // Get the phases of unchecked tasks before changes
-    const phasesBefore = new Set(
-      uncheckedBefore
-        .filter(task => task.phase)
-        .map(task => task.phase)
-    );
-    
-    // Get the phases of unchecked tasks after changes
-    const phasesAfter = new Set(
-      uncheckedAfter
-        .filter(task => task.phase)
-        .map(task => task.phase)
-    );
-    
-    // Only trigger if tasks cross phase boundaries
-    // (i.e., unchecked tasks span multiple phases before OR after)
-    return phasesBefore.size > 1 || phasesAfter.size > 1;
+  // Extract phase information from the plan text
+  const phaseMap = new Map(); // line -> phase
+  const lines = afterPlan.split(/\r?\n/);
+  let currentPhase = null;
+  let hasPhaseMarkers = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const phaseMatch = line.match(/<!--\s*loopy:phase\s+(\S+)\s*-->/);
+    if (phaseMatch) {
+      currentPhase = phaseMatch[1];
+      hasPhaseMarkers = true;
+    }
+    phaseMap.set(i + 1, currentPhase);
   }
   
-  // Fallback: if no phase info, use the original behavior
-  return newlyChecked.length >= 2;
+  // If no phase markers found, use original behavior (multi-task = violation)
+  if (!hasPhaseMarkers) {
+    return true;
+  }
+  
+  // Get phases of newly checked tasks
+  const phasesOfCheckedTasks = new Set();
+  for (const box of newlyChecked) {
+    const phase = phaseMap.get(box.line);
+    if (phase) {
+      phasesOfCheckedTasks.add(phase);
+    }
+  }
+  
+  // Trigger violation if checked tasks span multiple phases
+  if (phasesOfCheckedTasks.size > 1) {
+    return true;
+  }
+  
+  // Allow multiple tasks in the same phase
+  return false;
 }
 
 module.exports = {
