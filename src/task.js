@@ -355,7 +355,16 @@ function compareCheckboxDiffs(before, after) {
   return newlyChecked;
 }
 
-function detectMultiTaskCompletion(beforePlan, afterPlan) {
+/**
+ * Detects if multiple tasks were completed in a single iteration.
+ * 
+ * @param {string} beforePlan - Plan text before changes
+ * @param {string} afterPlan - Plan text after changes
+ * @param {Object} parsedTaskBefore - Parsed task structure before changes (optional)
+ * @param {Object} parsedTaskAfter - Parsed task structure after changes (optional)
+ * @returns {boolean} true if multiple tasks were completed
+ */
+function detectMultiTaskCompletion(beforePlan, afterPlan, parsedTaskBefore = null, parsedTaskAfter = null) {
   const newlyChecked = compareCheckboxDiffs(beforePlan, afterPlan);
   return newlyChecked.length >= 2;
 }
