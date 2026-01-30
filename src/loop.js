@@ -917,6 +917,15 @@ async function runIteration(config, { stopSignal } = {}) {
     iterationStatus = "stopped";
     const message = `Stop requested; aborting iteration${suffix}`;
     printStep(message, { iteration, kind: "result", level: "warn" });
+    
+    // Ensure agent running state is cleared on abort
+    try {
+      const abortedState = { ...state, isAgentRunning: false };
+      await writeText(config.stateFile, JSON.stringify(abortedState, null, 2) + "\n");
+    } catch (_) {
+      // ignore
+    }
+    
     try {
       await appendActivity(config.activityLog, [message]);
     } catch (_) {
@@ -1011,6 +1020,11 @@ async function runIteration(config, { stopSignal } = {}) {
       `Agent run ${redact(config.agentCommand)} (stream log: ${prettyPath(config.cwd, agentStreamLogPath)})`,
       { iteration, kind: "agent" }
     );
+    
+    // Set agent running state to true before request
+    const agentRunningState = { ...state, isAgentRunning: true };
+    await writeText(config.stateFile, JSON.stringify(agentRunningState, null, 2) + "\n");
+    
     const agentResult = await runShellCommand(config.agentCommand, prompt, DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
       agentStreamLogPath,
@@ -1018,6 +1032,10 @@ async function runIteration(config, { stopSignal } = {}) {
       noColor: config.noColor,
       stopSignal,
     });
+    // Set agent running state to false after request completes
+    const agentCompletedState = { ...state, isAgentRunning: false };
+    await writeText(config.stateFile, JSON.stringify(agentCompletedState, null, 2) + "\n");
+    
     if (agentResult.aborted) {
       return await abortIteration("agent run");
     }
