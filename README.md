@@ -114,21 +114,6 @@ loopy \
   --git-branch "loopy/add-auth"
 ```
 
-### Example Session
-
-```bash
-$ loopy
-? Select agent command: copilot --allow-all
-? Enter your prompt: Refactor the user service to use async/await
-? Git branch name: loopy/refactor-user-service
-✓ Created branch loopy/refactor-user-service
-✓ Iteration 1 complete (status: success)
-✓ Iteration 2 complete (status: success)
-✓ All tasks complete! 🎉
-```
-
----
-
 ## 📖 Common Workflows
 
 ### Start a New Task
@@ -191,7 +176,7 @@ Loopy treats a **markdown plan document** as the source of truth and orchestrate
 
 ```
 ┌─────────────────────────────────────────┐
-│  1. Read Plan (LOOPY_PLAN.md)          │
+│  1. Read Plan (LOOPY_PLAN.md)           │
 │     ↓                                   │
 │  2. Prepare Agent Prompt                │
 │     ↓                                   │
@@ -263,13 +248,3 @@ npm test
 MIT License — see [LICENSE](./LICENSE) for details.
 
 Copyright (c) 2026 Vagner Santana
-
----
-
-<div align="center">
-
-**Made with ❤️ for the agent automation community**
-
-[⬆ Back to Top](#-loopy)
-
-</div>
