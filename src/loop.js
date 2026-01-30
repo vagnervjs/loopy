@@ -880,14 +880,6 @@ async function runIteration(config, { stopSignal } = {}) {
 
   const parsedTask = parseTask(taskText);
 
-  if (parsedTask.allChecked) {
-    const totalDurationMs = (state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
-    const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
-    await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
-    printStep(`Plan complete; stopping loop${totalDurationLabel}`, { kind: "plan" });
-    return { status: "complete", bytes: 0 };
-  }
-
   let guardrailsText = await readText(config.guardrailsFile);
   bytesRead += Buffer.byteLength(guardrailsText);
 
@@ -904,6 +896,14 @@ async function runIteration(config, { stopSignal } = {}) {
   const loaded = await loadState(config.stateFile);
   const state = loaded.state;
   bytesRead += loaded.bytes;
+
+  if (parsedTask.allChecked) {
+    const totalDurationMs = (state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+    const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
+    await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
+    printStep(`Plan complete; stopping loop${totalDurationLabel}`, { kind: "plan" });
+    return { status: "complete", bytes: 0 };
+  }
 
   const iteration = (state.iteration || 0) + 1;
   const rotationPending = Boolean(state.rotatePending);

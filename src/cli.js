@@ -180,12 +180,16 @@ function printHelp() {
     ...formatHelpRows(commands, { indent: "  ", gap: 2 }),
     "",
     "Common options:",
-    ...formatHelpRows(commonOptions, { indent: "  ", gap: 2 }),
+    ...(() => {
+      const allAdvanced = Object.values(advancedByGroup).flat();
+      const labelWidth = maxStringLength([...commonOptions, ...allAdvanced].map((r) => r.label));
+      return formatHelpRows(commonOptions, { indent: "  ", labelWidth, gap: 2 });
+    })(),
     "",
     "Advanced options:",
     ...(() => {
       const all = Object.values(advancedByGroup).flat();
-      const labelWidth = maxStringLength(all.map((r) => r.label));
+      const labelWidth = maxStringLength([...commonOptions, ...all].map((r) => r.label));
       const out = [];
       for (const [group, rows] of Object.entries(advancedByGroup)) {
         out.push("");
