@@ -261,4 +261,39 @@ test('Flag toggling: singleTaskMode=true enforces single-task, singleTaskMode=fa
   }
 });
 
+test('Run 100 single-task iterations and confirm zero false positives', () => {
+  // This test simulates 100 iterations where exactly one task is checked each time
+  // and verifies that detectMultiTaskCompletion never falsely triggers
+  
+  let falsePositives = 0;
+  const iterations = 100;
+  
+  for (let i = 0; i < iterations; i++) {
+    // Create a plan with 10 tasks
+    const taskCount = 10;
+    let before = '';
+    let after = '';
+    
+    for (let j = 0; j < taskCount; j++) {
+      // All tasks start unchecked
+      before += `- [ ] Task ${j + 1}: Iteration ${i} task number ${j}\n`;
+      
+      // Check exactly one task (the one matching current iteration modulo task count)
+      const shouldCheck = (j === (i % taskCount));
+      after += shouldCheck 
+        ? `- [x] Task ${j + 1}: Iteration ${i} task number ${j}\n`
+        : `- [ ] Task ${j + 1}: Iteration ${i} task number ${j}\n`;
+    }
+    
+    const detected = detectMultiTaskCompletion(before, after);
+    
+    // Should never detect multi-task (exactly one task checked each time)
+    if (detected) {
+      falsePositives++;
+    }
+  }
+  
+  assert.equal(falsePositives, 0, `Expected zero false positives, but got ${falsePositives} out of ${iterations} iterations`);
+});
+
 
