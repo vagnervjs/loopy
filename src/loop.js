@@ -1863,7 +1863,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   // Log celebration and total duration after archival
   printStep(`All tasks complete! 🎉`, { kind: "plan" });
   if (totalDurationMs > 0) {
-    printStep(`Total duration :clock: ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
+    printStep(`Total duration 🕐 ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
   }
 }
 
