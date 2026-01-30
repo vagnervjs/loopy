@@ -22,7 +22,7 @@ const { confirm, promptLine, promptSelect } = require("./confirm");
 const { runShellCommand } = require("./shell");
 const { loadState } = require("./state");
 const { configureSteps, endIteration, formatDurationMs, printBlankLine, printStep, startIteration } = require("./steps");
-const { getTaskLine, parseTask, toSlug } = require("./task");
+const { getTaskLine, parseTask, toSlug, getCurrentTask, getCurrentPhaseSection } = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
@@ -936,6 +936,10 @@ async function runIteration(config, { stopSignal } = {}) {
     bytesRead += Buffer.byteLength(hintsTextRaw);
     const hintsText = truncate(hintsTextRaw, 8000);
 
+    const currentTaskObj = getCurrentTask(taskText, { phaseId: currentPhaseId });
+    const currentTaskText = currentTaskObj ? currentTaskObj.text.trim() : null;
+    const filteredPlan = currentPhaseId ? getCurrentPhaseSection(taskText, currentPhaseId) : taskText;
+
     const prompt = formatPrompt({
       iteration,
       taskText,
@@ -948,6 +952,8 @@ async function runIteration(config, { stopSignal } = {}) {
       currentPhase: currentPhaseId,
       taskFilePath: config.taskFile,
       hintsText,
+      currentTask: currentTaskText,
+      filteredPlan,
     });
 
     await writeText(config.promptFile, prompt);

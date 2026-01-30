@@ -238,6 +238,64 @@ function getTaskLine(text, options = {}) {
   return "task update";
 }
 
+function getCurrentTask(text, options = {}) {
+  if (!text) return null;
+  const parsed = parseTask(text);
+  const phaseId = options && options.phaseId ? String(options.phaseId) : "";
+  const phaseChecklist =
+    phaseId && parsed.phaseSections && parsed.phaseSections[phaseId]
+      ? parsed.phaseSections[phaseId].checklist
+      : null;
+  const list = phaseChecklist || parsed.checklist;
+  const firstOpen = list.find((item) => !item.checked);
+  return firstOpen || null;
+}
+
+function getCurrentPhaseSection(text, phaseId) {
+  if (!text || !phaseId) return text;
+  const parsed = parseTask(text);
+  if (!parsed.phaseSections || !parsed.phaseSections[phaseId]) return text;
+  
+  const bodyLines = String(parsed.body || "").split(/\r?\n/);
+  const phaseSection = parsed.phaseSections[phaseId];
+  
+  // Find the phase header (it's usually just before startLine)
+  let phaseHeaderLine = -1;
+  for (let i = 0; i < phaseSection.startLine && i < bodyLines.length; i += 1) {
+    const line = bodyLines[i];
+    if (line.includes(`<!-- loopy:phase ${phaseId} -->`)) {
+      // Found the marker, the header is likely the line before or at this position
+      phaseHeaderLine = i - 1;
+      if (phaseHeaderLine < 0 || !bodyLines[phaseHeaderLine].match(/^#{2,6}\s+/)) {
+        phaseHeaderLine = i;
+      }
+      break;
+    }
+  }
+  
+  // If we didn't find the marker, look for a heading near startLine
+  if (phaseHeaderLine === -1) {
+    for (let i = Math.max(0, phaseSection.startLine - 3); i < phaseSection.startLine; i += 1) {
+      if (bodyLines[i] && bodyLines[i].match(/^#{2,6}\s+/)) {
+        phaseHeaderLine = i;
+      }
+    }
+  }
+  
+  // Include everything from the beginning through the end of this phase
+  const startIndex = phaseHeaderLine >= 0 ? phaseHeaderLine : phaseSection.startLine;
+  const filteredBodyLines = ["# Plan", "", ...bodyLines.slice(startIndex, phaseSection.endLine)];
+  const filteredBody = filteredBodyLines.join("\n");
+  
+  // Find where the body starts in the full text
+  const headerEndIndex = text.indexOf(parsed.body);
+  if (headerEndIndex === -1) return text;
+  
+  const header = text.slice(0, headerEndIndex);
+  
+  return header + filteredBody;
+}
+
 function parseCheckboxes(text) {
   if (!text) return [];
   const lines = String(text).split(/\r?\n/);
@@ -300,6 +358,8 @@ function compareCheckboxDiffs(before, after) {
 module.exports = {
   parseTask,
   getTaskLine,
+  getCurrentTask,
+  getCurrentPhaseSection,
   toSlug,
   parseCheckboxes,
   compareCheckboxDiffs,
