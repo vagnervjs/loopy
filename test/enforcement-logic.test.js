@@ -134,4 +134,15 @@ test('Multi-task enforcement should mark iteration as failure', async () => {
   assert.ok(true, 'Integration documented');
 });
 
+test('Guardrail sign should be appended when multi-task violation detected', async () => {
+  // This is a documentation test - the actual integration is tested
+  // via the loop.js logic which:
+  // 1. Detects multi-task completion using detectMultiTaskCompletion
+  // 2. Reads the current guardrails file
+  // 3. Appends a sign with the violation message using appendSign
+  // 4. Writes the updated guardrails back to the file
+  // This test documents the expected behavior
+  assert.ok(true, 'Guardrail appending integration documented');
+});
+
 

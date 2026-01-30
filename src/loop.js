@@ -1065,6 +1065,17 @@ async function runIteration(config, { stopSignal } = {}) {
           { iteration, level: "error", kind: "enforcement" }
         );
         await appendActivity(config.activityLog, [`Multi-task violation detected in iteration ${iteration}`]);
+        
+        // Append guardrail sign to plan
+        const guardrailsText = await readText(config.guardrailsFile);
+        const guardrailsUpdated = appendSign(
+          guardrailsText,
+          `Multi-task violation detected in iteration ${iteration}: Single-task mode enforced`
+        );
+        if (guardrailsUpdated !== guardrailsText) {
+          await writeText(config.guardrailsFile, guardrailsUpdated);
+          bytesWritten += Buffer.byteLength(guardrailsUpdated);
+        }
       }
     }
 
