@@ -1058,7 +1058,11 @@ async function runIteration(config, { stopSignal } = {}) {
       const multiTaskDetected = detectMultiTaskCompletion(taskText, taskAfter, parsedTask, parsedTaskAfter);
       if (multiTaskDetected) {
         status = "failure";
-        lastError = "Multiple tasks completed in single iteration (single-task mode enforced)";
+        // Determine if phase boundary was crossed
+        const hasPhaseCrossing = parsedTask && parsedTaskAfter;
+        lastError = hasPhaseCrossing 
+          ? "Multiple phases crossed in single iteration (single-task mode enforced)"
+          : "Multiple tasks completed in single iteration (single-task mode enforced)";
         errorSignature = "multi-task-violation";
         printStep(
           `Multi-task violation: ${lastError}`,
