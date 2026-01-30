@@ -898,10 +898,8 @@ async function runIteration(config, { stopSignal } = {}) {
   bytesRead += loaded.bytes;
 
   if (parsedTask.allChecked) {
-    const totalDurationMs = (state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
-    const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
     await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
-    printStep(`Plan complete; stopping loop${totalDurationLabel}`, { kind: "plan" });
+    printStep(`Plan complete; stopping loop`, { kind: "plan" });
     return { status: "complete", bytes: 0 };
   }
 
@@ -1331,10 +1329,8 @@ async function runIteration(config, { stopSignal } = {}) {
     ]);
 
     if (taskComplete) {
-      const totalDurationMs = (nextState.iterationDurations || []).reduce((sum, d) => sum + d, 0);
-      const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
       await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
-      printStep(`Plan complete after iteration${totalDurationLabel}`, { iteration, kind: "plan" });
+      printStep(`Plan complete after iteration`, { iteration, kind: "plan" });
       iterationStatus = status;
       return { status: "complete", bytes: bytesRead + bytesWritten };
     }
@@ -1832,6 +1828,13 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   if (archiveResult.archived) {
     const prettyArchive = prettyPath(config.cwd, archiveResult.archiveDir);
     printStep(`Archive ${prettyArchive}`, { kind: "archive" });
+  }
+
+  // Log total duration after archival
+  const finalState = await loadState(config.stateFile);
+  const totalDurationMs = (finalState.state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+  if (totalDurationMs > 0) {
+    printStep(`Total duration ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
   }
 }
 
