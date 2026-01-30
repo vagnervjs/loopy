@@ -238,8 +238,69 @@ function getTaskLine(text, options = {}) {
   return "task update";
 }
 
+function parseCheckboxes(text) {
+  if (!text) return [];
+  const lines = String(text).split(/\r?\n/);
+  const checkboxes = [];
+  let inComment = false;
+  
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i];
+    
+    if (inComment) {
+      if (raw.includes("-->")) inComment = false;
+      continue;
+    }
+    
+    let effective = raw;
+    const commentStart = raw.indexOf("<!--");
+    if (commentStart >= 0) {
+      const commentEnd = raw.indexOf("-->", commentStart + 4);
+      if (commentEnd >= 0) {
+        effective = raw.slice(0, commentStart);
+      } else {
+        effective = raw.slice(0, commentStart);
+        inComment = true;
+      }
+    }
+    
+    const itemMatch = effective.match(/^-\s*\[( |x|X)\]\s+(.*)$/);
+    if (itemMatch) {
+      checkboxes.push({
+        line: i + 1,
+        checked: itemMatch[1].toLowerCase() === "x",
+        text: itemMatch[2],
+      });
+    }
+  }
+  
+  return checkboxes;
+}
+
+function compareCheckboxDiffs(before, after) {
+  const beforeMap = new Map();
+  const beforeBoxes = parseCheckboxes(before);
+  const afterBoxes = parseCheckboxes(after);
+  
+  for (const box of beforeBoxes) {
+    beforeMap.set(box.text, box.checked);
+  }
+  
+  const newlyChecked = [];
+  for (const box of afterBoxes) {
+    const wasPreviouslyUnchecked = beforeMap.has(box.text) && beforeMap.get(box.text) === false;
+    if (box.checked && wasPreviouslyUnchecked) {
+      newlyChecked.push(box);
+    }
+  }
+  
+  return newlyChecked;
+}
+
 module.exports = {
   parseTask,
   getTaskLine,
   toSlug,
+  parseCheckboxes,
+  compareCheckboxDiffs,
 };
