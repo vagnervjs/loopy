@@ -136,24 +136,39 @@ function formatPlanOverviewLines(parsedTask, options = {}) {
         kind: "plan",
       },
     ];
+    let phaseIndex = 0;
     for (const section of sections) {
+      phaseIndex += 1;
       if (section.scope === "phase") {
-        lines.push({ message: formatSectionLabel(section), kind: "plan-item", indent: 2 });
+        lines.push({
+          message: `#${phaseIndex} ${formatSectionLabel(section)}`,
+          kind: "plan-item",
+          indent: 2,
+        });
         if (!section.items.length) {
           lines.push({ message: "(no tasks)", kind: "plan-item", indent: 4 });
           continue;
         }
+        let taskIndex = 0;
         for (const item of section.items) {
-          lines.push({ message: formatChecklistItem(item), kind: "plan-item", indent: 4 });
+          taskIndex += 1;
+          lines.push({
+            message: `#${phaseIndex}.${taskIndex} ${formatChecklistItem(item)}`,
+            kind: "plan-item",
+            indent: 4,
+          });
         }
+        lines.push({ blank: true });
         continue;
       }
       if (!section.items.length) {
         lines.push({ message: "(no tasks)", kind: "plan-item", indent: 2 });
         continue;
       }
+      let taskIndex = 0;
       for (const item of section.items) {
-        lines.push({ message: formatChecklistItem(item), kind: "plan-item", indent: 2 });
+        taskIndex += 1;
+        lines.push({ message: `#${taskIndex} ${formatChecklistItem(item)}`, kind: "plan-item", indent: 2 });
       }
     }
     return lines;
@@ -276,6 +291,10 @@ function printStepLines(lines, options) {
   if (!Array.isArray(lines)) return;
   for (const line of lines) {
     if (!line) continue;
+    if (typeof line === "object" && line.blank) {
+      printBlankLine();
+      continue;
+    }
     if (typeof line === "string") {
       if (!line.trim()) continue;
       printStep(line, options);
