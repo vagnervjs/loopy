@@ -60,6 +60,8 @@ function formatPrompt({
   currentPhase,
   taskFilePath,
   hintsText,
+  currentTask,
+  filteredPlan,
 }) {
   const planLabel = taskFilePath ? path.basename(String(taskFilePath)) : "plan doc";
 
@@ -78,6 +80,8 @@ function formatPrompt({
     }
   }
 
+  const displayPlan = filteredPlan || taskText;
+
   const lines = [
     "# Loopy Loop Prompt",
     "",
@@ -92,15 +96,27 @@ function formatPrompt({
     normalizedHints ? "## Hints" : "",
     normalizedHints ? normalizedHints : "",
     normalizedHints ? "" : "",
+  ];
+
+  if (currentTask) {
+    lines.push(
+      "## Current Task",
+      "",
+      `- [ ] ${currentTask}`,
+      ""
+    );
+  }
+
+  lines.push(
     `## Plan (${planLabel})`,
-    taskText.trimEnd(),
+    displayPlan.trimEnd(),
     "",
     "## Guardrails",
     guardrailsText.trimEnd(),
     "",
     "## Progress",
-    progressText.trimEnd(),
-  ];
+    progressText.trimEnd()
+  );
 
   if (!rotationPending && lastOutput) {
     lines.push("", "## Last Agent Output (truncated)", lastOutput.trimEnd());
@@ -108,7 +124,14 @@ function formatPrompt({
 
   lines.push(
     "",
-    "## Instructions",
+    "## Instructions"
+  );
+
+  if (currentTask) {
+    lines.push("- **Complete only the Current Task in this iteration.**");
+  }
+
+  lines.push(
     `- Follow the plan checklist in ${planLabel}.`,
     "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",

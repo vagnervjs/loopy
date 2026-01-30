@@ -20,9 +20,10 @@ const { detectRepeatFailure, detectThrash } = require("./guardrails");
 const { formatProgress, ensureGuardrails, appendSign, formatPrompt } = require("./prompt");
 const { confirm, promptLine, promptSelect } = require("./confirm");
 const { runShellCommand } = require("./shell");
+const { Spinner } = require("./spinner");
 const { loadState } = require("./state");
 const { configureSteps, endIteration, formatDurationMs, printBlankLine, printStep, startIteration } = require("./steps");
-const { getTaskLine, parseTask, toSlug } = require("./task");
+const { getTaskLine, parseTask, toSlug, getCurrentTask, getCurrentPhaseSection, detectMultiTaskCompletion } = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
@@ -37,6 +38,7 @@ const {
 } = require("./git");
 
 const ARCHIVE_DIRNAME = "archive";
+const PLAN_OUTPUT_FILE = "last_plan_output.txt";
 
 function parseSkipPhaseList(value) {
   const raw = String(value || "").trim();
@@ -46,6 +48,23 @@ function parseSkipPhaseList(value) {
     .map((s) => toSlug(s) || s.trim())
     .map((s) => String(s || "").trim())
     .filter(Boolean);
+}
+
+async function recordPlanGenerationFailure(config, { output, error, seedSource }) {
+  const logPath = path.join(config.loopyDir, PLAN_OUTPUT_FILE);
+  const header = [
+    "# Loopy Plan Generation Output",
+    "",
+    `Timestamp: ${new Date().toISOString()}`,
+    `Error: ${error || "unknown"}`,
+    `Seed source: ${seedSource || "unknown"}`,
+    "",
+  ].join("\n");
+  const payload = header + (output ? truncate(String(output), DEFAULTS.maxOutputBytes) : "(no output)") + "\n";
+  await writeText(logPath, payload);
+  await appendActivity(config.activityLog, [
+    `plan generation failed: ${error || "unknown"} (see ${prettyPath(config.cwd, logPath)})`,
+  ]);
 }
 
 function normalizeChecklistItems(items) {
@@ -118,24 +137,39 @@ function formatPlanOverviewLines(parsedTask, options = {}) {
         kind: "plan",
       },
     ];
+    let phaseIndex = 0;
     for (const section of sections) {
+      phaseIndex += 1;
       if (section.scope === "phase") {
-        lines.push({ message: formatSectionLabel(section), kind: "plan-item", indent: 2 });
+        lines.push({
+          message: `#${phaseIndex} ${formatSectionLabel(section)}`,
+          kind: "plan-item",
+          indent: 2,
+        });
         if (!section.items.length) {
           lines.push({ message: "(no tasks)", kind: "plan-item", indent: 4 });
           continue;
         }
+        let taskIndex = 0;
         for (const item of section.items) {
-          lines.push({ message: formatChecklistItem(item), kind: "plan-item", indent: 4 });
+          taskIndex += 1;
+          lines.push({
+            message: `#${phaseIndex}.${taskIndex} ${formatChecklistItem(item)}`,
+            kind: "plan-item",
+            indent: 4,
+          });
         }
+        lines.push({ blank: true });
         continue;
       }
       if (!section.items.length) {
         lines.push({ message: "(no tasks)", kind: "plan-item", indent: 2 });
         continue;
       }
+      let taskIndex = 0;
       for (const item of section.items) {
-        lines.push({ message: formatChecklistItem(item), kind: "plan-item", indent: 2 });
+        taskIndex += 1;
+        lines.push({ message: `#${taskIndex} ${formatChecklistItem(item)}`, kind: "plan-item", indent: 2 });
       }
     }
     return lines;
@@ -258,6 +292,10 @@ function printStepLines(lines, options) {
   if (!Array.isArray(lines)) return;
   for (const line of lines) {
     if (!line) continue;
+    if (typeof line === "object" && line.blank) {
+      printBlankLine();
+      continue;
+    }
     if (typeof line === "string") {
       if (!line.trim()) continue;
       printStep(line, options);
@@ -627,6 +665,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   if (!existing) {
     const loaded = loadedSeed || (await loadTaskSeed(config));
     let seed = loaded.seed;
+    const seedSource = loaded.source || "interactive";
     if (!seed) {
       seed = await promptLine(`Enter a short plan description for ${prettyPath(cwd, taskPath)}: `);
     }
@@ -643,6 +682,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
       if (proposed.aborted || shouldStop()) {
         return { taskText: "", rewritten: false, aborted: true };
+      }
+      if (!proposed.ok) {
+        await recordPlanGenerationFailure(config, {
+          output: proposed.output,
+          error: proposed.error,
+          seedSource,
+        });
       }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
@@ -714,6 +760,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       if (proposed.aborted || shouldStop()) {
         return { taskText: existing, rewritten: false, aborted: true };
       }
+      if (!proposed.ok) {
+        await recordPlanGenerationFailure(config, {
+          output: proposed.output,
+          error: proposed.error,
+          seedSource: loaded.source || "--prompt",
+        });
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || config.testCommand });
@@ -762,6 +815,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       if (proposed.aborted || shouldStop()) {
         return { taskText: existing, rewritten: false, aborted: true };
       }
+      if (!proposed.ok) {
+        await recordPlanGenerationFailure(config, {
+          output: proposed.output,
+          error: proposed.error,
+          seedSource: "plan-doc",
+        });
+      }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : null;
@@ -809,6 +869,7 @@ async function runIteration(config, { stopSignal } = {}) {
   let bytesRead = 0;
   let bytesWritten = 0;
   const guardrailStopReasons = [];
+  let guardrailCooldownMs = 0;
   let iterationStatus = "failure";
   let testStatus = "n/a";
 
@@ -819,14 +880,6 @@ async function runIteration(config, { stopSignal } = {}) {
   }
 
   const parsedTask = parseTask(taskText);
-
-  if (parsedTask.allChecked) {
-    const totalDurationMs = (state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
-    const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
-    await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
-    printStep(`Plan complete; stopping loop${totalDurationLabel}`, { kind: "plan" });
-    return { status: "complete", bytes: 0 };
-  }
 
   let guardrailsText = await readText(config.guardrailsFile);
   bytesRead += Buffer.byteLength(guardrailsText);
@@ -845,6 +898,12 @@ async function runIteration(config, { stopSignal } = {}) {
   const state = loaded.state;
   bytesRead += loaded.bytes;
 
+  if (parsedTask.allChecked) {
+    await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
+    printStep(`Plan complete; stopping loop`, { kind: "plan" });
+    return { status: "complete", bytes: 0 };
+  }
+
   const iteration = (state.iteration || 0) + 1;
   const rotationPending = Boolean(state.rotatePending);
 
@@ -859,6 +918,15 @@ async function runIteration(config, { stopSignal } = {}) {
     iterationStatus = "stopped";
     const message = `Stop requested; aborting iteration${suffix}`;
     printStep(message, { iteration, kind: "result", level: "warn" });
+    
+    // Ensure agent running state is cleared on abort
+    try {
+      const abortedState = { ...state, isAgentRunning: false };
+      await writeText(config.stateFile, JSON.stringify(abortedState, null, 2) + "\n");
+    } catch (_) {
+      // ignore
+    }
+    
     try {
       await appendActivity(config.activityLog, [message]);
     } catch (_) {
@@ -877,6 +945,10 @@ async function runIteration(config, { stopSignal } = {}) {
     bytesRead += Buffer.byteLength(hintsTextRaw);
     const hintsText = truncate(hintsTextRaw, 8000);
 
+    const currentTaskObj = getCurrentTask(taskText, { phaseId: currentPhaseId });
+    const currentTaskText = currentTaskObj ? currentTaskObj.text.trim() : null;
+    const filteredPlan = currentPhaseId ? getCurrentPhaseSection(taskText, currentPhaseId) : taskText;
+
     const prompt = formatPrompt({
       iteration,
       taskText,
@@ -889,6 +961,8 @@ async function runIteration(config, { stopSignal } = {}) {
       currentPhase: currentPhaseId,
       taskFilePath: config.taskFile,
       hintsText,
+      currentTask: currentTaskText,
+      filteredPlan,
     });
 
     await writeText(config.promptFile, prompt);
@@ -947,6 +1021,16 @@ async function runIteration(config, { stopSignal } = {}) {
       `Agent run ${redact(config.agentCommand)} (stream log: ${prettyPath(config.cwd, agentStreamLogPath)})`,
       { iteration, kind: "agent" }
     );
+    
+    // Set agent running state to true before request and show spinner
+    const agentRunningState = { ...state, isAgentRunning: true };
+    await writeText(config.stateFile, JSON.stringify(agentRunningState, null, 2) + "\n");
+    
+    const spinner = new Spinner('Agent request in progress...');
+    if (!config.stream) {
+      spinner.start();
+    }
+    
     const agentResult = await runShellCommand(config.agentCommand, prompt, DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
       agentStreamLogPath,
@@ -954,6 +1038,12 @@ async function runIteration(config, { stopSignal } = {}) {
       noColor: config.noColor,
       stopSignal,
     });
+    
+    // Set agent running state to false after request completes and hide spinner
+    spinner.stop();
+    const agentCompletedState = { ...state, isAgentRunning: false };
+    await writeText(config.stateFile, JSON.stringify(agentCompletedState, null, 2) + "\n");
+    
     if (agentResult.aborted) {
       return await abortIteration("agent run");
     }
@@ -986,6 +1076,36 @@ async function runIteration(config, { stopSignal } = {}) {
     const taskAfter = await readText(config.taskFile);
     bytesRead += Buffer.byteLength(taskAfter);
     const parsedTaskAfter = taskAfter ? parseTask(taskAfter) : parsedTask;
+
+    // Check for multi-task completion violation (only when single-task mode is enabled)
+    if (status === "success" && config.singleTaskMode) {
+      const multiTaskDetected = detectMultiTaskCompletion(taskText, taskAfter, parsedTask, parsedTaskAfter);
+      if (multiTaskDetected) {
+        status = "failure";
+        // Determine if phase boundary was crossed
+        const hasPhaseCrossing = parsedTask && parsedTaskAfter;
+        lastError = hasPhaseCrossing 
+          ? "Multiple phases crossed in single iteration (single-task mode enforced)"
+          : "Multiple tasks completed in single iteration (single-task mode enforced)";
+        errorSignature = "multi-task-violation";
+        printStep(
+          `Multi-task violation: ${lastError}`,
+          { iteration, level: "error", kind: "enforcement" }
+        );
+        await appendActivity(config.activityLog, [`Multi-task violation detected in iteration ${iteration}`]);
+        
+        // Append guardrail sign to plan
+        const guardrailsText = await readText(config.guardrailsFile);
+        const guardrailsUpdated = appendSign(
+          guardrailsText,
+          `Multi-task violation detected in iteration ${iteration}: Single-task mode enforced`
+        );
+        if (guardrailsUpdated !== guardrailsText) {
+          await writeText(config.guardrailsFile, guardrailsUpdated);
+          bytesWritten += Buffer.byteLength(guardrailsUpdated);
+        }
+      }
+    }
 
     const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTaskAfter, currentPhaseId) : config.testCommand;
     if (status === "success" && effectiveTestCommand) {
@@ -1167,7 +1287,7 @@ async function runIteration(config, { stopSignal } = {}) {
     }
 
     if (status === "failure") {
-      const repeat = detectRepeatFailure(nextState, errorSignature);
+      const repeat = detectRepeatFailure(nextState, errorSignature, config.guardrailRepeatLimit);
       nextState = repeat.state;
 
       const thrashCheck = detectThrash(nextState, modifiedFiles);
@@ -1176,8 +1296,11 @@ async function runIteration(config, { stopSignal } = {}) {
       let guardrailsUpdated = guardrailsText;
 
       if (repeat.repeated) {
-        guardrailsUpdated = appendSign(guardrailsUpdated, `Repeated failure signature: ${errorSignature}`);
-        guardrailStopReasons.push("Repeated failure signature (>= 3).");
+        guardrailsUpdated = appendSign(
+          guardrailsUpdated,
+          `Repeated failure signature (>= ${config.guardrailRepeatLimit}): ${errorSignature}`
+        );
+        guardrailCooldownMs = Math.max(guardrailCooldownMs, config.guardrailCooldownMs);
       }
 
       if (thrashCheck.thrash) {
@@ -1199,6 +1322,15 @@ async function runIteration(config, { stopSignal } = {}) {
         `Guardrail stop (${guardrailStopReason}) (see ${prettyPath(config.cwd, config.guardrailsFile)})`,
         { iteration, level: "warn", kind: "guardrail" }
       );
+    } else if (guardrailCooldownMs > 0) {
+      nextState.lastStatus = status;
+      printStep(
+        `Guardrail cooldown (repeated failure signature). Backing off ${guardrailCooldownMs}ms`,
+        { iteration, level: "warn", kind: "guardrail" }
+      );
+      await appendActivity(config.activityLog, [
+        `Guardrail cooldown triggered: repeated failure signature (>= ${config.guardrailRepeatLimit}).`,
+      ]);
     }
 
     if (bytesRead + bytesWritten >= config.rotateBytes) {
@@ -1223,10 +1355,8 @@ async function runIteration(config, { stopSignal } = {}) {
     ]);
 
     if (taskComplete) {
-      const totalDurationMs = (nextState.iterationDurations || []).reduce((sum, d) => sum + d, 0);
-      const totalDurationLabel = totalDurationMs > 0 ? ` · Total duration ${formatDurationMs(totalDurationMs)}` : "";
       await appendActivity(config.activityLog, ["Plan complete detected after iteration."]);
-      printStep(`Plan complete after iteration${totalDurationLabel}`, { iteration, kind: "plan" });
+      printStep(`Plan complete after iteration`, { iteration, kind: "plan" });
       iterationStatus = status;
       return { status: "complete", bytes: bytesRead + bytesWritten };
     }
@@ -1244,7 +1374,7 @@ async function runIteration(config, { stopSignal } = {}) {
       kind: "result",
       level: status === "failure" ? "error" : undefined,
     });
-    return { status, bytes: bytesRead + bytesWritten, guardrailStopReason };
+    return { status, bytes: bytesRead + bytesWritten, guardrailStopReason, guardrailCooldownMs };
   } finally {
     endIteration({ iteration, status: iterationStatus });
   }
@@ -1695,10 +1825,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       break;
     }
 
-    if (config.backoffMs > 0) {
-      printStep(`Sleeping ${config.backoffMs}ms before next iteration`, { kind: "sleep" });
+    const sleepMs =
+      result.guardrailCooldownMs && result.guardrailCooldownMs > 0 ? result.guardrailCooldownMs : config.backoffMs;
+    if (sleepMs > 0) {
+      printStep(`Sleeping ${sleepMs}ms before next iteration`, { kind: "sleep" });
     }
-    await new Promise((resolve) => setTimeout(resolve, config.backoffMs));
+    await new Promise((resolve) => setTimeout(resolve, sleepMs));
   }
 
   if (stop.stopRequested) {
@@ -1718,10 +1850,20 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     printStep("Loop stopped", { kind: "loop-stop", level: "warn" });
   }
 
+  // Load state before archiving (archiving moves the state file)
+  const finalState = await loadState(config.stateFile);
+  const totalDurationMs = (finalState.state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+
   const archiveResult = await archiveCompletedLoop(config);
   if (archiveResult.archived) {
     const prettyArchive = prettyPath(config.cwd, archiveResult.archiveDir);
     printStep(`Archive ${prettyArchive}`, { kind: "archive" });
+  }
+
+  // Log celebration and total duration after archival
+  printStep(`All tasks complete! 🎉`, { kind: "plan" });
+  if (totalDurationMs > 0) {
+    printStep(`Total duration 🕐 ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
   }
 }
 

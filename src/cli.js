@@ -154,6 +154,9 @@ function printHelp() {
       { label: "--max-minutes <n>", desc: "Max wall time in minutes (default: 120)" },
       { label: "--backoff-ms <n>", desc: "Backoff between iterations (default: 5000)" },
       { label: "--rotate-bytes <n>", desc: "Bytes threshold for rotation (default: 150000)" },
+      { label: "--guardrail-repeat-limit <n>", desc: "Repeated failure threshold before cooldown (default: 20)" },
+      { label: "--guardrail-cooldown-ms <n>", desc: "Extra backoff when guardrail triggers (default: 60000)" },
+      { label: "--single-task", desc: "Enforce single-task mode (default: false; enable with --single-task)" },
     ],
   };
 
@@ -177,12 +180,16 @@ function printHelp() {
     ...formatHelpRows(commands, { indent: "  ", gap: 2 }),
     "",
     "Common options:",
-    ...formatHelpRows(commonOptions, { indent: "  ", gap: 2 }),
+    ...(() => {
+      const allAdvanced = Object.values(advancedByGroup).flat();
+      const labelWidth = maxStringLength([...commonOptions, ...allAdvanced].map((r) => r.label));
+      return formatHelpRows(commonOptions, { indent: "  ", labelWidth, gap: 2 });
+    })(),
     "",
     "Advanced options:",
     ...(() => {
       const all = Object.values(advancedByGroup).flat();
-      const labelWidth = maxStringLength(all.map((r) => r.label));
+      const labelWidth = maxStringLength([...commonOptions, ...all].map((r) => r.label));
       const out = [];
       for (const [group, rows] of Object.entries(advancedByGroup)) {
         out.push("");
@@ -499,4 +506,3 @@ async function runCli(argv) {
 module.exports = {
   runCli,
 };
-

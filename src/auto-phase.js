@@ -73,7 +73,14 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "You are Loopy's planning assistant.",
     "Given a task description, propose a phase plan.",
     "",
-    "Return ONLY valid YAML (no code fences, no extra text) with this schema:",
+    "Return ONLY valid YAML wrapped between these exact markers (no extra text before/after):",
+    "BEGIN_LOOPY_PLAN",
+    "<YAML>",
+    "END_LOOPY_PLAN",
+    "Do NOT include markdown fences (```), headings, or commentary.",
+    "If you add any extra text, the plan will be rejected.",
+    "",
+    "YAML schema:",
     "phase_defaults:",
     "  stop_on: all_checked",
     "  test_command: <optional>",
@@ -84,7 +91,16 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "    test_command: <optional>",
     "phase_tasks:",
     "  <phase id>:",
-    "    - <checklist item text>",
+    "    - \"<checklist item text>\"",
+    "",
+    "Break work into JIRA-sized tasks (as if assigning to a junior engineer):",
+    "- Atomic: exactly ONE outcome per task (no compound items).",
+    "- Testable: include explicit acceptance criteria.",
+    "- Scoped: small enough for < 1 day of work.",
+    "- Clear: start with a strong verb (add/implement/update/remove/verify).",
+    "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
+    "- Quote every checklist item in YAML.",
+    "- Prefer 5-10 tasks per phase.",
     "",
     "Keep phases small (3-6). Prefer stable ids. Ensure every phase has at least 1 checklist item.",
     "",
@@ -99,16 +115,24 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
   if (result.aborted) {
     return { ok: false, aborted: true, error: "aborted", output: "" };
   }
-  const output = `${result.stdout || ""}\n${result.stderr || ""}`.trim();
+  let output = `${result.stdout || ""}\n${result.stderr || ""}`.trim();
   if (result.code !== 0) {
     return { ok: false, error: `agent-exit-${result.code}`, output };
   }
 
   let parsed = null;
   try {
+    output = normalizePlannerYaml(output);
     parsed = yaml.load(output) || {};
   } catch (err) {
-    return { ok: false, error: "invalid-yaml", output };
+    try {
+      const recovered = quotePhaseTasks(output);
+      parsed = yaml.load(recovered) || {};
+      output = recovered;
+    } catch (err2) {
+      const msg = err && err.message ? err.message : "invalid-yaml";
+      return { ok: false, error: `invalid-yaml: ${msg}`, output };
+    }
   }
 
   const normalized = normalizePhaseOutput(parsed);
@@ -121,6 +145,61 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
   }
 
   return { ok: true, ...normalized, output };
+}
+
+function stripYamlFences(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return raw;
+  const fenceMatch = raw.match(/```(?:yaml)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) return fenceMatch[1].trim();
+  return raw;
+}
+
+function normalizePlannerYaml(text) {
+  let raw = stripYamlFences(text);
+  if (!raw) return raw;
+
+  const marker = raw.match(/BEGIN_LOOPY_PLAN\s*([\s\S]*?)\s*END_LOOPY_PLAN/i);
+  if (marker) {
+    raw = marker[1].trim();
+  }
+
+  const yamlStart = raw.search(/(^|\n)phase_defaults:\s*/);
+  if (yamlStart >= 0) {
+    raw = raw.slice(yamlStart).trim();
+  }
+
+  const cutoff = raw.search(/\nTotal usage|\nAPI time spent|\nBreakdown by AI model|\nTotal session time/);
+  if (cutoff >= 0) {
+    raw = raw.slice(0, cutoff).trim();
+  }
+
+  return raw.trim();
+}
+
+function quotePhaseTasks(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  let inPhaseTasks = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (/^\s*phase_tasks:\s*$/.test(line)) {
+      inPhaseTasks = true;
+      continue;
+    }
+    if (inPhaseTasks && /^\S/.test(line)) {
+      inPhaseTasks = false;
+    }
+    if (!inPhaseTasks) continue;
+
+    const match = line.match(/^(\s*-\s+)(.+)$/);
+    if (!match) continue;
+    const prefix = match[1];
+    const value = match[2].trim();
+    if (value.startsWith('"') || value.startsWith("'")) continue;
+    const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+    lines[i] = `${prefix}"${escaped}"`;
+  }
+  return lines.join("\n");
 }
 
 function renderTaskMarkdown({
@@ -165,4 +244,3 @@ module.exports = {
   fallbackPhasesFromSeed,
   renderTaskMarkdown,
 };
-

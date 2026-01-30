@@ -11,13 +11,13 @@ function detectThrash(state, files) {
   return { thrash: newState.fileThrashCount >= 3, state: newState };
 }
 
-function detectRepeatFailure(state, errorSignature) {
+function detectRepeatFailure(state, errorSignature, limit = 3) {
   if (!errorSignature) return { repeated: false, state };
   const newState = { ...state };
   const counts = { ...(state.errorCounts || {}) };
   counts[errorSignature] = (counts[errorSignature] || 0) + 1;
   newState.errorCounts = counts;
-  return { repeated: counts[errorSignature] >= 3, state: newState };
+  return { repeated: counts[errorSignature] >= limit, state: newState };
 }
 
 module.exports = {

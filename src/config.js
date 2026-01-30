@@ -14,6 +14,8 @@ const DEFAULTS = {
   agentStreamLog: ".loopy/agent_stream.log",
   stateFile: ".loopy/state.json",
   hintsFile: ".loopy/hints.md",
+  guardrailRepeatLimit: 20,
+  guardrailCooldownMs: 60000,
   maxIterations: 50,
   maxMinutes: 120,
   backoffMs: 5000,
@@ -25,6 +27,7 @@ const DEFAULTS = {
   confirm: false,
   stream: true,
   verbose: true,
+  singleTaskMode: false,
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -271,7 +274,20 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const maxMinutesDefault = pickDefined(def, ["max_minutes", "maxMinutes"]);
   const backoffMsDefault = pickDefined(def, ["backoff_ms", "backoffMs"]);
   const rotateBytesDefault = pickDefined(def, ["rotate_bytes", "rotateBytes"]);
+  const guardrailRepeatLimitDefault = pickDefined(def, [
+    "guardrail_repeat_limit",
+    "guardrailRepeatLimit",
+    "repeat_limit",
+    "repeatLimit",
+  ]);
+  const guardrailCooldownMsDefault = pickDefined(def, [
+    "guardrail_cooldown_ms",
+    "guardrailCooldownMs",
+    "cooldown_ms",
+    "cooldownMs",
+  ]);
   const dryRunDefault = pickDefined(def, ["dry_run", "dryRun"]);
+  const singleTaskModeDefault = pickDefined(def, ["single_task_mode", "singleTaskMode", "singleTask"]);
   return {
     cwd: process.cwd(),
     resume: coerceBoolean(flags.resume ?? resumeDefault, false),
@@ -387,12 +403,36 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
       coerceNumber(flags["rotate-bytes"] || fm.rotate_bytes || rotateBytesDefault, DEFAULTS.rotateBytes),
       1024
     ),
+    guardrailRepeatLimit: clampMin(
+      coerceNumber(
+        flags["guardrail-repeat-limit"] ||
+          fm.guardrail_repeat_limit ||
+          fm.guardrailRepeatLimit ||
+          guardrailRepeatLimitDefault,
+        DEFAULTS.guardrailRepeatLimit
+      ),
+      0
+    ),
+    guardrailCooldownMs: clampMin(
+      coerceNumber(
+        flags["guardrail-cooldown-ms"] ||
+          fm.guardrail_cooldown_ms ||
+          fm.guardrailCooldownMs ||
+          guardrailCooldownMsDefault,
+        DEFAULTS.guardrailCooldownMs
+      ),
+      0
+    ),
     plain,
     noEmoji: plain ? true : noEmoji,
     noColor: plain ? true : resolveNoColor(flags, def),
     dryRun: coerceBoolean(flags["dry-run"] ?? dryRunDefault, false),
     stream: flags["no-stream"] !== undefined ? !coerceBoolean(flags["no-stream"], false) : coerceBoolean(streamDefault, DEFAULTS.stream),
     verbose: coerceBoolean(flags.verbose ?? verboseDefault, DEFAULTS.verbose),
+    singleTaskMode: coerceBoolean(
+      flags["single-task"] ?? fm.single_task_mode ?? fm.singleTaskMode ?? singleTaskModeDefault,
+      DEFAULTS.singleTaskMode
+    ),
   };
 }
 

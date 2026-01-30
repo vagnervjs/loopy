@@ -238,8 +238,186 @@ function getTaskLine(text, options = {}) {
   return "task update";
 }
 
+function getCurrentTask(text, options = {}) {
+  if (!text) return null;
+  const parsed = parseTask(text);
+  const phaseId = options && options.phaseId ? String(options.phaseId) : "";
+  const phaseChecklist =
+    phaseId && parsed.phaseSections && parsed.phaseSections[phaseId]
+      ? parsed.phaseSections[phaseId].checklist
+      : null;
+  const list = phaseChecklist || parsed.checklist;
+  const firstOpen = list.find((item) => !item.checked);
+  return firstOpen || null;
+}
+
+function getCurrentPhaseSection(text, phaseId) {
+  if (!text || !phaseId) return text;
+  const parsed = parseTask(text);
+  if (!parsed.phaseSections || !parsed.phaseSections[phaseId]) return text;
+  
+  const bodyLines = String(parsed.body || "").split(/\r?\n/);
+  const phaseSection = parsed.phaseSections[phaseId];
+  
+  // Find the phase header (it's usually just before startLine)
+  let phaseHeaderLine = -1;
+  for (let i = 0; i < phaseSection.startLine && i < bodyLines.length; i += 1) {
+    const line = bodyLines[i];
+    if (line.includes(`<!-- loopy:phase ${phaseId} -->`)) {
+      // Found the marker, the header is likely the line before or at this position
+      phaseHeaderLine = i - 1;
+      if (phaseHeaderLine < 0 || !bodyLines[phaseHeaderLine].match(/^#{2,6}\s+/)) {
+        phaseHeaderLine = i;
+      }
+      break;
+    }
+  }
+  
+  // If we didn't find the marker, look for a heading near startLine
+  if (phaseHeaderLine === -1) {
+    for (let i = Math.max(0, phaseSection.startLine - 3); i < phaseSection.startLine; i += 1) {
+      if (bodyLines[i] && bodyLines[i].match(/^#{2,6}\s+/)) {
+        phaseHeaderLine = i;
+      }
+    }
+  }
+  
+  // Include everything from the beginning through the end of this phase
+  const startIndex = phaseHeaderLine >= 0 ? phaseHeaderLine : phaseSection.startLine;
+  const filteredBodyLines = ["# Plan", "", ...bodyLines.slice(startIndex, phaseSection.endLine)];
+  const filteredBody = filteredBodyLines.join("\n");
+  
+  // Find where the body starts in the full text
+  const headerEndIndex = text.indexOf(parsed.body);
+  if (headerEndIndex === -1) return text;
+  
+  const header = text.slice(0, headerEndIndex);
+  
+  return header + filteredBody;
+}
+
+function parseCheckboxes(text) {
+  if (!text) return [];
+  const lines = String(text).split(/\r?\n/);
+  const checkboxes = [];
+  let inComment = false;
+  
+  for (let i = 0; i < lines.length; i += 1) {
+    const raw = lines[i];
+    
+    if (inComment) {
+      if (raw.includes("-->")) inComment = false;
+      continue;
+    }
+    
+    let effective = raw;
+    const commentStart = raw.indexOf("<!--");
+    if (commentStart >= 0) {
+      const commentEnd = raw.indexOf("-->", commentStart + 4);
+      if (commentEnd >= 0) {
+        effective = raw.slice(0, commentStart);
+      } else {
+        effective = raw.slice(0, commentStart);
+        inComment = true;
+      }
+    }
+    
+    const itemMatch = effective.match(/^-\s*\[( |x|X)\]\s+(.*)$/);
+    if (itemMatch) {
+      checkboxes.push({
+        line: i + 1,
+        checked: itemMatch[1].toLowerCase() === "x",
+        text: itemMatch[2],
+      });
+    }
+  }
+  
+  return checkboxes;
+}
+
+function compareCheckboxDiffs(before, after) {
+  const beforeMap = new Map();
+  const beforeBoxes = parseCheckboxes(before);
+  const afterBoxes = parseCheckboxes(after);
+  
+  for (const box of beforeBoxes) {
+    beforeMap.set(box.text, box.checked);
+  }
+  
+  const newlyChecked = [];
+  for (const box of afterBoxes) {
+    const wasPreviouslyUnchecked = beforeMap.has(box.text) && beforeMap.get(box.text) === false;
+    if (box.checked && wasPreviouslyUnchecked) {
+      newlyChecked.push(box);
+    }
+  }
+  
+  return newlyChecked;
+}
+
+/**
+ * Detects if multiple tasks were completed in a single iteration.
+ * 
+ * @param {string} beforePlan - Plan text before changes
+ * @param {string} afterPlan - Plan text after changes
+ * @param {Object} parsedTaskBefore - Parsed task structure before changes (optional)
+ * @param {Object} parsedTaskAfter - Parsed task structure after changes (optional)
+ * @returns {boolean} true if multiple tasks were completed
+ */
+function detectMultiTaskCompletion(beforePlan, afterPlan, parsedTaskBefore = null, parsedTaskAfter = null) {
+  const newlyChecked = compareCheckboxDiffs(beforePlan, afterPlan);
+  
+  // If less than 2 tasks checked, no multi-task completion
+  if (newlyChecked.length < 2) {
+    return false;
+  }
+  
+  // Extract phase information from the plan text
+  const phaseMap = new Map(); // line -> phase
+  const lines = afterPlan.split(/\r?\n/);
+  let currentPhase = null;
+  let hasPhaseMarkers = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const phaseMatch = line.match(/<!--\s*loopy:phase\s+(\S+)\s*-->/);
+    if (phaseMatch) {
+      currentPhase = phaseMatch[1];
+      hasPhaseMarkers = true;
+    }
+    phaseMap.set(i + 1, currentPhase);
+  }
+  
+  // If no phase markers found, use original behavior (multi-task = violation)
+  if (!hasPhaseMarkers) {
+    return true;
+  }
+  
+  // Get phases of newly checked tasks
+  const phasesOfCheckedTasks = new Set();
+  for (const box of newlyChecked) {
+    const phase = phaseMap.get(box.line);
+    if (phase) {
+      phasesOfCheckedTasks.add(phase);
+    }
+  }
+  
+  // Trigger violation if checked tasks span multiple phases
+  if (phasesOfCheckedTasks.size > 1) {
+    return true;
+  }
+  
+  // Allow multiple tasks in the same phase
+  return false;
+}
+
 module.exports = {
   parseTask,
   getTaskLine,
+  getCurrentTask,
+  getCurrentPhaseSection,
   toSlug,
+  parseCheckboxes,
+  compareCheckboxDiffs,
+  detectMultiTaskCompletion,
 };
