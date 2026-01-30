@@ -86,6 +86,14 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "  <phase id>:",
     "    - <checklist item text>",
     "",
+    "Break work into JIRA-sized tasks (as if assigning to a junior engineer):",
+    "- Atomic: exactly ONE outcome per task (no compound items).",
+    "- Testable: include explicit acceptance criteria.",
+    "- Scoped: small enough for < 1 day of work.",
+    "- Clear: start with a strong verb (add/implement/update/remove/verify).",
+    "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
+    "- Prefer 5-10 tasks per phase.",
+    "",
     "Keep phases small (3-6). Prefer stable ids. Ensure every phase has at least 1 checklist item.",
     "",
     `Task:\n${String(seedText || "").trim()}`,
@@ -165,4 +173,3 @@ module.exports = {
   fallbackPhasesFromSeed,
   renderTaskMarkdown,
 };
-
