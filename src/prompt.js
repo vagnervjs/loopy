@@ -48,6 +48,17 @@ function appendSign(guardrailsText, message) {
   return updated.trimEnd() + "\n" + line + "\n";
 }
 
+function applyPromptTemplate(template, tokens) {
+  const text = String(template || "");
+  if (!text.trim()) return "";
+  const replacements = tokens && typeof tokens === "object" ? tokens : {};
+  return text.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+    if (!Object.prototype.hasOwnProperty.call(replacements, key)) return "";
+    const value = replacements[key];
+    return value == null ? "" : String(value);
+  });
+}
+
 function formatPrompt({
   iteration,
   taskText,
@@ -62,6 +73,7 @@ function formatPrompt({
   hintsText,
   currentTask,
   filteredPlan,
+  promptTemplate,
 }) {
   const planLabel = taskFilePath ? path.basename(String(taskFilePath)) : "plan doc";
 
@@ -81,6 +93,52 @@ function formatPrompt({
   }
 
   const displayPlan = filteredPlan || taskText;
+
+  const seedTextValue = taskSeedText ? String(taskSeedText).trimEnd() : "";
+  const seedBlock = seedLabel && seedTextValue ? [seedLabel, seedTextValue].join("\n") : "";
+  const hintsBlock = normalizedHints ? ["## Hints", normalizedHints].join("\n") : "";
+  const currentTaskBlock = currentTask
+    ? ["## Current Task", "", `- [ ] ${currentTask}`, ""].join("\n")
+    : "";
+  const lastOutputBlock = !rotationPending && lastOutput
+    ? ["## Last Agent Output (truncated)", String(lastOutput || "").trimEnd()].join("\n")
+    : "";
+  const instructionsLines = ["## Instructions"];
+  if (currentTask) instructionsLines.push("- **Complete only the Current Task in this iteration.**");
+  instructionsLines.push(
+    `- Follow the plan checklist in ${planLabel}.`,
+    "- Update plan checkboxes as you complete items.",
+    "- Record any new guardrails if you detect repetition or drift.",
+    "- Keep changes focused and maintain repo state."
+  );
+  const instructionsBlock = instructionsLines.join("\n");
+
+  const templateText = String(promptTemplate || "");
+  if (templateText.trim()) {
+    const tokens = {
+      timestamp: new Date().toISOString(),
+      iteration: String(iteration || 0),
+      rotation: rotationPending ? "fresh" : "standard",
+      rotation_pending: rotationPending ? "true" : "false",
+      phase: currentPhase || "",
+      plan_label: planLabel,
+      plan: String(displayPlan || "").trimEnd(),
+      seed_label: seedLabel,
+      seed: seedTextValue,
+      seed_block: seedBlock,
+      hints: normalizedHints,
+      hints_block: hintsBlock,
+      current_task: currentTask || "",
+      current_task_block: currentTaskBlock,
+      guardrails: String(guardrailsText || "").trimEnd(),
+      progress: String(progressText || "").trimEnd(),
+      last_output: String(lastOutput || "").trimEnd(),
+      last_output_block: lastOutputBlock,
+      instructions: instructionsBlock,
+    };
+    const rendered = applyPromptTemplate(templateText, tokens);
+    if (rendered.trim()) return rendered;
+  }
 
   const lines = [
     "# Loopy Loop Prompt",

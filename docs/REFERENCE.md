@@ -17,9 +17,17 @@ No configuration files needed — just run:
 loopy
 ```
 
+In build mode (default), Loopy follows tasks from `LOOPY_PLAN.md` and updates progress/checkboxes as work completes.
+
 **Start a new loop (non-interactive — for automation):**
 ```bash
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
+```
+
+Plan-only mode generates or updates `LOOPY_PLAN.md` and exits without running build iterations:
+
+```bash
+loopy --mode plan --prompt "Add OAuth login to the app"
 ```
 
 Resume a previous run (requires `.loopy/state.json`):

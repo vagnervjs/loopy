@@ -28,6 +28,8 @@ const DEFAULTS = {
   stream: true,
   verbose: true,
   singleTaskMode: false,
+  mode: "build",
+  promptTemplate: "",
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -255,6 +257,8 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const preIterationDefault = pickDefined(def, ["preIteration", "pre_iteration"]);
   const postIterationDefault = pickDefined(def, ["postIteration", "post_iteration"]);
   const onFailureDefault = pickDefined(def, ["onFailure", "on_failure"]);
+  const modeDefault = pickDefined(def, ["mode"]);
+  const promptTemplateDefault = pickDefined(def, ["prompt_template", "promptTemplate"]);
   const gitBranchDefault =
     pickDefined(def, ["git_branch", "gitBranch"]) ||
     pickDefined(defaultGit, ["branch", "git_branch", "gitBranch"]);
@@ -432,6 +436,10 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     singleTaskMode: coerceBoolean(
       flags["single-task"] ?? fm.single_task_mode ?? fm.singleTaskMode ?? singleTaskModeDefault,
       DEFAULTS.singleTaskMode
+    ),
+    mode: String(flags.mode ?? fm.mode ?? modeDefault ?? DEFAULTS.mode).trim() || DEFAULTS.mode,
+    promptTemplate: normalizeCommand(
+      flags["prompt-template"] ?? fm.prompt_template ?? fm.promptTemplate ?? promptTemplateDefault ?? ""
     ),
   };
 }

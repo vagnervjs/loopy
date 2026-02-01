@@ -40,6 +40,73 @@ const {
 const ARCHIVE_DIRNAME = "archive";
 const PLAN_OUTPUT_FILE = "last_plan_output.txt";
 
+const DEFAULT_PLAN_PROMPT_TEMPLATE = [
+  "# Loopy Plan Prompt",
+  "",
+  "Timestamp: {{timestamp}}",
+  "",
+  "You are in PLANNING mode.",
+  "Goal: update the plan only. Do NOT implement anything. No code edits. No commits.",
+  "",
+  "## Context",
+  "{{seed_block}}",
+  "",
+  "## Requirements",
+  "Study these sources before planning:",
+  "- `specs/*` (requirements)",
+  "- `src/*` (current implementation)",
+  "",
+  "## Plan",
+  "Compare specs against code. Produce a prioritized plan that closes gaps.",
+  "If the existing plan is wrong or stale, replace it.",
+  "Keep tasks atomic, testable, and outcome-focused.",
+  "Do not assume anything is missing; search first.",
+  "",
+  "## Current Plan",
+  "{{plan}}",
+  "",
+  "## Guardrails",
+  "{{guardrails}}",
+  "",
+  "## Output Rules",
+  "- Plan only.",
+  "- No implementation steps.",
+  "- No commits.",
+  "- Keep tasks small and unambiguous.",
+  "",
+].join("\n");
+
+const DEFAULT_BUILD_PROMPT_TEMPLATE = [
+  "# Loopy Build Prompt",
+  "",
+  "Timestamp: {{timestamp}}",
+  "Iteration: {{iteration}}",
+  "",
+  "You are in BUILDING mode.",
+  "Goal: complete exactly one task from the current plan.",
+  "",
+  "## Context",
+  "{{seed_block}}",
+  "",
+  "{{current_task_block}}",
+  "",
+  "## Plan",
+  "{{plan}}",
+  "",
+  "## Guardrails",
+  "{{guardrails}}",
+  "",
+  "## Task Rules",
+  "- Do not assume functionality is missing; search first.",
+  "- Complete only the current task.",
+  "- Implement fully; no stubs or placeholders.",
+  "- Run required tests for the task and fix failures.",
+  "- Update the plan checkbox for the completed task.",
+  "",
+  "{{instructions}}",
+  "",
+].join("\n");
+
 function parseSkipPhaseList(value) {
   const raw = String(value || "").trim();
   if (!raw) return [];
@@ -48,6 +115,52 @@ function parseSkipPhaseList(value) {
     .map((s) => toSlug(s) || s.trim())
     .map((s) => String(s || "").trim())
     .filter(Boolean);
+}
+
+async function readPromptTemplate(filePath, { required, cwd } = {}) {
+  const target = String(filePath || "").trim();
+  if (!target) return { text: "", path: "" };
+  try {
+    const data = await nodeFs.promises.readFile(target, "utf8");
+    return { text: data, path: target };
+  } catch (err) {
+    if (err && err.code === "ENOENT") {
+      if (required) {
+        throw new Error(`Prompt template not found: ${prettyPath(cwd || process.cwd(), target)}`);
+      }
+      return { text: "", path: "" };
+    }
+    throw err;
+  }
+}
+
+async function loadPromptTemplate(config) {
+  const mode = String(config.mode || "build").trim().toLowerCase();
+  const explicit = String(config.promptTemplate || "").trim();
+  if (explicit) {
+    const abs = resolveFrom(config.cwd, explicit);
+    const loaded = await readPromptTemplate(abs, { required: true, cwd: config.cwd });
+    if (!String(loaded.text || "").trim()) {
+      throw new Error(`Prompt template is empty: ${prettyPath(config.cwd, abs)}`);
+    }
+    return { text: loaded.text, path: abs, source: "--prompt-template" };
+  }
+
+  const filename = mode === "plan" ? "PROMPT_plan.md" : "PROMPT_build.md";
+  const candidates = [
+    resolveFrom(config.cwd, filename),
+    path.join(config.loopyDir || resolveFrom(config.cwd, ".loopy"), filename),
+  ];
+  for (const candidate of candidates) {
+    const loaded = await readPromptTemplate(candidate, { required: false, cwd: config.cwd });
+    if (String(loaded.text || "").trim()) {
+      return { text: loaded.text, path: candidate, source: "default" };
+    }
+  }
+  if (mode === "plan") {
+    return { text: DEFAULT_PLAN_PROMPT_TEMPLATE, path: "", source: "built-in" };
+  }
+  return { text: DEFAULT_BUILD_PROMPT_TEMPLATE, path: "", source: "built-in" };
 }
 
 async function recordPlanGenerationFailure(config, { output, error, seedSource }) {
@@ -865,6 +978,50 @@ async function confirmPlanReview(config, { prdGenerated } = {}) {
   return true;
 }
 
+async function writePromptPreview(config) {
+  const taskText = await readText(config.taskFile);
+  if (!taskText) {
+    throw new Error(`Missing ${prettyPath(config.cwd, config.taskFile)}.`);
+  }
+  const parsedTask = parseTask(taskText);
+
+  let guardrailsText = await readText(config.guardrailsFile);
+  const ensuredGuardrails = ensureGuardrails(guardrailsText);
+  if (ensuredGuardrails !== guardrailsText) {
+    await writeText(config.guardrailsFile, ensuredGuardrails);
+    guardrailsText = ensuredGuardrails;
+  }
+
+  const progressText = await readText(config.progressFile);
+  const hintsTextRaw = await readText(config.hintsFile);
+  const hintsText = truncate(hintsTextRaw, 8000);
+
+  const currentPhaseId = pickCurrentPhaseId(parsedTask, {}, config, { phaseExplicit: false });
+  const currentTaskObj = getCurrentTask(taskText, { phaseId: currentPhaseId });
+  const currentTaskText = currentTaskObj ? currentTaskObj.text.trim() : null;
+  const filteredPlan = currentPhaseId ? getCurrentPhaseSection(taskText, currentPhaseId) : taskText;
+
+  const prompt = formatPrompt({
+    iteration: 0,
+    taskText,
+    taskSeedText: config.taskSeedText || "",
+    taskSeedSource: config.taskSeedSource || "",
+    guardrailsText,
+    progressText: progressText || "(no progress recorded yet)",
+    lastOutput: "",
+    rotationPending: false,
+    currentPhase: currentPhaseId,
+    taskFilePath: config.taskFile,
+    hintsText,
+    currentTask: currentTaskText,
+    filteredPlan,
+    promptTemplate: config.promptTemplateText || "",
+  });
+
+  await writeText(config.promptFile, prompt);
+  printStep(`Prompt saved to ${prettyPath(config.cwd, config.promptFile)}`, { kind: "prompt" });
+}
+
 async function runIteration(config, { stopSignal } = {}) {
   let bytesRead = 0;
   let bytesWritten = 0;
@@ -963,6 +1120,7 @@ async function runIteration(config, { stopSignal } = {}) {
       hintsText,
       currentTask: currentTaskText,
       filteredPlan,
+      promptTemplate: config.promptTemplateText || "",
     });
 
     await writeText(config.promptFile, prompt);
@@ -1411,6 +1569,15 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   let config = mergeConfig(flags, parsedTask.frontMatter, globalDefaults);
   configureSteps({ noColor: config.noColor, noEmoji: config.noEmoji, plain: config.plain });
 
+  const normalizedMode = String(config.mode || DEFAULTS.mode).trim().toLowerCase();
+  if (!normalizedMode) {
+    throw new Error("Missing mode (expected 'build' or 'plan').");
+  }
+  if (!["build", "plan"].includes(normalizedMode)) {
+    throw new Error(`Unsupported --mode "${config.mode}" (expected 'build' or 'plan').`);
+  }
+  config.mode = normalizedMode;
+
   // `--resume` is a "resume only" mode: don't accept seed prompt updates here.
   if (config.resume && (promptSeedProvided || planSeedProvided)) {
     throw new Error(
@@ -1445,6 +1612,14 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   // Validate prompt output flag.
   if (flags["prompt-out"] === true) {
     throw new Error("Missing value for --prompt-out (expected a file path).");
+  }
+
+  if (flags.mode === true) {
+    throw new Error("Missing value for --mode (expected 'build' or 'plan').");
+  }
+
+  if (flags["prompt-template"] === true) {
+    throw new Error("Missing value for --prompt-template (expected a file path).");
   }
 
   if (flags["plan-file"] === true || flags["plan-doc"] === true) {
@@ -1516,7 +1691,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
 
   // Default git branch when missing (only when running inside a git repo).
-  if (!config.resume) {
+  if (!config.resume && config.mode !== "plan") {
     const hasGitBranch = Boolean(String(config.gitBranch || "").trim());
     const hasWorktreeBranch = Boolean(String(config.gitWorktreeBranch || "").trim());
     if (!hasGitBranch && !hasWorktreeBranch) {
@@ -1547,7 +1722,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
   // Optional git workspace setup (worktree / branch). This is done once, before the loop.
   let effectiveCwd = baseCwd;
-  if (config.gitWorktree) {
+  if (config.gitWorktree && config.mode !== "plan") {
     const worktreeAbs = resolveFrom(baseCwd, config.gitWorktree);
     if (config.resume) {
       // Resume mode: use existing worktree path only (don't create/switch).
@@ -1587,7 +1762,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   if (config.gitWorktree && config.gitWorktreeBranch && !gitBranchExplicit) {
     config.gitBranch = "";
   }
-  if (config.gitBranch) {
+  if (config.gitBranch && config.mode !== "plan") {
     if (config.resume) {
       printStep(`Branch ${config.gitBranch} (--resume)`, { kind: "branch" });
     } else {
@@ -1597,13 +1772,16 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       printStep(`Branch ${config.gitBranch}`, { kind: "branch" });
     }
   }
-  if (!config.gitBranch && config.gitWorktreeBranch) {
+  if (!config.gitBranch && config.gitWorktreeBranch && config.mode !== "plan") {
     printStep(`Branch ${config.gitWorktreeBranch}`, { kind: "branch" });
   }
 
   config = materializeConfigPaths(config, effectiveCwd);
   config.phaseExplicit = phaseExplicit;
   if (onActivityLog) onActivityLog(config.activityLog);
+  const promptTemplate = await loadPromptTemplate(config);
+  config.promptTemplateText = promptTemplate.text;
+  config.promptTemplatePath = promptTemplate.path;
   let prdGenerated = false;
   const planReviewRequired = !config.resume && (planSeedProvided || promptSeedProvided);
   const stopBeforeLoop = async (message) => {
@@ -1775,6 +1953,13 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
   if (planReviewRequired) {
     await confirmPlanReview(config, { prdGenerated });
+  }
+
+  if (config.mode === "plan") {
+    await writePromptPreview(config);
+    await appendActivity(config.activityLog, ["Plan-only mode: skipping build iterations."]);
+    printStep("Plan-only mode: skipping build iterations", { kind: "plan" });
+    return;
   }
 
   const start = Date.now();

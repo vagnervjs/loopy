@@ -96,6 +96,8 @@ function printHelp() {
     { label: "--plan <text>", desc: "Plan prompt (inline) to generate a PRD + plan before looping" },
     { label: "--plan @<file>", desc: "Plan prompt from a file to generate a PRD + plan before looping" },
     { label: "--plan -", desc: "Plan prompt from stdin to generate a PRD + plan before looping" },
+    { label: "--mode <build|plan>", desc: "Run in build mode (default) or plan-only mode" },
+    { label: "--prompt-template <file>", desc: "Override prompt template file (build or plan)" },
     {
       label: "--resume",
       desc: "Resume from saved state (requires existing `.loopy/state.json`); skips git switching",

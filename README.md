@@ -96,6 +96,8 @@ npm link
 loopy
 ```
 
+Defaults to build mode: Loopy follows tasks in `LOOPY_PLAN.md` and updates checkboxes as work completes.
+
 Loopy will interactively guide you through:
 1. 🤖 **Agent command** — Select or enter your agent CLI (e.g., `cursor-agent`, `copilot --allow-all`)
 2. 📝 **Task description** — Describe what you want to build or fix
@@ -164,7 +166,21 @@ Displays: iteration count, current phase, last status, test results, errors, out
 loopy --plan examples/feature-prd.md
 ```
 
-Start with a pre-written plan document instead of a simple prompt.
+Use the PRD-first flow to generate/update `LOOPY_PLAN.md` from a PRD seed.
+
+If you already have a clear plan seed, use `--prompt` instead of `--plan`.
+
+### Plan-Only Mode
+
+```bash
+loopy --mode plan --prompt "Add OAuth login to the app"
+```
+
+Generates/updates `LOOPY_PLAN.md` and exits without running build iterations.
+
+### Prompt Templates
+
+Add `PROMPT_build.md` and `PROMPT_plan.md` to customize prompts per mode. Use `--prompt-template <file>` to override the template path.
 
 > 📚 More workflows and real-world examples in [`docs/REFERENCE.md`](./docs/REFERENCE.md)
 
