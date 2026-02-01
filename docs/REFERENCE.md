@@ -19,6 +19,8 @@ loopy
 
 In build mode (default), Loopy follows tasks from `LOOPY_PLAN.md` and updates progress/checkboxes as work completes.
 
+Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps `.loopy/AGENTS.md` unless `--no-bootstrap-agents` is set.
+
 **Start a new loop (non-interactive — for automation):**
 ```bash
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"

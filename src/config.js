@@ -30,6 +30,7 @@ const DEFAULTS = {
   singleTaskMode: false,
   mode: "build",
   promptTemplate: "",
+  bootstrapAgents: true,
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -259,6 +260,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const onFailureDefault = pickDefined(def, ["onFailure", "on_failure"]);
   const modeDefault = pickDefined(def, ["mode"]);
   const promptTemplateDefault = pickDefined(def, ["prompt_template", "promptTemplate"]);
+  const bootstrapAgentsDefault = pickDefined(def, ["bootstrap_agents", "bootstrapAgents"]);
   const gitBranchDefault =
     pickDefined(def, ["git_branch", "gitBranch"]) ||
     pickDefined(defaultGit, ["branch", "git_branch", "gitBranch"]);
@@ -440,6 +442,10 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     mode: String(flags.mode ?? fm.mode ?? modeDefault ?? DEFAULTS.mode).trim() || DEFAULTS.mode,
     promptTemplate: normalizeCommand(
       flags["prompt-template"] ?? fm.prompt_template ?? fm.promptTemplate ?? promptTemplateDefault ?? ""
+    ),
+    bootstrapAgents: coerceBoolean(
+      flags["no-bootstrap-agents"] !== undefined ? !coerceBoolean(flags["no-bootstrap-agents"], false) : bootstrapAgentsDefault,
+      DEFAULTS.bootstrapAgents
     ),
   };
 }

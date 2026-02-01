@@ -27,6 +27,7 @@ const { getTaskLine, parseTask, toSlug, getCurrentTask, getCurrentPhaseSection, 
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
+const { generateAgentsWithAgent, buildAgentsStub, resolveAgentsPath } = require("./agents");
 const { generatePrdWithAgent } = require("./prd");
 const {
   ensureGitRepo,
@@ -50,6 +51,12 @@ const DEFAULT_PLAN_PROMPT_TEMPLATE = [
   "",
   "## Context",
   "{{seed_block}}",
+  "",
+  "{{hints_block}}",
+  "",
+  "{{specs_block}}",
+  "",
+  "{{agents_block}}",
   "",
   "## Requirements",
   "Study these sources before planning:",
@@ -87,6 +94,12 @@ const DEFAULT_BUILD_PROMPT_TEMPLATE = [
   "",
   "## Context",
   "{{seed_block}}",
+  "",
+  "{{hints_block}}",
+  "",
+  "{{specs_block}}",
+  "",
+  "{{agents_block}}",
   "",
   "{{current_task_block}}",
   "",
@@ -161,6 +174,101 @@ async function loadPromptTemplate(config) {
     return { text: DEFAULT_PLAN_PROMPT_TEMPLATE, path: "", source: "built-in" };
   }
   return { text: DEFAULT_BUILD_PROMPT_TEMPLATE, path: "", source: "built-in" };
+}
+
+async function buildSpecsSummary(cwd, { limit = 20 } = {}) {
+  const specsDir = path.join(cwd, "specs");
+  let entries = [];
+  try {
+    entries = await nodeFs.promises.readdir(specsDir, { withFileTypes: true });
+  } catch (err) {
+    if (err && err.code === "ENOENT") return "";
+    throw err;
+  }
+  const files = entries
+    .filter((entry) => entry && entry.isFile())
+    .map((entry) => entry.name)
+    .filter((name) => name.toLowerCase().endsWith(".md"))
+    .sort();
+
+  if (!files.length) return "";
+  const items = [];
+  for (const filename of files.slice(0, limit)) {
+    const filePath = path.join(specsDir, filename);
+    let text = "";
+    try {
+      text = await readText(filePath);
+    } catch (err) {
+      text = "";
+    }
+    const titleMatch = String(text || "").match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : "";
+    const label = title ? `${filename} — ${title}` : filename;
+    items.push(`- ${label}`);
+  }
+  const body = items.join("\n");
+  const suffix = files.length > limit ? `\n- …and ${files.length - limit} more` : "";
+  return body + suffix;
+}
+
+async function ensureAgentsDoc(config, { stopSignal } = {}) {
+  const cwd = config.cwd;
+  const rootPath = resolveAgentsPath(cwd);
+  const loopyPath = resolveAgentsPath(config.loopyDir || path.join(cwd, ".loopy"));
+
+  const rootText = await readText(rootPath);
+  if (String(rootText || "").trim()) {
+    return { text: rootText, path: rootPath, source: "root" };
+  }
+
+  const loopyText = await readText(loopyPath);
+  if (String(loopyText || "").trim()) {
+    return { text: loopyText, path: loopyPath, source: "loopy" };
+  }
+
+  if (!config.bootstrapAgents) {
+    return { text: "", path: "", source: "" };
+  }
+
+  if (!process.stdin.isTTY) {
+    const stub = buildAgentsStub();
+    const payload = `${stub.trimEnd()}\n`;
+    await writeText(loopyPath, payload);
+    await appendActivity(config.activityLog, [
+      `AGENTS stub generated (non-interactive): ${prettyPath(config.cwd, loopyPath)}`,
+    ]);
+    printStep(`AGENTS saved to ${prettyPath(config.cwd, loopyPath)}`, { kind: "plan" });
+    return { text: stub, path: loopyPath, source: "stub" };
+  }
+
+  const agentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
+  printStep(`Generating AGENTS.md${agentLabel}`, { kind: "plan" });
+  let agentsText = "";
+  try {
+    const result = await generateAgentsWithAgent(config.agentCommand, {
+      cwd,
+      noColor: config.noColor,
+      stopSignal,
+    });
+    if (result.aborted || (stopSignal && stopSignal.stopRequested)) {
+      return { text: "", path: "", source: "aborted" };
+    }
+    agentsText = result.text || "";
+  } catch (err) {
+    const message = err && err.message ? err.message : String(err);
+    await appendActivity(config.activityLog, [`AGENTS bootstrap failed: ${message}`]);
+    agentsText = buildAgentsStub();
+  }
+  if (!String(agentsText || "").trim()) {
+    agentsText = buildAgentsStub();
+  }
+  const payload = `${agentsText.trimEnd()}\n`;
+  await writeText(loopyPath, payload);
+  await appendActivity(config.activityLog, [
+    `AGENTS generated: ${prettyPath(config.cwd, loopyPath)}`,
+  ]);
+  printStep(`AGENTS saved to ${prettyPath(config.cwd, loopyPath)}`, { kind: "plan" });
+  return { text: agentsText, path: loopyPath, source: "bootstrapped" };
 }
 
 async function recordPlanGenerationFailure(config, { output, error, seedSource }) {
@@ -996,6 +1104,9 @@ async function writePromptPreview(config) {
   const hintsTextRaw = await readText(config.hintsFile);
   const hintsText = truncate(hintsTextRaw, 8000);
 
+  const specsSummary = await buildSpecsSummary(config.cwd);
+  const agentsDoc = await ensureAgentsDoc(config, { stopSignal: null });
+
   const currentPhaseId = pickCurrentPhaseId(parsedTask, {}, config, { phaseExplicit: false });
   const currentTaskObj = getCurrentTask(taskText, { phaseId: currentPhaseId });
   const currentTaskText = currentTaskObj ? currentTaskObj.text.trim() : null;
@@ -1013,6 +1124,8 @@ async function writePromptPreview(config) {
     currentPhase: currentPhaseId,
     taskFilePath: config.taskFile,
     hintsText,
+    agentsText: agentsDoc.text || "",
+    specsText: specsSummary || "",
     currentTask: currentTaskText,
     filteredPlan,
     promptTemplate: config.promptTemplateText || "",
@@ -1102,6 +1215,9 @@ async function runIteration(config, { stopSignal } = {}) {
     bytesRead += Buffer.byteLength(hintsTextRaw);
     const hintsText = truncate(hintsTextRaw, 8000);
 
+    const specsSummary = await buildSpecsSummary(config.cwd);
+    const agentsDoc = await ensureAgentsDoc(config, { stopSignal });
+
     const currentTaskObj = getCurrentTask(taskText, { phaseId: currentPhaseId });
     const currentTaskText = currentTaskObj ? currentTaskObj.text.trim() : null;
     const filteredPlan = currentPhaseId ? getCurrentPhaseSection(taskText, currentPhaseId) : taskText;
@@ -1118,6 +1234,8 @@ async function runIteration(config, { stopSignal } = {}) {
       currentPhase: currentPhaseId,
       taskFilePath: config.taskFile,
       hintsText,
+      agentsText: agentsDoc.text || "",
+      specsText: specsSummary || "",
       currentTask: currentTaskText,
       filteredPlan,
       promptTemplate: config.promptTemplateText || "",

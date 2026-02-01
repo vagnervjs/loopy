@@ -24,7 +24,7 @@ test("no subcommand runs the default loop", async () => {
   assert.equal(code, 0, stderr);
   assert.match(stdout, /Loop start/);
   const prompt = await fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8");
-  assert.match(prompt, /Loopy Loop Prompt/);
+  assert.match(prompt, /Loopy Build Prompt/);
 });
 
 test("repeated failure signature triggers guardrail sign and cooldown", async () => {

@@ -98,6 +98,8 @@ loopy
 
 Defaults to build mode: Loopy follows tasks in `LOOPY_PLAN.md` and updates checkboxes as work completes.
 
+Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps `.loopy/AGENTS.md` unless `--no-bootstrap-agents` is set.
+
 Loopy will interactively guide you through:
 1. 🤖 **Agent command** — Select or enter your agent CLI (e.g., `cursor-agent`, `copilot --allow-all`)
 2. 📝 **Task description** — Describe what you want to build or fix

@@ -8,6 +8,7 @@ This document summarizes the Phase 1 updates for Ralph-compatible planning/promp
 - Added prompt template discovery using `PROMPT_build.md` and `PROMPT_plan.md`.
 - Added `--prompt-template <file>` to override the template file path.
 - Plan-only mode now prepares the plan and writes a prompt preview without running build iterations.
+- Loopy now includes `AGENTS.md` and a `specs/` summary in prompts (auto-generates `.loopy/AGENTS.md` when missing).
 
 ## New workflow options
 
@@ -44,6 +45,8 @@ Loopy will look for a prompt template in this order:
 3) `PROMPT_build.md` or `PROMPT_plan.md` inside `.loopy/`
 
 If no template is found, Loopy falls back to the built-in prompt format.
+
+Loopy also injects `AGENTS.md` content and a `specs/` summary into every prompt (when available). If no repo-level `AGENTS.md` exists, it will bootstrap `.loopy/AGENTS.md` unless you pass `--no-bootstrap-agents`.
 
 ### Template placeholders
 

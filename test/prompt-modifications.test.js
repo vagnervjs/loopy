@@ -225,3 +225,28 @@ test("formatPrompt - does not include Current Task section when currentTask is n
   assert.doesNotMatch(prompt, /## Current Task/);
   assert.doesNotMatch(prompt, /\*\*Complete only the Current Task in this iteration\.\*\*/);
 });
+
+test("formatPrompt - includes AGENTS and specs summary when provided", () => {
+  const prompt = formatPrompt({
+    iteration: 1,
+    taskText: "# Plan\n- [ ] task",
+    taskSeedText: "",
+    taskSeedSource: "",
+    guardrailsText: "# Guardrails\n",
+    progressText: "# Progress\n",
+    lastOutput: "",
+    rotationPending: false,
+    currentPhase: "",
+    taskFilePath: "LOOPY_PLAN.md",
+    hintsText: "",
+    currentTask: null,
+    filteredPlan: null,
+    agentsText: "## Build & Run\n- npm run dev",
+    specsText: "- auth.md — Auth",
+  });
+
+  assert.match(prompt, /## Specs Summary/);
+  assert.match(prompt, /auth\.md — Auth/);
+  assert.match(prompt, /## AGENTS/);
+  assert.match(prompt, /npm run dev/);
+});

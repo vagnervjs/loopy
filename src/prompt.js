@@ -74,6 +74,8 @@ function formatPrompt({
   currentTask,
   filteredPlan,
   promptTemplate,
+  agentsText,
+  specsText,
 }) {
   const planLabel = taskFilePath ? path.basename(String(taskFilePath)) : "plan doc";
 
@@ -102,6 +104,10 @@ function formatPrompt({
     : "";
   const lastOutputBlock = !rotationPending && lastOutput
     ? ["## Last Agent Output (truncated)", String(lastOutput || "").trimEnd()].join("\n")
+    : "";
+  const agentsBlock = String(agentsText || "").trim() ? ["## AGENTS", String(agentsText || "").trimEnd()].join("\n") : "";
+  const specsBlock = String(specsText || "").trim()
+    ? ["## Specs Summary", String(specsText || "").trimEnd()].join("\n")
     : "";
   const instructionsLines = ["## Instructions"];
   if (currentTask) instructionsLines.push("- **Complete only the Current Task in this iteration.**");
@@ -134,6 +140,10 @@ function formatPrompt({
       progress: String(progressText || "").trimEnd(),
       last_output: String(lastOutput || "").trimEnd(),
       last_output_block: lastOutputBlock,
+      agents: String(agentsText || "").trimEnd(),
+      agents_block: agentsBlock,
+      specs: String(specsText || "").trimEnd(),
+      specs_block: specsBlock,
       instructions: instructionsBlock,
     };
     const rendered = applyPromptTemplate(templateText, tokens);
@@ -154,6 +164,12 @@ function formatPrompt({
     normalizedHints ? "## Hints" : "",
     normalizedHints ? normalizedHints : "",
     normalizedHints ? "" : "",
+    String(specsText || "").trim() ? "## Specs Summary" : "",
+    String(specsText || "").trim() ? String(specsText).trimEnd() : "",
+    String(specsText || "").trim() ? "" : "",
+    String(agentsText || "").trim() ? "## AGENTS" : "",
+    String(agentsText || "").trim() ? String(agentsText).trimEnd() : "",
+    String(agentsText || "").trim() ? "" : "",
   ];
 
   if (currentTask) {

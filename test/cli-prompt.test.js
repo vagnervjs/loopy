@@ -280,7 +280,7 @@ test("`--prompt @file` accepts markdown and includes it in `.loopy/PROMPT.md`", 
   assert.match(prompt, /# PRD: Build a thing/);
   assert.match(prompt, /## Requirements/);
   assert.match(prompt, /- Must support X/);
-  assert.match(prompt, /## Plan \(LOOPY_PLAN\.md\)/);
+  assert.match(prompt, /## Plan/);
 });
 
 test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `.loopy/PROMPT.md`", async () => {
