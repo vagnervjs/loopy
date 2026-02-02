@@ -272,29 +272,61 @@ async function runStatus(flags) {
   const startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
   const elapsedMs = Number.isFinite(startedAtMs) ? Date.now() - startedAtMs : 0;
 
-  const lines = [
-    `Loopy status (${path.relative(cwd, stateFile) || stateFile})`,
-    "",
-    `Iteration: ${state && state.iteration != null ? state.iteration : 0}`,
-    `Current phase: ${(state && state.currentPhase) || "n/a"}`,
-    `Last status: ${(state && state.lastStatus) || "n/a"}`,
-    `Last test: ${(state && state.lastTest) || "n/a"}`,
-    `Last error: ${(state && state.lastError) || "n/a"}`,
-    `Last hint: ${(state && state.lastHint) || "n/a"}`,
-    `Last hint at: ${(state && state.lastHintAt) || "n/a"}`,
-    `Hint count: ${state && state.hintCount != null ? state.hintCount : 0}`,
-    `Last bytes: ${state && state.lastBytes != null ? state.lastBytes : 0}`,
-    `Plan file: ${path.relative(cwd, planFile) || planFile}`,
-    planMetrics ? `Tasks: ${planMetrics.completedTasks}/${planMetrics.totalTasks}` : "Tasks: n/a",
+  const tasksTotal = planMetrics ? planMetrics.totalTasks : 0;
+  const tasksDone = planMetrics ? planMetrics.completedTasks : 0;
+  const taskPercent = tasksTotal > 0 ? Math.round((tasksDone / tasksTotal) * 100) : 0;
+  const barWidth = 20;
+  const filled = tasksTotal > 0 ? Math.round((taskPercent / 100) * barWidth) : 0;
+  const progressBar = tasksTotal > 0
+    ? `[${"#".repeat(filled)}${"-".repeat(Math.max(0, barWidth - filled))}] ${taskPercent}% (${tasksDone}/${tasksTotal})`
+    : "[--------------------] n/a";
+
+  const progressLines = [
+    "📈 Progress",
+    `Tasks: ${progressBar}`,
     planMetrics && planMetrics.totalPhases
       ? `Phases: ${planMetrics.completedPhases}/${planMetrics.totalPhases}`
       : "Phases: n/a",
     planMetrics ? `Current task: ${planMetrics.currentTask}` : "Current task: n/a",
+  ];
+
+  const timeLines = [
+    "⏱️  Time",
     totalDurationMs > 0 ? `Total duration: ${formatDurationMs(totalDurationMs)}` : "Total duration: n/a",
     elapsedMs > 0 ? `Elapsed: ${formatDurationMs(elapsedMs)}` : "Elapsed: n/a",
-    `Updated at: ${(state && state.updatedAt) || "n/a"}`,
     startedAt ? `Started at: ${startedAt}` : "Started at: n/a",
-    `Hints file: ${path.relative(cwd, hintsFile) || hintsFile}`,
+    `Updated at: ${(state && state.updatedAt) || "n/a"}`,
+  ];
+
+  const detailRows = [
+    ["Iteration", state && state.iteration != null ? state.iteration : 0],
+    ["Current phase", (state && state.currentPhase) || "n/a"],
+    ["Last status", (state && state.lastStatus) || "n/a"],
+    ["Last test", (state && state.lastTest) || "n/a"],
+    ["Last error", (state && state.lastError) || "n/a"],
+    ["Last hint", (state && state.lastHint) || "n/a"],
+    ["Last hint at", (state && state.lastHintAt) || "n/a"],
+    ["Hint count", state && state.hintCount != null ? state.hintCount : 0],
+    ["Last bytes", state && state.lastBytes != null ? state.lastBytes : 0],
+    ["Plan file", path.relative(cwd, planFile) || planFile],
+    ["Hints file", path.relative(cwd, hintsFile) || hintsFile],
+  ];
+  const keyWidth = Math.max(...detailRows.map(([key]) => String(key).length));
+  const infoLines = [
+    "ℹ️  Details",
+    ...detailRows.map(
+      ([key, value]) => `  ${String(key).padEnd(keyWidth)} | ${String(value)}`
+    ),
+  ];
+
+  const lines = [
+    `Loopy status (${path.relative(cwd, stateFile) || stateFile})`,
+    "",
+    ...progressLines,
+    "",
+    ...timeLines,
+    "",
+    ...infoLines,
     "",
   ];
   console.log(lines.join("\n"));
