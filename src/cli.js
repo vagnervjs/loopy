@@ -346,9 +346,13 @@ async function runStatus(flags) {
   ];
 
   const indentLines = (items) => items.map((line) => (line ? `  - ${line}` : ""));
-  const progressLines = [formatHeader("📈 Progress"), ...indentLines(progressItems)];
-  const timeLines = [formatHeader("⏱️ Time"), ...indentLines(timeItems)];
-  const infoLines = [formatHeader("ℹ️ Details"), ...indentLines(infoItems)];
+  const useEmojiHeaders = !(flags && (flags.noEmoji || flags.plain));
+  const progressHeader = useEmojiHeaders ? "📈 Progress" : "Progress";
+  const timeHeader = useEmojiHeaders ? "⏱️ Time" : "Time";
+  const infoHeader = useEmojiHeaders ? "ℹ️ Details" : "Details";
+  const progressLines = [formatHeader(progressHeader), ...indentLines(progressItems)];
+  const timeLines = [formatHeader(timeHeader), ...indentLines(timeItems)];
+  const infoLines = [formatHeader(infoHeader), ...indentLines(infoItems)];
 
   const lines = [
     `Loopy status (${path.relative(cwd, stateFile) || stateFile})`,
