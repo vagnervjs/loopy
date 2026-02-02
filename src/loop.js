@@ -30,7 +30,6 @@ const {
   getCurrentTask,
   getCurrentPhaseSection,
   detectMultiTaskCompletion,
-  extractRequiredTests,
 } = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
@@ -481,17 +480,6 @@ function formatCompletedTaskLines(completedSections) {
   return lines;
 }
 
-function collectRequiredTestsFromCompleted(completedSections) {
-  const required = [];
-  for (const section of completedSections || []) {
-    for (const text of section.items || []) {
-      const tests = extractRequiredTests(text);
-      if (tests) required.push({ task: text, tests });
-    }
-  }
-  return required;
-}
-
 function countChecklist(items) {
   let total = 0;
   let checked = 0;
@@ -889,6 +877,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   const cwd = config.cwd;
   const taskPath = config.taskFile;
   const shouldStop = () => Boolean(stopSignal && stopSignal.stopRequested);
+  const defaultTestCommand = config.testCommand || "npm test";
   const phaseAgentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
   const logPhasePlan = () => {
     printStep(`Generating phase plan${phaseAgentLabel}`, { kind: "plan" });
@@ -928,10 +917,16 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
-        : fallbackPhasesFromSeed(seed, { testCommand: config.testCommand });
+        : fallbackPhasesFromSeed(seed, { testCommand: defaultTestCommand });
+      if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
+        plan.phaseDefaults = {};
+      }
+      if (!String(plan.phaseDefaults.test_command || plan.phaseDefaults.testCommand || "").trim()) {
+        plan.phaseDefaults.test_command = defaultTestCommand;
+      }
       const fm = {
         agent_command: config.agentCommand || "",
-        test_command: config.testCommand || "",
+        test_command: defaultTestCommand,
         max_iterations: config.maxIterations,
         max_minutes: config.maxMinutes,
         backoff_ms: config.backoffMs,
@@ -956,7 +951,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         yaml.dump(
           {
             agent_command: config.agentCommand || "",
-            test_command: config.testCommand || "",
+            test_command: defaultTestCommand,
             max_iterations: config.maxIterations,
             max_minutes: config.maxMinutes,
             backoff_ms: config.backoffMs,
@@ -988,6 +983,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
     const seed = loaded.seed;
     const parsed = parseTask(existing);
     const fm = parsed.frontMatter || {};
+    const defaultTestCommand = config.testCommand || "npm test";
 
     let nextText = existing;
     if (config.autoPhase) {
@@ -1005,7 +1001,16 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
-        : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || config.testCommand });
+        : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || defaultTestCommand });
+      if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
+        plan.phaseDefaults = {};
+      }
+      if (!String(plan.phaseDefaults.test_command || plan.phaseDefaults.testCommand || "").trim()) {
+        plan.phaseDefaults.test_command = defaultTestCommand;
+      }
+      if (!String(fm.test_command || fm.testCommand || "").trim()) {
+        fm.test_command = defaultTestCommand;
+      }
       nextText = renderTaskMarkdown({
         frontMatter: fm,
         phaseDefaults: plan.phaseDefaults,
@@ -1062,6 +1067,13 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : null;
       if (plan) {
+        const defaultTestCommand = config.testCommand || "npm test";
+        if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
+          plan.phaseDefaults = {};
+        }
+        if (!String(plan.phaseDefaults.test_command || plan.phaseDefaults.testCommand || "").trim()) {
+          plan.phaseDefaults.test_command = defaultTestCommand;
+        }
         const nextText = renderTaskMarkdown({
           frontMatter: parsed.frontMatter || {},
           phaseDefaults: plan.phaseDefaults,
@@ -1434,31 +1446,6 @@ async function runIteration(config, { stopSignal } = {}) {
     }
     const taskComplete = Boolean(parsedTaskAfter.allChecked);
     const completedSections = findNewlyCompletedTasks(parsedTask, parsedTaskAfter);
-    const requiredTests = collectRequiredTestsFromCompleted(completedSections);
-    const testsPassed = typeof testStatus === "string" && /^pass\b/i.test(testStatus.trim());
-    if (status === "success" && requiredTests.length && !testsPassed) {
-      status = "failure";
-      lastError = "Required tests not run or failing for completed tasks.";
-      errorSignature = "required-tests-missing";
-      printStep("Required tests missing: mark iteration as failure", {
-        iteration,
-        level: "error",
-        kind: "tests",
-      });
-      await appendActivity(config.activityLog, [
-        `Required tests missing for tasks: ${requiredTests.map((t) => t.tests).join("; ")}`,
-      ]);
-      const guardrailsText = await readText(config.guardrailsFile);
-      const guardrailsUpdated = appendSign(
-        guardrailsText,
-        `Required tests missing for completed tasks (iteration ${iteration})`
-      );
-      if (guardrailsUpdated !== guardrailsText) {
-        await writeText(config.guardrailsFile, guardrailsUpdated);
-        bytesWritten += Buffer.byteLength(guardrailsUpdated);
-      }
-    }
-
     printStepLines(formatCompletedTaskLines(completedSections), { iteration });
     printStepLines([formatProgressLine(summarizePlanProgress(parsedTaskAfter, currentPhaseId))], { iteration });
     const taskLine = getTaskLine(taskAfter || taskText, { phaseId: currentPhaseId });

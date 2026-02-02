@@ -60,18 +60,18 @@ function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
   const tasksByPhase = {
     plan: [
       seed
-        ? `Plan: ${seed} — Acceptance: outline scope and milestones — Required tests: none`
-        : "Plan: Clarify requirements and outline approach — Acceptance: outline scope and milestones — Required tests: none",
+        ? `Plan: ${seed} — Acceptance: outline scope and milestones`
+        : "Plan: Clarify requirements and outline approach — Acceptance: outline scope and milestones",
     ],
     implement: [
       seed
-        ? `Implement: ${seed} — Acceptance: behavior matches requirements — Required tests: none`
-        : "Implement: Apply the requested changes — Acceptance: behavior matches requirements — Required tests: none",
+        ? `Implement: ${seed} — Acceptance: behavior matches requirements`
+        : "Implement: Apply the requested changes — Acceptance: behavior matches requirements",
     ],
     verify: [
       tc
-        ? `Verify: Run tests (${tc}) — Acceptance: test suite passes — Required tests: ${tc}`
-        : "Verify: Validate behavior and edge cases — Acceptance: expected behavior confirmed — Required tests: none",
+        ? `Verify: Run tests (${tc}) — Acceptance: test suite passes`
+        : "Verify: Validate behavior and edge cases — Acceptance: expected behavior confirmed",
     ],
   };
   return { phases, phaseDefaults: { stop_on: "all_checked", test_command: tc }, tasksByPhase };
@@ -107,11 +107,11 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "",
     "Break work into JIRA-sized tasks (as if assigning to a junior engineer):",
     "- Atomic: exactly ONE outcome per task (no compound items).",
-    "- Testable: include explicit acceptance criteria and required tests.",
+    "- Testable: include explicit acceptance criteria.",
     "- Scoped: small enough for < 1 day of work.",
     "- Clear: start with a strong verb (add/implement/update/remove/verify).",
-    "- Format: \"<type>: <short summary> — Acceptance: <clear test/result> — Required tests: <command or none>\"",
-    "- If no tests are needed, use \"Required tests: none\".",
+    "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
+    "- Ensure phase_defaults.test_command is set (use npm test if unsure).",
     "- Quote every checklist item in YAML.",
     "- Prefer 5-10 tasks per phase.",
     "",

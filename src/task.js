@@ -217,19 +217,6 @@ function parseTask(text) {
   return result;
 }
 
-function extractRequiredTests(text) {
-  const raw = String(text || "");
-  if (!raw) return "";
-  const match = raw.match(/Required tests:\s*(.+)$/i);
-  if (!match) return "";
-  const value = String(match[1] || "").trim();
-  if (!value) return "";
-  const normalized = value.replace(/[.;]+$/g, "").trim();
-  const lower = normalized.toLowerCase();
-  if (["none", "n/a", "na", "not required", "no tests", "no test"].includes(lower)) return "";
-  return normalized;
-}
-
 function getTaskLine(text, options = {}) {
   if (!text) return "task update";
   const parsed = parseTask(text);
@@ -433,5 +420,4 @@ module.exports = {
   parseCheckboxes,
   compareCheckboxDiffs,
   detectMultiTaskCompletion,
-  extractRequiredTests,
 };
