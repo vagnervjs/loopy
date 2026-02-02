@@ -17,16 +17,41 @@ No configuration files needed — just run:
 loopy
 ```
 
+In build mode (default), Loopy follows tasks from `LOOPY_PLAN.md` and updates progress/checkboxes as work completes.
+
+If no plan exists, running `loopy` starts plan mode and prompts for a seed.
+
+Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps one in the project root unless `--no-bootstrap-agents` is set.
+
 **Start a new loop (non-interactive — for automation):**
 ```bash
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 ```
 
+Plan-only mode generates or updates `LOOPY_PLAN.md` and exits without running build iterations. Run `loopy` to start build mode:
+
+```bash
+loopy --mode plan --prompt "Add OAuth login to the app"
+```
+
+## Ralph compatibility
+
+Loopy follows the Ralph playbook structure with separate planning and building phases:
+
+- `--mode plan`: planning only (generates/updates `LOOPY_PLAN.md`, no build iterations)
+- `--mode build`: build loop (executes tasks from `LOOPY_PLAN.md`)
+- Build mode requires an existing plan; `--prompt` is ignored.
+- `--generate-prd` (plan mode): generate PRD first; uses `--prompt` as the PRD seed
+- Prompt templates: `PROMPT_plan.md` + `PROMPT_build.md` (or `--prompt-template` override)
+- `AGENTS.md` and `specs/` summary are injected into every prompt; `AGENTS.md` is bootstrapped in the project root when missing (disable with `--no-bootstrap-agents`)
+- `test_command` is required when generating or updating plans; use `--test-command` in non-interactive runs
+- Use `loopy add-judge` to scaffold optional LLM judge tests for subjective criteria
+
 Resume a previous run (requires `.loopy/state.json`):
 ```bash
 loopy --resume
 ```
-Note: `--resume` is resume-only and cannot be combined with `--prompt` or `--plan`.
+Note: `--resume` is resume-only and cannot be combined with `--prompt`.
 
 Run a single iteration:
 ```bash
@@ -39,6 +64,18 @@ loopy status
 ```
 Status shows: iteration, current phase, last status, last test, last error, last hint + hint count, last bytes, updated at.
 
+Scaffold an LLM judge fixture for subjective acceptance criteria:
+```bash
+loopy add-judge
+```
+This creates `src/lib/llm-review.js` and `src/lib/llm-review.test.js` (use `--force` to overwrite).
+Set `LOOPY_AGENT_COMMAND` (or `JUDGE_AGENT_COMMAND`) when running judge tests.
+
+Overwrite existing judge fixtures:
+```bash
+loopy add-judge --force
+```
+
 Manage mid-loop hints:
 ```bash
 loopy hint "Focus on fixing the failing test first."
@@ -48,7 +85,7 @@ loopy hint --reset
 
 Disable streaming when you only want logs:
 ```bash
-loopy --agent "cursor-agent" --prompt @examples/PRD.md --stream=false
+loopy --agent "cursor-agent" --prompt @examples/PRD.md --no-stream
 ```
 
 Help and version:
@@ -65,13 +102,16 @@ loopy --agent "cursor-agent" --prompt @./task.txt
 cat ./task.txt | loopy --agent "cursor-agent" --prompt -
 ```
 
-### Plan seed from a file or stdin (PRD-first)
+### PRD generation (plan mode)
 ```bash
 # file
-loopy --agent "cursor-agent" --plan @./problem.md
+loopy --agent "cursor-agent" --mode plan --prompt @./problem.md
 
 # stdin
-cat ./problem.md | loopy --agent "cursor-agent" --plan -
+cat ./problem.md | loopy --agent "cursor-agent" --mode plan --prompt -
+
+# skip PRD generation (plan directly from prompt)
+loopy --agent "cursor-agent" --mode plan --prompt "Seed" --generate-prd=false
 ```
 
 ## Log output
@@ -90,7 +130,7 @@ Completion is driven by checked items, not by agent confidence.
 
 ## How Loopy works
 1. Loopy reads a plan doc (default: `.loopy/LOOPY_PLAN.md`) on every iteration.
-2. If you provide a seed prompt (`--prompt`) or plan seed (`--plan`), Loopy generates/updates the plan doc before looping.
+2. If you provide a seed prompt (`--prompt`), Loopy generates/updates the plan doc before looping (PRD-first when `--generate-prd` is enabled).
 3. When run interactively with a seed, Loopy pauses for plan review before starting iterations.
 4. Each iteration runs the agent, optional tests, and updates logs/state.
 5. The loop stops when all plan checkboxes are checked or when guardrails stop it.
@@ -131,13 +171,13 @@ hooks:
 You can also pass `--agent` to override the plan front matter.
 See `examples/LOOPY_PLAN.md` for a starter template.
 
-### Plan seed (`--plan`)
-The plan seed is a raw problem statement. Loopy uses it to generate a PRD (`.loopy/PRD.md`) via the agent, then uses the PRD as the seed for the plan doc.
+### PRD generation (`--generate-prd`)
+When enabled in plan mode (default), Loopy uses the seed prompt (`--prompt`) to generate a PRD (`.loopy/PRD.md`) via the agent, then uses the PRD as the seed for the plan doc.
 
 How to provide it:
-- `--plan "<text>"`: inline text
-- `--plan @<path>`: read text from a file (any extension; `.md` recommended)
-- `--plan -`: read text from stdin
+- `--mode plan --prompt "<text>"`: inline text
+- `--mode plan --prompt @<path>`: read text from a file (any extension; `.md` recommended)
+- `--mode plan --prompt -`: read text from stdin
 
 Notes:
 - If you also provide `--prompt`, Loopy passes it as extra context during PRD generation.
@@ -252,12 +292,12 @@ Core loop:
 - `--dry-run` build prompt only, skip agent execution
 
 Input/output paths:
-- `--plan <text|@file|->` plan seed to generate PRD + plan before looping
+- `--generate-prd` generate PRD + plan before looping (plan mode only)
 - `--plan-file <file>` plan doc path (default: `.loopy/LOOPY_PLAN.md`)
 - `--prompt <text|@file|->` seed prompt to generate/update the plan doc before looping
 
 Output/utility:
-- `--stream` mirror agent stdout/stderr to your terminal (default: true; disable with `--stream=false`)
+- `--no-stream` disable mirroring agent stdout/stderr to your terminal
 - `--verbose` print full checklist details in the plan summary (default: true; disable with `--verbose=false`)
 - `--version` print version and exit
 
@@ -291,7 +331,7 @@ Output/utility:
 - `.loopy/agent_stream.log` live agent stdout/stderr stream (redacted)
 - `.loopy/last_test_output.txt` most recent test output (redacted)
 - `.loopy/PROMPT.md` generated prompt input for each iteration
-- `.loopy/PRD.md` generated PRD (when using `--plan`)
+- `.loopy/PRD.md` generated PRD (when `--generate-prd` is enabled)
 
 ## Git integration
 Loopy can:
@@ -352,13 +392,52 @@ Safety notes:
 - There is no explicit max size cap today; very large prompts can degrade planning quality.
 
 ## Troubleshooting
-- Missing plan doc: provide `--prompt` or `--plan` to generate one (or use `--plan-file <file>` to point to an existing file).
+- Missing plan doc: provide `--prompt` (plan mode) to generate one (or use `--plan-file <file>` to point to an existing file).
 - Agent exits immediately: verify `agent_command` is correct and accepts stdin.
 - Loop stops early: check `.loopy/progress.md` and `.loopy/activity.log` for caps or completion.
 - Guardrails growing: repeated failures or file thrashing were detected.
-- Resume errors: `--resume` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt` or `--plan`.
+- Resume errors: `--resume` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt`.
 - Flag errors: `--prompt` requires a value (`"<text>"`, `@<file>`, or `-`); `--prompt-out` requires a file path value.
 - Resetting state: use `loopy reset` to archive all `.loopy/` files to `.loopy/archive/reset-<timestamp>/` for a clean start; or delete the whole `.loopy/` directory for a full reset.
+
+---
+
+## Architecture Overview
+
+### System Map
+
+```text
+bin/loopy.js
+  -> src/cli.js
+     -> src/loop.js
+        -> src/loop/iteration.js
+        -> src/loop/plan-ensure.js
+        -> src/loop/prompt-templates.js
+        -> src/loop/agents-doc.js
+        -> src/loop/phases.js
+        -> src/loop/plan-overview.js
+        -> src/loop/archive.js
+        -> src/loop/seed.js
+
+Shared utilities:
+  src/config.js + src/config-validate.js
+  src/task.js, src/guardrails.js, src/prompt.js, src/text.js
+  src/git.js, src/shell.js, src/fs.js, src/state.js, src/steps.js
+
+Artifacts:
+  .loopy/ (PROMPT.md, state.json, progress.md, guardrails.md, logs)
+```
+
+### Responsibilities
+
+- **CLI entrypoint**: `bin/loopy.js` -> `src/cli.js` handles commands, help, signals, and status/hints/reset.
+- **Config + validation**: `src/config.js` merges defaults/front matter/flags; `src/config-validate.js` enforces flag rules.
+- **Loop orchestrator**: `src/loop.js` wires planning, git setup, prompt templates, and iteration control.
+- **Loop modules**: `src/loop/iteration.js` (single iteration), `src/loop/plan-ensure.js` (plan/PRD bootstrap + preview), `src/loop/prompt-templates.js` (template loading), `src/loop/agents-doc.js` (AGENTS bootstrap), `src/loop/phases.js` (phase logic), `src/loop/plan-overview.js` (plan summaries), `src/loop/archive.js` (artifact archiving), `src/loop/seed.js` (stdin/seed loading).
+- **Domain utilities**: `src/task.js` (plan parsing + task detection), `src/guardrails.js` (repeat/thrash detection), `src/prompt.js` (prompt assembly), `src/text.js` (redaction, truncation), `src/git.js` (git integration), `src/shell.js` (process execution).
+- **Artifacts**: `.loopy/` stores prompts, guardrails, progress, state, and agent/test outputs per run.
+
+For a lightweight module diagram, see `docs/ARCHITECTURE.md`.
 
 ## Notes
 - Logs redact common secret patterns, but avoid writing secrets to stdout/stderr.

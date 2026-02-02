@@ -1,6 +1,14 @@
-const { runCli } = require('./src/cli');
+const { suite } = require("./test/suite");
+const { runCli } = require("./src/cli");
 
-runCli(['--help']).catch(e => {
-  console.error(e);
-  process.exit(1);
+const test = suite("test-help");
+
+test("prints help", async () => {
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  process.stdout.write = () => true;
+  try {
+    await runCli(["--help"]);
+  } finally {
+    process.stdout.write = originalStdoutWrite;
+  }
 });

@@ -6,8 +6,17 @@ const { parseArgs } = require("./args");
 const { DEFAULTS, resolveFrom } = require("./config");
 const { appendText, readText, writeText } = require("./fs");
 const { runLoop } = require("./loop");
-const { printStep } = require("./steps");
+const { scaffoldJudge } = require("./scaffold");
+const { formatDurationMs, printStep } = require("./steps");
 const { loadState } = require("./state");
+const { parseTask, getCurrentTask } = require("./task");
+
+const STATUS_ANSI = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  cyan: "\x1b[36m",
+  blue: "\x1b[34m",
+};
 
 function getLoopyVersion() {
   try {
@@ -86,16 +95,19 @@ function printHelp() {
       desc: "Save a hint for the next prompt\nAppends to `.loopy/hints.md` (included in the next prompt under \"Hints\")\nUse --reset to clear all hints, --pop to remove the last hint",
     },
     { label: "reset", desc: "Archive all files from `.loopy/` to `.loopy/archive/reset-<timestamp>/`\nClears loop state for a fresh start" },
+    {
+      label: "add-judge",
+      desc: "Scaffold LLM judge fixture into src/lib (llm-review.js + llm-review.test.js)\nUse --force to overwrite",
+    },
     { label: "help", desc: "Show help" },
   ];
 
   const commonOptions = [
-    { label: "--prompt <text>", desc: "Seed prompt (inline) to generate/update the plan before looping" },
-    { label: "--prompt @<file>", desc: "Seed prompt from a file to generate/update the plan before looping" },
-    { label: "--prompt -", desc: "Seed prompt from stdin to generate/update the plan before looping" },
-    { label: "--plan <text>", desc: "Plan prompt (inline) to generate a PRD + plan before looping" },
-    { label: "--plan @<file>", desc: "Plan prompt from a file to generate a PRD + plan before looping" },
-    { label: "--plan -", desc: "Plan prompt from stdin to generate a PRD + plan before looping" },
+    { label: "--mode <build|plan>", desc: "Run in build mode (default) or plan-only mode" },
+    { label: "--prompt <text>", desc: "Seed prompt (inline) for plan/PRD generation" },
+    { label: "--prompt @<file>", desc: "Seed prompt from a file for plan/PRD generation" },
+    { label: "--prompt -", desc: "Seed prompt from stdin for plan/PRD generation" },
+    { label: "--generate-prd", desc: "Generate a PRD before the plan (plan mode only; default true; set false to skip)" },
     {
       label: "--resume",
       desc: "Resume from saved state (requires existing `.loopy/state.json`); skips git switching",
@@ -119,6 +131,7 @@ function printHelp() {
     ],
     Output: [
       { label: "--prompt-out <file>", desc: `Prompt output file (default: ${DEFAULTS.promptFile})` },
+      { label: "--include-last-output", desc: "Include last agent output in prompt (default: false)" },
       { label: "--no-stream", desc: "Disable mirroring agent stdout/stderr to your terminal" },
       { label: "--no-color", desc: "Disable ANSI colors (also respects NO_COLOR)" },
       { label: "--no-emoji", desc: "Disable emoji (use ASCII fallbacks)" },
@@ -127,6 +140,8 @@ function printHelp() {
     ],
     Files: [
       { label: "--plan-file <file>", desc: `Plan doc path (default: ${DEFAULTS.taskFile})` },
+      { label: "--prompt-template <file>", desc: "Override prompt template (build or plan)" },
+      { label: "--test-command <cmd>", desc: "Test command for phases (required when generating plans)" },
       { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },
       { label: "--guardrails <file>", desc: "Guardrails file (default: .loopy/guardrails.md)" },
       { label: "--activity-log <file>", desc: "Activity log (default: .loopy/activity.log)" },
@@ -156,7 +171,8 @@ function printHelp() {
       { label: "--rotate-bytes <n>", desc: "Bytes threshold for rotation (default: 150000)" },
       { label: "--guardrail-repeat-limit <n>", desc: "Repeated failure threshold before cooldown (default: 20)" },
       { label: "--guardrail-cooldown-ms <n>", desc: "Extra backoff when guardrail triggers (default: 60000)" },
-      { label: "--single-task", desc: "Enforce single-task mode (default: false; enable with --single-task)" },
+      { label: "--single-task", desc: "Enforce single-task mode (default: true; disable with --single-task=false)" },
+      { label: "--no-bootstrap-agents", desc: "Disable auto-generating .loopy/AGENTS.md" },
     ],
   };
 
@@ -168,16 +184,15 @@ function printHelp() {
     "  loopy status",
     '  loopy hint "<text>"',
     "  loopy reset",
+    "  loopy add-judge [--force]",
     "  loopy help",
     "  loopy --help, -h",
     "  loopy --version",
     "",
-    "Default behavior:",
-    "  Run iterations: build prompt -> run agent -> update state",
-    "  Stops when phase criteria are met, limits hit, guardrails trigger, or signal received",
-    "",
     "Commands:",
     ...formatHelpRows(commands, { indent: "  ", gap: 2 }),
+    "",
+    "Tip: Plan mode writes the plan and exits. Run `loopy` to start build mode.",
     "",
     "Common options:",
     ...(() => {
@@ -207,6 +222,7 @@ async function runStatus(flags) {
   const cwd = process.cwd();
   const stateFile = resolveFrom(cwd, flags.state || DEFAULTS.stateFile);
   const hintsFile = resolveFrom(cwd, flags.hints || DEFAULTS.hintsFile);
+  const planFile = resolveFrom(cwd, flags["plan-file"] || DEFAULTS.taskFile);
 
   let text = "";
   try {
@@ -235,21 +251,117 @@ async function runStatus(flags) {
     process.exitCode = 1;
     return;
   }
+  state = state || {};
+
+  const planText = await readText(planFile);
+  let planMetrics = null;
+  if (planText) {
+    try {
+      const parsed = parseTask(planText);
+      const totalTasks = parsed.checklist.length;
+      const completedTasks = parsed.checklist.filter((item) => item.checked).length;
+      const totalPhases = parsed.phases.length;
+      const completedPhases = parsed.phases.reduce((sum, phase) => {
+        const section = parsed.phaseSections[phase.id];
+        return sum + (section && section.allChecked ? 1 : 0);
+      }, 0);
+      const currentTaskObj = getCurrentTask(planText, {
+        phaseId: (state && state.currentPhase) || "",
+      });
+      planMetrics = {
+        totalTasks,
+        completedTasks,
+        totalPhases,
+        completedPhases,
+        currentTask: currentTaskObj ? currentTaskObj.text.trim() : "n/a",
+      };
+    } catch (_) {
+      planMetrics = null;
+    }
+  }
+
+  const totalDurationMs = (state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+  const startedAt = state.startedAt || "";
+  const startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
+  const elapsedMs = Number.isFinite(startedAtMs) ? Date.now() - startedAtMs : 0;
+
+  const useColor =
+    Boolean(process.stdout && process.stdout.isTTY) &&
+    !process.env.NO_COLOR &&
+    !flags["no-color"] &&
+    !flags.noColor;
+  const colorize = (value, color, bold = false) => {
+    if (!useColor) return String(value);
+    const code = STATUS_ANSI[color] || "";
+    const weight = bold ? STATUS_ANSI.bold : "";
+    if (!code && !weight) return String(value);
+    return `${weight}${code}${value}${STATUS_ANSI.reset}`;
+  };
+  const formatHeader = (label) => colorize(label, "blue", true);
+
+  const tasksTotal = planMetrics ? planMetrics.totalTasks : 0;
+  const tasksDone = planMetrics ? planMetrics.completedTasks : 0;
+  const taskPercent = tasksTotal > 0 ? Math.round((tasksDone / tasksTotal) * 100) : 0;
+  const barWidth = 20;
+  const filled = tasksTotal > 0 ? Math.round((taskPercent / 100) * barWidth) : 0;
+  const progressBar = tasksTotal > 0
+    ? `[${"#".repeat(filled)}${"-".repeat(Math.max(0, barWidth - filled))}] ${taskPercent}% (${tasksDone}/${tasksTotal})`
+    : "[--------------------] n/a";
+
+  const formatLabelLine = (label, value) => `${colorize(label, "cyan")}: ${value}`;
+  const formatInfoLine = (label, value) => formatLabelLine(label, value);
+
+  const progressItems = [
+    progressBar,
+    formatLabelLine("Current phase", (state && state.currentPhase) || "n/a"),
+    planMetrics && planMetrics.totalPhases
+      ? formatLabelLine("Phases", `${planMetrics.completedPhases}/${planMetrics.totalPhases}`)
+      : formatLabelLine("Phases", "n/a"),
+    planMetrics
+      ? formatLabelLine("Current task", planMetrics.currentTask)
+      : formatLabelLine("Current task", "n/a"),
+  ];
+
+  const timeItems = [
+    totalDurationMs > 0
+      ? formatLabelLine("Total duration", formatDurationMs(totalDurationMs))
+      : formatLabelLine("Total duration", "n/a"),
+    elapsedMs > 0
+      ? formatLabelLine("Elapsed", formatDurationMs(elapsedMs))
+      : formatLabelLine("Elapsed", "n/a"),
+    startedAt ? formatLabelLine("Started at", startedAt) : formatLabelLine("Started at", "n/a"),
+    formatLabelLine("Updated at", (state && state.updatedAt) || "n/a"),
+  ];
+  const infoItems = [
+    formatInfoLine("Iteration", state && state.iteration != null ? state.iteration : 0),
+    formatInfoLine("Last status", (state && state.lastStatus) || "n/a"),
+    formatInfoLine("Last test", (state && state.lastTest) || "n/a"),
+    formatInfoLine("Last error", (state && state.lastError) || "n/a"),
+    formatInfoLine("Last hint", (state && state.lastHint) || "n/a"),
+    formatInfoLine("Last hint at", (state && state.lastHintAt) || "n/a"),
+    formatInfoLine("Hint count", state && state.hintCount != null ? state.hintCount : 0),
+    formatInfoLine("Last bytes", state && state.lastBytes != null ? state.lastBytes : 0),
+    formatInfoLine("Plan file", path.relative(cwd, planFile) || planFile),
+    formatInfoLine("Hints file", path.relative(cwd, hintsFile) || hintsFile),
+  ];
+
+  const indentLines = (items) => items.map((line) => (line ? `  - ${line}` : ""));
+  const useEmojiHeaders = !(flags && (flags.noEmoji || flags.plain));
+  const progressHeader = useEmojiHeaders ? "📈 Progress" : "Progress";
+  const timeHeader = useEmojiHeaders ? "⏱️ Time" : "Time";
+  const infoHeader = useEmojiHeaders ? "ℹ️ Details" : "Details";
+  const progressLines = [formatHeader(progressHeader), ...indentLines(progressItems)];
+  const timeLines = [formatHeader(timeHeader), ...indentLines(timeItems)];
+  const infoLines = [formatHeader(infoHeader), ...indentLines(infoItems)];
 
   const lines = [
     `Loopy status (${path.relative(cwd, stateFile) || stateFile})`,
     "",
-    `Iteration: ${state && state.iteration != null ? state.iteration : 0}`,
-    `Current phase: ${(state && state.currentPhase) || "n/a"}`,
-    `Last status: ${(state && state.lastStatus) || "n/a"}`,
-    `Last test: ${(state && state.lastTest) || "n/a"}`,
-    `Last error: ${(state && state.lastError) || "n/a"}`,
-    `Last hint: ${(state && state.lastHint) || "n/a"}`,
-    `Last hint at: ${(state && state.lastHintAt) || "n/a"}`,
-    `Hint count: ${state && state.hintCount != null ? state.hintCount : 0}`,
-    `Last bytes: ${state && state.lastBytes != null ? state.lastBytes : 0}`,
-    `Updated at: ${(state && state.updatedAt) || "n/a"}`,
-    `Hints file: ${path.relative(cwd, hintsFile) || hintsFile}`,
+    ...progressLines,
+    "",
+    ...timeLines,
+    "",
+    ...infoLines,
     "",
   ];
   console.log(lines.join("\n"));
@@ -423,6 +535,28 @@ async function runReset(flags) {
   }
 }
 
+async function runAddJudge(flags) {
+  const cwd = process.cwd();
+  const force = Boolean(flags.force);
+  const result = await scaffoldJudge({ cwd, force });
+  const rel = (filePath) => path.relative(cwd, filePath) || filePath;
+  if (result.created.length) {
+    console.log("Scaffolded judge fixtures:");
+    for (const filePath of result.created) {
+      console.log(`- ${rel(filePath)}`);
+    }
+  }
+  if (result.skipped.length) {
+    console.log("Skipped existing files:");
+    for (const filePath of result.skipped) {
+      console.log(`- ${rel(filePath)}`);
+    }
+    if (!result.created.length) {
+      console.log("Nothing to do. Use --force to overwrite.");
+    }
+  }
+}
+
 async function runCli(argv) {
   let { command, flags } = parseArgs(argv);
 
@@ -457,6 +591,11 @@ async function runCli(argv) {
 
   if (command === "reset") {
     await runReset(flags);
+    return;
+  }
+
+  if (command === "add-judge") {
+    await runAddJudge(flags);
     return;
   }
 

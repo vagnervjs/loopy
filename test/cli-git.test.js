@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("cli-git");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -93,7 +94,7 @@ test("`--git-worktree` runs loop inside worktree path", async () => {
   assert.equal(head.stdout.trim(), "loopy/wt-branch");
 
   const promptInWorktree = await fs.readFile(path.join(wt, ".loopy", "PROMPT.md"), "utf8");
-  assert.match(promptInWorktree, /Loopy Loop Prompt/);
+  assert.match(promptInWorktree, /Loopy Build Prompt/);
 
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8"));
 });
@@ -136,5 +137,5 @@ test("`--resume` rejects `--prompt`", async () => {
   assert.equal(code, 1);
   assert.equal(stdout, "");
   assert.match(stderr, /--resume.*--prompt/i);
-  assert.match(stderr, /--plan/i);
+  assert.match(stderr, /--prompt/i);
 });

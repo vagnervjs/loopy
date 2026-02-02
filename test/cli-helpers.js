@@ -128,6 +128,7 @@ async function initGitRepo(tmp, { withTask = true } = {}) {
         "---",
         "max_iterations: 1",
         "backoff_ms: 0",
+        "test_command: node -e \"process.exit(0)\"",
         "---",
         "",
         "# Plan",
@@ -145,6 +146,13 @@ async function initGitRepo(tmp, { withTask = true } = {}) {
   return gitEnv;
 }
 
+async function writeTestConfig(tmp, { testCommand = "npm test" } = {}) {
+  const configPath = path.join(tmp, "config.yml");
+  const payload = `test_command: ${testCommand}\n`;
+  await fs.writeFile(configPath, payload, "utf8");
+  return configPath;
+}
+
 module.exports = {
   CLI_PATH,
   LOOPY_VERSION,
@@ -153,4 +161,5 @@ module.exports = {
   runCmd,
   assertHelpAligned,
   initGitRepo,
+  writeTestConfig,
 };

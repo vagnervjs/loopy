@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("steps-format");
 const assert = require("node:assert/strict");
 
 const { configureSteps, printStep } = require("../src/steps");

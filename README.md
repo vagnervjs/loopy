@@ -96,6 +96,10 @@ npm link
 loopy
 ```
 
+If no plan exists, Loopy starts in plan mode and asks for a seed; otherwise it runs build mode.
+
+Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps one in the project root (unless `--no-bootstrap-agents` is set).
+
 Loopy will interactively guide you through:
 1. 🤖 **Agent command** — Select or enter your agent CLI (e.g., `cursor-agent`, `copilot --allow-all`)
 2. 📝 **Task description** — Describe what you want to build or fix
@@ -158,15 +162,29 @@ loopy status
 
 Displays: iteration count, current phase, last status, test results, errors, output size, and timestamps.
 
-### Use a Predefined Plan
+### Generate a PRD + Plan
 
 ```bash
-loopy --plan examples/feature-prd.md
+loopy --mode plan --prompt @examples/feature-prd.md
 ```
 
-Start with a pre-written plan document instead of a simple prompt.
+Use the PRD-first flow to generate/update `LOOPY_PLAN.md` from a PRD seed.
 
-> 📚 More workflows and real-world examples in [`docs/REFERENCE.md`](./docs/REFERENCE.md)
+If you already have a clear plan seed, run plan mode with `--generate-prd=false`.
+
+### Plan-Only Mode
+
+```bash
+loopy --mode plan --prompt "Add OAuth login to the app"
+```
+
+Generates/updates `LOOPY_PLAN.md` and exits without running build iterations. Run `loopy` to start build mode.
+
+### Prompt Templates
+
+Add `PROMPT_build.md` and `PROMPT_plan.md` to customize prompts per mode. Use `--prompt-template <file>` to override the template path.
+
+> 📚 More workflows in [`docs/REFERENCE.md`](./docs/REFERENCE.md) and Ralph-specific guidance in [`docs/RALPH_WORKFLOW.md`](./docs/RALPH_WORKFLOW.md). Templates live in [`examples/`](./examples).
 
 ---
 
@@ -211,8 +229,9 @@ Loopy treats a **markdown plan document** as the source of truth and orchestrate
 | Resource | Description |
 |----------|-------------|
 | **[Complete Reference](./docs/REFERENCE.md)** | Full CLI reference, configuration options, git integration, and troubleshooting |
+| **[Architecture](./docs/ARCHITECTURE.md)** | Lightweight module diagram and system map |
+| **[Ralph Workflow](./docs/RALPH_WORKFLOW.md)** | Planning vs building guidance, templates, and workflow conventions |
 | **[Examples](./examples)** | Sample PRDs, prompts, and plan templates for common use cases |
-| **[API Documentation](./docs/API.md)** | Internal architecture for contributors |
 
 ---
 

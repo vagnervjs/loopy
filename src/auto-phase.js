@@ -58,9 +58,21 @@ function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
     { id: "verify", title: "Verify", stop_on: tc ? ["all_checked", "tests_pass"] : "all_checked", test_command: tc },
   ];
   const tasksByPhase = {
-    plan: [seed || "Clarify requirements and outline approach."],
-    implement: [seed ? `Implement: ${seed}` : "Implement the requested changes."],
-    verify: [tc ? `Run tests: ${tc}` : "Validate behavior and edge cases."],
+    plan: [
+      seed
+        ? `Plan: ${seed} — Acceptance: outline scope and milestones`
+        : "Plan: Clarify requirements and outline approach — Acceptance: outline scope and milestones",
+    ],
+    implement: [
+      seed
+        ? `Implement: ${seed} — Acceptance: behavior matches requirements`
+        : "Implement: Apply the requested changes — Acceptance: behavior matches requirements",
+    ],
+    verify: [
+      tc
+        ? `Verify: Run tests (${tc}) — Acceptance: test suite passes`
+        : "Verify: Validate behavior and edge cases — Acceptance: expected behavior confirmed",
+    ],
   };
   return { phases, phaseDefaults: { stop_on: "all_checked", test_command: tc }, tasksByPhase };
 }
@@ -99,6 +111,7 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "- Scoped: small enough for < 1 day of work.",
     "- Clear: start with a strong verb (add/implement/update/remove/verify).",
     "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
+    "- Ensure phase_defaults.test_command is set (ask if unsure).",
     "- Quote every checklist item in YAML.",
     "- Prefer 5-10 tasks per phase.",
     "",

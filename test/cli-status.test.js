@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("cli-status");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
@@ -33,15 +34,23 @@ test("`status` prints summary from `.loopy/state.json`", async () => {
   assert.equal(code, 0);
   assert.equal(stderr, "");
   assert.match(stdout, /Loopy status/);
-  assert.match(stdout, /Iteration:\s+12/);
-  assert.match(stdout, /Last status:\s+guardrail-stop/);
-  assert.match(stdout, /Last test:\s+n\/a/);
-  assert.match(stdout, /Last error:\s+Repeated failure signature/);
-  assert.match(stdout, /Last hint:\s+Try a different approach\./);
-  assert.match(stdout, /Last hint at:\s+2026-01-26T01:16:00.000Z/);
-  assert.match(stdout, /Hint count:\s+3/);
-  assert.match(stdout, /Last bytes:\s+8856/);
+  assert.match(stdout, /📈 Progress/);
+  assert.match(stdout, /\[[#-]+\]\s+(n\/a|\d+%)/);
+  assert.match(stdout, /Phases:\s+n\/a|Phases:\s+\d+\/\d+/);
+  assert.match(stdout, /⏱️\s+Time/);
+  assert.match(stdout, /Total duration:/);
+  assert.match(stdout, /Elapsed:/);
   assert.match(stdout, /Updated at:\s+2026-01-26T01:16:24.741Z/);
+  assert.match(stdout, /ℹ️\s+Details/);
+  assert.match(stdout, /Current phase:\s+n\/a/);
+  assert.match(stdout, /-\s+Iteration:\s+12/);
+  assert.match(stdout, /-\s+Last status:\s+guardrail-stop/);
+  assert.match(stdout, /-\s+Last test:\s+n\/a/);
+  assert.match(stdout, /-\s+Last error:\s+Repeated failure signature/);
+  assert.match(stdout, /-\s+Last hint:\s+Try a different approach\./);
+  assert.match(stdout, /-\s+Last hint at:\s+2026-01-26T01:16:00.000Z/);
+  assert.match(stdout, /-\s+Hint count:\s+3/);
+  assert.match(stdout, /-\s+Last bytes:\s+8856/);
 });
 
 test("`status` exits 1 with friendly message when state file is missing", async () => {

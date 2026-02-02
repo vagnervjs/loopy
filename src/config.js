@@ -27,7 +27,12 @@ const DEFAULTS = {
   confirm: false,
   stream: true,
   verbose: true,
-  singleTaskMode: false,
+  singleTaskMode: true,
+  mode: "build",
+  promptTemplate: "",
+  bootstrapAgents: true,
+  includeLastOutput: false,
+  generatePrd: true,
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -222,8 +227,6 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const defaultPhaseDefaults = def.phase_defaults || def.phaseDefaults || {};
   const hasPromptSeed = Object.prototype.hasOwnProperty.call(flags, "prompt");
   const promptSeedFlag = hasPromptSeed ? flags.prompt : undefined;
-  const hasPlanSeed = Object.prototype.hasOwnProperty.call(flags, "plan");
-  const planSeedFlag = hasPlanSeed ? flags.plan : undefined;
   const promptOutFlag = flags["prompt-out"];
   const promptOutDefault = pickDefined(def, ["prompt-out", "prompt_out", "promptOut", "promptFile", "prompt_file"]);
   const gitWorktreeFlag = flags["git-worktree"];
@@ -255,6 +258,11 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const preIterationDefault = pickDefined(def, ["preIteration", "pre_iteration"]);
   const postIterationDefault = pickDefined(def, ["postIteration", "post_iteration"]);
   const onFailureDefault = pickDefined(def, ["onFailure", "on_failure"]);
+  const modeDefault = pickDefined(def, ["mode"]);
+  const promptTemplateDefault = pickDefined(def, ["prompt_template", "promptTemplate"]);
+  const bootstrapAgentsDefault = pickDefined(def, ["bootstrap_agents", "bootstrapAgents"]);
+  const includeLastOutputDefault = pickDefined(def, ["include_last_output", "includeLastOutput"]);
+  const generatePrdDefault = pickDefined(def, ["generate_prd", "generatePrd"]);
   const gitBranchDefault =
     pickDefined(def, ["git_branch", "gitBranch"]) ||
     pickDefined(defaultGit, ["branch", "git_branch", "gitBranch"]);
@@ -292,7 +300,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     cwd: process.cwd(),
     resume: coerceBoolean(flags.resume ?? resumeDefault, false),
     confirm: coerceBoolean(flags.confirm ?? confirmDefault, DEFAULTS.confirm),
-    // NOTE: `--plan` supplies the plan seed (PRD-first flow). Use `--plan-file` to override the plan doc path.
+    // NOTE: `--generate-prd` controls whether to generate a PRD before the plan. Use `--plan-file` to override the plan doc path.
     taskFile: planFileFlag || taskFileDefault,
     // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.
     promptFile: (promptOutValue === true ? "" : String(promptOutValue || "")) || DEFAULTS.promptFile,
@@ -304,11 +312,6 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     agentStreamLog: DEFAULTS.agentStreamLog,
     stateFile: flags.state || stateDefault,
     hintsFile: flags.hints || hintsDefault,
-    // Plan seed entrypoint (for PRD generation):
-    // - `--plan "<inline text>"`
-    // - `--plan @path/to/file`
-    // - `--plan -` (stdin)
-    planSeed: planSeedFlag === true ? "" : String(planSeedFlag || ""),
     // New seed prompt entrypoint (preferred):
     // - `--prompt "<inline text>"`
     // - `--prompt @path/to/file`
@@ -316,7 +319,8 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     promptSeed: promptSeedFlag === true ? "" : String(promptSeedFlag || ""),
     agentCommand: normalizeCommand(flags.agent || fm.agent_command || fm.agentCommand || agentCommandDefault || ""),
     testCommand: normalizeCommand(
-      fm.test_command ||
+      flags["test-command"] ||
+        fm.test_command ||
         fm.testCommand ||
         phaseDefaults.test_command ||
         phaseDefaults.testCommand ||
@@ -432,6 +436,19 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     singleTaskMode: coerceBoolean(
       flags["single-task"] ?? fm.single_task_mode ?? fm.singleTaskMode ?? singleTaskModeDefault,
       DEFAULTS.singleTaskMode
+    ),
+    mode: String(flags.mode ?? fm.mode ?? modeDefault ?? DEFAULTS.mode).trim() || DEFAULTS.mode,
+    promptTemplate: normalizeCommand(
+      flags["prompt-template"] ?? fm.prompt_template ?? fm.promptTemplate ?? promptTemplateDefault ?? ""
+    ),
+    bootstrapAgents: coerceBoolean(
+      flags["no-bootstrap-agents"] !== undefined ? !coerceBoolean(flags["no-bootstrap-agents"], false) : bootstrapAgentsDefault,
+      DEFAULTS.bootstrapAgents
+    ),
+    generatePrd: coerceBoolean(flags["generate-prd"] ?? generatePrdDefault, DEFAULTS.generatePrd),
+    includeLastOutput: coerceBoolean(
+      flags["include-last-output"] ?? fm.include_last_output ?? fm.includeLastOutput ?? includeLastOutputDefault,
+      DEFAULTS.includeLastOutput
     ),
   };
 }

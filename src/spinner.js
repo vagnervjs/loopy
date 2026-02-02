@@ -1,17 +1,30 @@
 // Simple terminal spinner using Unicode characters
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const SPINNER_FRAMES_ASCII = ['-', '\\', '|', '/'];
 const FRAME_INTERVAL = 80; // ms between frames
 
 class Spinner {
-  constructor(text = '') {
+  constructor(text = '', options = {}) {
     this.text = text;
     this.frameIndex = 0;
     this.intervalId = null;
     this.isSpinning = false;
+    this.enabled = options.enabled !== undefined ? Boolean(options.enabled) : true;
+    this.plain = Boolean(options.plain);
+    this.noEmoji = Boolean(options.noEmoji) || this.plain;
+  }
+
+  shouldRender() {
+    if (!this.enabled) return false;
+    if (!process.stdout || !process.stdout.isTTY) return false;
+    return true;
   }
 
   start(text) {
+    if (!this.shouldRender()) {
+      return;
+    }
     if (this.isSpinning) {
       return;
     }
@@ -35,6 +48,10 @@ class Spinner {
 
   stop(finalText = '') {
     if (!this.isSpinning) {
+      return;
+    }
+    if (!this.shouldRender()) {
+      this.isSpinning = false;
       return;
     }
 
@@ -61,8 +78,9 @@ class Spinner {
       return;
     }
 
-    const frame = SPINNER_FRAMES[this.frameIndex];
-    this.frameIndex = (this.frameIndex + 1) % SPINNER_FRAMES.length;
+    const frames = this.noEmoji ? SPINNER_FRAMES_ASCII : SPINNER_FRAMES;
+    const frame = frames[this.frameIndex];
+    this.frameIndex = (this.frameIndex + 1) % frames.length;
 
     // Move to beginning of line, clear it, and write spinner + text
     process.stdout.write(`\r\x1B[K${frame} ${this.text}`);

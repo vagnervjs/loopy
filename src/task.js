@@ -122,39 +122,10 @@ function parseTask(text) {
   result.phases = phases;
   result.phaseDefaults = phaseDefaults;
 
-  const checklist = [];
-  const lines = text.split(/\r?\n/);
-  let inComment = false;
-  for (const line of lines) {
-    const raw = String(line || "");
-
-    if (inComment) {
-      if (raw.includes("-->")) inComment = false;
-      continue;
-    }
-
-    let effective = raw;
-    const commentStart = raw.indexOf("<!--");
-    if (commentStart >= 0) {
-      const commentEnd = raw.indexOf("-->", commentStart + 4);
-      if (commentEnd >= 0) {
-        // Strip inline comment content.
-        effective = raw.slice(0, commentStart);
-      } else {
-        // Start of a multiline comment block; parse any prefix then ignore until closed.
-        effective = raw.slice(0, commentStart);
-        inComment = true;
-      }
-    }
-
-    const itemMatch = effective.match(/^-\s*\[( |x|X)\]\s+(.*)$/);
-    if (itemMatch) {
-      checklist.push({
-        checked: itemMatch[1].toLowerCase() === "x",
-        text: itemMatch[2],
-      });
-    }
-  }
+  const checklist = parseCheckboxes(text).map((item) => ({
+    checked: item.checked,
+    text: item.text,
+  }));
 
   result.checklist = checklist;
   result.allChecked = checklist.length > 0 && checklist.every((item) => item.checked);
@@ -172,14 +143,11 @@ function parseTask(text) {
       if (!currentPhase) return;
       const start = currentStart >= 0 ? currentStart : 0;
       const end = Math.max(start, endLineExclusive);
-      const slice = bodyLines.slice(start, end);
-      const items = [];
-      for (const ln of slice) {
-        const m = ln.match(/^-\s*\[( |x|X)\]\s+(.*)$/);
-        if (m) {
-          items.push({ checked: m[1].toLowerCase() === "x", text: m[2] });
-        }
-      }
+      const slice = bodyLines.slice(start, end).join("\n");
+      const items = parseCheckboxes(slice).map((item) => ({
+        checked: item.checked,
+        text: item.text,
+      }));
       sections[currentPhase] = {
         checklist: items,
         allChecked: items.length > 0 && items.every((it) => it.checked),
@@ -411,6 +379,48 @@ function detectMultiTaskCompletion(beforePlan, afterPlan, parsedTaskBefore = nul
   return false;
 }
 
+/**
+ * Detects if newly completed tasks span multiple phases.
+ *
+ * @param {string} beforePlan - Plan text before changes
+ * @param {string} afterPlan - Plan text after changes
+ * @returns {boolean} true if multiple phases were crossed
+ */
+function detectPhaseCrossing(beforePlan, afterPlan) {
+  const newlyChecked = compareCheckboxDiffs(beforePlan, afterPlan);
+
+  if (newlyChecked.length < 2) {
+    return false;
+  }
+
+  const phaseMap = new Map();
+  const lines = afterPlan.split(/\r?\n/);
+  let currentPhase = null;
+  let hasPhaseMarkers = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const phaseMatch = line.match(/<!--\s*loopy:phase\s+(\S+)\s*-->/);
+    if (phaseMatch) {
+      currentPhase = phaseMatch[1];
+      hasPhaseMarkers = true;
+    }
+    phaseMap.set(i + 1, currentPhase);
+  }
+
+  if (!hasPhaseMarkers) {
+    return false;
+  }
+
+  const phasesOfCheckedTasks = new Set();
+  for (const box of newlyChecked) {
+    const phase = phaseMap.get(box.line);
+    phasesOfCheckedTasks.add(phase ?? "__unphased__");
+  }
+
+  return phasesOfCheckedTasks.size > 1;
+}
+
 module.exports = {
   parseTask,
   getTaskLine,
@@ -420,4 +430,5 @@ module.exports = {
   parseCheckboxes,
   compareCheckboxDiffs,
   detectMultiTaskCompletion,
+  detectPhaseCrossing,
 };

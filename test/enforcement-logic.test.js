@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("enforcement-logic");
 const assert = require("node:assert/strict");
 
 const { detectMultiTaskCompletion } = require('../src/task');
@@ -416,5 +417,4 @@ test('Multi-phase violation: detects tasks from 2+ phases checked', () => {
   
   assert.equal(multiTaskDetected, true, 'Should detect violation when tasks from 2+ phases are checked');
 });
-
 

@@ -1,13 +1,20 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("cli-loop");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 
-const { CLI_PATH, runNodeCli, initGitRepo } = require("./cli-helpers");
+const { CLI_PATH, runNodeCli, initGitRepo, writeTestConfig } = require("./cli-helpers");
+
+async function createTmp(prefix) {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  await writeTestConfig(tmp);
+  return tmp;
+}
 
 test("no subcommand runs the default loop", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-default-loop-"));
+  const tmp = await createTmp("loopy-default-loop-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -24,11 +31,11 @@ test("no subcommand runs the default loop", async () => {
   assert.equal(code, 0, stderr);
   assert.match(stdout, /Loop start/);
   const prompt = await fs.readFile(path.join(tmp, ".loopy", "PROMPT.md"), "utf8");
-  assert.match(prompt, /Loopy Loop Prompt/);
+  assert.match(prompt, /Loopy Build Prompt/);
 });
 
 test("repeated failure signature triggers guardrail sign and cooldown", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-test-"));
+  const tmp = await createTmp("loopy-test-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   const taskPath = path.join(tmp, ".loopy", "LOOPY_PLAN.md");
   await fs.writeFile(
@@ -78,7 +85,7 @@ test("repeated failure signature triggers guardrail sign and cooldown", async ()
 });
 
 test("agent output streams to `.loopy/agent_stream.log`", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-log-"));
+  const tmp = await createTmp("loopy-stream-log-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -102,7 +109,7 @@ test("agent output streams to `.loopy/agent_stream.log`", async () => {
 });
 
 test("prints step status lines to terminal during loop", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-step-status-"));
+  const tmp = await createTmp("loopy-step-status-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -126,7 +133,7 @@ test("prints step status lines to terminal during loop", async () => {
 });
 
 test("NO_COLOR disables ANSI formatting in logs", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-no-color-"));
+  const tmp = await createTmp("loopy-no-color-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -146,7 +153,7 @@ test("NO_COLOR disables ANSI formatting in logs", async () => {
 });
 
 test("default `--verbose` prints full checklist details", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-verbose-plan-"));
+  const tmp = await createTmp("loopy-verbose-plan-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -165,7 +172,7 @@ test("default `--verbose` prints full checklist details", async () => {
 });
 
 test("`--verbose=false` hides checklist details", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-verbose-off-"));
+  const tmp = await createTmp("loopy-verbose-off-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -185,7 +192,7 @@ test("`--verbose=false` hides checklist details", async () => {
 });
 
 test("default streaming mirrors agent output to terminal", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-default-"));
+  const tmp = await createTmp("loopy-stream-default-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -219,7 +226,7 @@ test("default streaming mirrors agent output to terminal", async () => {
 });
 
 test("default streaming mirrors agent output to terminal", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-stream-terminal-"));
+  const tmp = await createTmp("loopy-stream-terminal-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -248,7 +255,7 @@ test("default streaming mirrors agent output to terminal", async () => {
 });
 
 test("`--no-stream` disables mirroring agent output to terminal", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-no-stream-"));
+  const tmp = await createTmp("loopy-no-stream-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -278,15 +285,20 @@ test("`--no-stream` disables mirroring agent output to terminal", async () => {
 });
 
 test("`--dry-run` stops after the first iteration (no backoff loop)", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-dry-run-single-"));
+  const tmp = await createTmp("loopy-dry-run-single-");
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] seed", ""].join("\n"),
+    "utf8"
+  );
 
   const { code, stdout, stderr } = await runNodeCli(
     [
       CLI_PATH,
       "--dry-run",
-      "--prompt",
-      "seed",
-      "--auto-phase=false",
+      "--test-command",
+      'node -e "process.exit(0)"',
       "--agent",
       'node -e "process.exit(0)"',
       "--max-minutes",
@@ -303,7 +315,7 @@ test("`--dry-run` stops after the first iteration (no backoff loop)", async () =
 });
 
 test("phase progression: `--phase-only` stops after phase completion and records phase history", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-phase-only-"));
+  const tmp = await createTmp("loopy-phase-only-");
 
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
@@ -364,7 +376,7 @@ test("phase progression: `--phase-only` stops after phase completion and records
 });
 
 test("archives completed loop files to archive/<branch> on loop completion", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-archive-plan-"));
+  const tmp = await createTmp("loopy-archive-plan-");
   const gitEnv = await initGitRepo(tmp);
 
   const agentCmd =
@@ -399,7 +411,7 @@ test("archives completed loop files to archive/<branch> on loop completion", asy
 });
 
 test("creates a fresh plan on the next loop after archiving", async () => {
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-archive-regen-"));
+  const tmp = await createTmp("loopy-archive-regen-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
   await fs.writeFile(
     path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
@@ -428,6 +440,9 @@ test("creates a fresh plan on the next loop after archiving", async () => {
       "--dry-run",
       "--prompt",
       "new work",
+      "--generate-prd=false",
+      "--test-command",
+      'node -e "process.exit(0)"',
       "--auto-phase=false",
       "--agent",
       'node -e "process.exit(0)"',
