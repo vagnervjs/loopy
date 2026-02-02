@@ -10,6 +10,13 @@ const { formatDurationMs, printStep } = require("./steps");
 const { loadState } = require("./state");
 const { parseTask, getCurrentTask } = require("./task");
 
+const STATUS_ANSI = {
+  reset: "\x1b[0m",
+  bold: "\x1b[1m",
+  cyan: "\x1b[36m",
+  blue: "\x1b[34m",
+};
+
 function getLoopyVersion() {
   try {
     // `src/cli.js` lives one level below `package.json`.
@@ -272,6 +279,20 @@ async function runStatus(flags) {
   const startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
   const elapsedMs = Number.isFinite(startedAtMs) ? Date.now() - startedAtMs : 0;
 
+  const useColor =
+    Boolean(process.stdout && process.stdout.isTTY) &&
+    !process.env.NO_COLOR &&
+    !flags["no-color"] &&
+    !flags.noColor;
+  const colorize = (value, color, bold = false) => {
+    if (!useColor) return String(value);
+    const code = STATUS_ANSI[color] || "";
+    const weight = bold ? STATUS_ANSI.bold : "";
+    if (!code && !weight) return String(value);
+    return `${weight}${code}${value}${STATUS_ANSI.reset}`;
+  };
+  const formatHeader = (label) => colorize(label, "blue", true);
+
   const tasksTotal = planMetrics ? planMetrics.totalTasks : 0;
   const tasksDone = planMetrics ? planMetrics.completedTasks : 0;
   const taskPercent = tasksTotal > 0 ? Math.round((tasksDone / tasksTotal) * 100) : 0;
@@ -281,43 +302,47 @@ async function runStatus(flags) {
     ? `[${"#".repeat(filled)}${"-".repeat(Math.max(0, barWidth - filled))}] ${taskPercent}% (${tasksDone}/${tasksTotal})`
     : "[--------------------] n/a";
 
-  const progressLines = [
-    "📈 Progress",
-    `Tasks: ${progressBar}`,
+  const formatLabelLine = (label, value) => `${colorize(label, "cyan")}: ${value}`;
+  const formatInfoLine = (label, value) => formatLabelLine(label, value);
+
+  const progressItems = [
+    progressBar,
+    formatLabelLine("Current phase", (state && state.currentPhase) || "n/a"),
     planMetrics && planMetrics.totalPhases
-      ? `Phases: ${planMetrics.completedPhases}/${planMetrics.totalPhases}`
-      : "Phases: n/a",
-    planMetrics ? `Current task: ${planMetrics.currentTask}` : "Current task: n/a",
+      ? formatLabelLine("Phases", `${planMetrics.completedPhases}/${planMetrics.totalPhases}`)
+      : formatLabelLine("Phases", "n/a"),
+    planMetrics
+      ? formatLabelLine("Current task", planMetrics.currentTask)
+      : formatLabelLine("Current task", "n/a"),
   ];
 
-  const timeLines = [
-    "⏱️  Time",
-    totalDurationMs > 0 ? `Total duration: ${formatDurationMs(totalDurationMs)}` : "Total duration: n/a",
-    elapsedMs > 0 ? `Elapsed: ${formatDurationMs(elapsedMs)}` : "Elapsed: n/a",
-    startedAt ? `Started at: ${startedAt}` : "Started at: n/a",
-    `Updated at: ${(state && state.updatedAt) || "n/a"}`,
+  const timeItems = [
+    totalDurationMs > 0
+      ? formatLabelLine("Total duration", formatDurationMs(totalDurationMs))
+      : formatLabelLine("Total duration", "n/a"),
+    elapsedMs > 0
+      ? formatLabelLine("Elapsed", formatDurationMs(elapsedMs))
+      : formatLabelLine("Elapsed", "n/a"),
+    startedAt ? formatLabelLine("Started at", startedAt) : formatLabelLine("Started at", "n/a"),
+    formatLabelLine("Updated at", (state && state.updatedAt) || "n/a"),
+  ];
+  const infoItems = [
+    formatInfoLine("Iteration", state && state.iteration != null ? state.iteration : 0),
+    formatInfoLine("Last status", (state && state.lastStatus) || "n/a"),
+    formatInfoLine("Last test", (state && state.lastTest) || "n/a"),
+    formatInfoLine("Last error", (state && state.lastError) || "n/a"),
+    formatInfoLine("Last hint", (state && state.lastHint) || "n/a"),
+    formatInfoLine("Last hint at", (state && state.lastHintAt) || "n/a"),
+    formatInfoLine("Hint count", state && state.hintCount != null ? state.hintCount : 0),
+    formatInfoLine("Last bytes", state && state.lastBytes != null ? state.lastBytes : 0),
+    formatInfoLine("Plan file", path.relative(cwd, planFile) || planFile),
+    formatInfoLine("Hints file", path.relative(cwd, hintsFile) || hintsFile),
   ];
 
-  const detailRows = [
-    ["Iteration", state && state.iteration != null ? state.iteration : 0],
-    ["Current phase", (state && state.currentPhase) || "n/a"],
-    ["Last status", (state && state.lastStatus) || "n/a"],
-    ["Last test", (state && state.lastTest) || "n/a"],
-    ["Last error", (state && state.lastError) || "n/a"],
-    ["Last hint", (state && state.lastHint) || "n/a"],
-    ["Last hint at", (state && state.lastHintAt) || "n/a"],
-    ["Hint count", state && state.hintCount != null ? state.hintCount : 0],
-    ["Last bytes", state && state.lastBytes != null ? state.lastBytes : 0],
-    ["Plan file", path.relative(cwd, planFile) || planFile],
-    ["Hints file", path.relative(cwd, hintsFile) || hintsFile],
-  ];
-  const keyWidth = Math.max(...detailRows.map(([key]) => String(key).length));
-  const infoLines = [
-    "ℹ️  Details",
-    ...detailRows.map(
-      ([key, value]) => `  ${String(key).padEnd(keyWidth)} | ${String(value)}`
-    ),
-  ];
+  const indentLines = (items) => items.map((line) => (line ? `  - ${line}` : ""));
+  const progressLines = [formatHeader("📈 Progress"), ...indentLines(progressItems)];
+  const timeLines = [formatHeader("⏱️ Time"), ...indentLines(timeItems)];
+  const infoLines = [formatHeader("ℹ️ Details"), ...indentLines(infoItems)];
 
   const lines = [
     `Loopy status (${path.relative(cwd, stateFile) || stateFile})`,
