@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("prompt-modifications");
 const assert = require("node:assert/strict");
 
 const { getCurrentTask, getCurrentPhaseSection } = require("../src/task");

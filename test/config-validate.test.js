@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("config-validate");
 const assert = require("node:assert/strict");
 
 const { validateConfig } = require("../src/config-validate");

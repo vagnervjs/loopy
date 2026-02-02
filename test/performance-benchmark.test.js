@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("performance-benchmark");
 const assert = require("node:assert/strict");
 const { parseCheckboxes, compareCheckboxDiffs } = require("../src/task");
 

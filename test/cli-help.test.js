@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("cli-help");
 const assert = require("node:assert/strict");
 
 const { CLI_PATH, LOOPY_VERSION, runNodeCli, assertHelpAligned } = require("./cli-helpers");

@@ -1,4 +1,5 @@
-const test = require("node:test");
+const { suite } = require("./suite");
+const test = suite("prompt-template");
 const assert = require("node:assert/strict");
 
 const { formatPrompt } = require("../src/prompt");
