@@ -9,6 +9,7 @@ This document summarizes the Phase 1 updates for Ralph-compatible planning/promp
 - Added `--prompt-template <file>` to override the template file path.
 - Plan-only mode now prepares the plan and writes a prompt preview without running build iterations.
 - Loopy now includes `AGENTS.md` and a `specs/` summary in prompts (auto-generates `.loopy/AGENTS.md` when missing).
+- Plan generation now requires `test_command` (use `--test-command` for non-interactive runs).
 
 ## New workflow options
 

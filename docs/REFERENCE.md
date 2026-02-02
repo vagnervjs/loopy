@@ -32,6 +32,16 @@ Plan-only mode generates or updates `LOOPY_PLAN.md` and exits without running bu
 loopy --mode plan --prompt "Add OAuth login to the app"
 ```
 
+## Ralph compatibility
+
+Loopy follows the Ralph playbook structure with separate planning and building phases:
+
+- `--mode plan`: planning only (generates/updates `LOOPY_PLAN.md`, no build iterations)
+- `--mode build`: build loop (executes tasks from `LOOPY_PLAN.md`)
+- Prompt templates: `PROMPT_plan.md` + `PROMPT_build.md` (or `--prompt-template` override)
+- `AGENTS.md` and `specs/` summary are injected into every prompt; `.loopy/AGENTS.md` is bootstrapped when missing (disable with `--no-bootstrap-agents`)
+- `test_command` is required when generating or updating plans; use `--test-command` in non-interactive runs
+
 Resume a previous run (requires `.loopy/state.json`):
 ```bash
 loopy --resume

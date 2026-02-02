@@ -184,7 +184,7 @@ Generates/updates `LOOPY_PLAN.md` and exits without running build iterations.
 
 Add `PROMPT_build.md` and `PROMPT_plan.md` to customize prompts per mode. Use `--prompt-template <file>` to override the template path.
 
-> 📚 More workflows and real-world examples in [`docs/REFERENCE.md`](./docs/REFERENCE.md)
+> 📚 More workflows in [`docs/REFERENCE.md`](./docs/REFERENCE.md) and Ralph-specific guidance in [`docs/RALPH_WORKFLOW.md`](./docs/RALPH_WORKFLOW.md). Templates live in [`examples/`](./examples).
 
 ---
 
@@ -229,6 +229,7 @@ Loopy treats a **markdown plan document** as the source of truth and orchestrate
 | Resource | Description |
 |----------|-------------|
 | **[Complete Reference](./docs/REFERENCE.md)** | Full CLI reference, configuration options, git integration, and troubleshooting |
+| **[Ralph Workflow](./docs/RALPH_WORKFLOW.md)** | Planning vs building guidance, templates, and workflow conventions |
 | **[Examples](./examples)** | Sample PRDs, prompts, and plan templates for common use cases |
 | **[API Documentation](./docs/API.md)** | Internal architecture for contributors |
 
