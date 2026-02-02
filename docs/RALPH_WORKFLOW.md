@@ -73,6 +73,10 @@ Use these placeholders in your template to inject Loopy context:
 - `{{last_output}}`
 - `{{last_output_block}}`
 - `{{instructions}}`
+- `{{specs}}`
+- `{{specs_block}}`
+- `{{agents}}`
+- `{{agents_block}}`
 
 Placeholders that are not available resolve to an empty string.
 
