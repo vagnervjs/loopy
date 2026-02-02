@@ -6,8 +6,9 @@ const { parseArgs } = require("./args");
 const { DEFAULTS, resolveFrom } = require("./config");
 const { appendText, readText, writeText } = require("./fs");
 const { runLoop } = require("./loop");
-const { printStep } = require("./steps");
+const { formatDurationMs, printStep } = require("./steps");
 const { loadState } = require("./state");
+const { parseTask, getCurrentTask } = require("./task");
 
 function getLoopyVersion() {
   try {
@@ -208,6 +209,7 @@ async function runStatus(flags) {
   const cwd = process.cwd();
   const stateFile = resolveFrom(cwd, flags.state || DEFAULTS.stateFile);
   const hintsFile = resolveFrom(cwd, flags.hints || DEFAULTS.hintsFile);
+  const planFile = resolveFrom(cwd, flags["plan-file"] || DEFAULTS.taskFile);
 
   let text = "";
   try {
@@ -236,6 +238,39 @@ async function runStatus(flags) {
     process.exitCode = 1;
     return;
   }
+  state = state || {};
+
+  const planText = await readText(planFile);
+  let planMetrics = null;
+  if (planText) {
+    try {
+      const parsed = parseTask(planText);
+      const totalTasks = parsed.checklist.length;
+      const completedTasks = parsed.checklist.filter((item) => item.checked).length;
+      const totalPhases = parsed.phases.length;
+      const completedPhases = parsed.phases.reduce((sum, phase) => {
+        const section = parsed.phaseSections[phase.id];
+        return sum + (section && section.allChecked ? 1 : 0);
+      }, 0);
+      const currentTaskObj = getCurrentTask(planText, {
+        phaseId: (state && state.currentPhase) || "",
+      });
+      planMetrics = {
+        totalTasks,
+        completedTasks,
+        totalPhases,
+        completedPhases,
+        currentTask: currentTaskObj ? currentTaskObj.text.trim() : "n/a",
+      };
+    } catch (_) {
+      planMetrics = null;
+    }
+  }
+
+  const totalDurationMs = (state.iterationDurations || []).reduce((sum, d) => sum + d, 0);
+  const startedAt = state.startedAt || "";
+  const startedAtMs = startedAt ? Date.parse(startedAt) : NaN;
+  const elapsedMs = Number.isFinite(startedAtMs) ? Date.now() - startedAtMs : 0;
 
   const lines = [
     `Loopy status (${path.relative(cwd, stateFile) || stateFile})`,
@@ -249,7 +284,16 @@ async function runStatus(flags) {
     `Last hint at: ${(state && state.lastHintAt) || "n/a"}`,
     `Hint count: ${state && state.hintCount != null ? state.hintCount : 0}`,
     `Last bytes: ${state && state.lastBytes != null ? state.lastBytes : 0}`,
+    `Plan file: ${path.relative(cwd, planFile) || planFile}`,
+    planMetrics ? `Tasks: ${planMetrics.completedTasks}/${planMetrics.totalTasks}` : "Tasks: n/a",
+    planMetrics && planMetrics.totalPhases
+      ? `Phases: ${planMetrics.completedPhases}/${planMetrics.totalPhases}`
+      : "Phases: n/a",
+    planMetrics ? `Current task: ${planMetrics.currentTask}` : "Current task: n/a",
+    totalDurationMs > 0 ? `Total duration: ${formatDurationMs(totalDurationMs)}` : "Total duration: n/a",
+    elapsedMs > 0 ? `Elapsed: ${formatDurationMs(elapsedMs)}` : "Elapsed: n/a",
     `Updated at: ${(state && state.updatedAt) || "n/a"}`,
+    startedAt ? `Started at: ${startedAt}` : "Started at: n/a",
     `Hints file: ${path.relative(cwd, hintsFile) || hintsFile}`,
     "",
   ];

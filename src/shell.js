@@ -209,7 +209,13 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
     let stderr = "";
     attachStopListener(child);
     child.stdout.on("data", (chunk) => {
-      if (streamToTerminal) process.stdout.write(chunk);
+      if (streamToTerminal) {
+        try {
+          process.stdout.write(chunk);
+        } catch (err) {
+          if (!(err && err.code === "EPIPE")) throw err;
+        }
+      }
       if (agentStreamLogPath) appendToLog(redact(chunk.toString()));
       if (Buffer.byteLength(stdout) < limit) {
         stdout += chunk.toString();
@@ -217,7 +223,13 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
     });
 
     child.stderr.on("data", (chunk) => {
-      if (streamToTerminal) process.stderr.write(chunk);
+      if (streamToTerminal) {
+        try {
+          process.stderr.write(chunk);
+        } catch (err) {
+          if (!(err && err.code === "EPIPE")) throw err;
+        }
+      }
       if (agentStreamLogPath) appendToLog(redact(chunk.toString()));
       if (Buffer.byteLength(stderr) < limit) {
         stderr += chunk.toString();
@@ -293,4 +305,3 @@ module.exports = {
   runShellCommand,
   runProcess,
 };
-

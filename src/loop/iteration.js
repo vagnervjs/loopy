@@ -10,7 +10,7 @@ const { formatProgress, ensureGuardrails, appendSign, formatPrompt } = require("
 const { runShellCommand } = require("../shell");
 const { Spinner } = require("../spinner");
 const { loadState } = require("../state");
-const { endIteration, printStep, startIteration } = require("../steps");
+const { endIteration, printBlankLine, printStep, startIteration } = require("../steps");
 const {
   detectMultiTaskCompletion,
   getCurrentPhaseSection,
@@ -206,6 +206,7 @@ async function runIteration(config, { stopSignal } = {}) {
       noEmoji: config.noEmoji,
     });
     spinner.start();
+    printBlankLine();
 
     const agentResult = await runShellCommand(config.agentCommand, prompt, DEFAULTS.maxOutputBytes, {
       cwd: config.cwd,
