@@ -110,11 +110,7 @@ const DEFAULT_BUILD_PROMPT_TEMPLATE = [
   "{{guardrails}}",
   "",
   "## Task Rules",
-  "- Do not assume functionality is missing; search first.",
-  "- Complete only the current task.",
-  "- Implement fully; no stubs or placeholders.",
   "- Run required tests for the task and fix failures.",
-  "- Update the plan checkbox for the completed task.",
   "",
   "{{instructions}}",
   "",
@@ -1207,9 +1203,12 @@ async function runIteration(config, { stopSignal } = {}) {
   try {
     printStep(`Rotation ${rotationPending ? "fresh" : "standard"}`, { iteration, kind: "meta" });
 
-    const lastOutputRaw = rotationPending ? "" : await readText(path.join(config.loopyDir, "last_agent_output.txt"));
-    bytesRead += Buffer.byteLength(lastOutputRaw);
-    const lastOutput = truncate(lastOutputRaw, 4000);
+    let lastOutput = "";
+    if (config.includeLastOutput && !rotationPending) {
+      const lastOutputRaw = await readText(path.join(config.loopyDir, "last_agent_output.txt"));
+      bytesRead += Buffer.byteLength(lastOutputRaw);
+      lastOutput = truncate(lastOutputRaw, 4000);
+    }
 
     const hintsTextRaw = await readText(config.hintsFile);
     bytesRead += Buffer.byteLength(hintsTextRaw);

@@ -110,14 +110,19 @@ function formatPrompt({
     ? ["## Specs Summary", String(specsText || "").trimEnd()].join("\n")
     : "";
   const instructionsLines = ["## Instructions"];
-  if (currentTask) instructionsLines.push("- **Complete only the Current Task in this iteration.**");
   instructionsLines.push(
+    "- Don't assume something is unimplemented; search first.",
+    currentTask ? null : "- Complete only the current task.",
+    "- Update AGENTS.md only for operational learnings.",
+    "- No stubs or placeholder implementations.",
     `- Follow the plan checklist in ${planLabel}.`,
     "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state."
   );
-  const instructionsBlock = instructionsLines.join("\n");
+  if (currentTask) instructionsLines.push("- **Complete only the Current Task in this iteration.**");
+  const instructionsBlock = instructionsLines.filter(Boolean).join("\n");
+  
 
   const templateText = String(promptTemplate || "");
   if (templateText.trim()) {

@@ -31,6 +31,7 @@ const DEFAULTS = {
   mode: "build",
   promptTemplate: "",
   bootstrapAgents: true,
+  includeLastOutput: false,
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -261,6 +262,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const modeDefault = pickDefined(def, ["mode"]);
   const promptTemplateDefault = pickDefined(def, ["prompt_template", "promptTemplate"]);
   const bootstrapAgentsDefault = pickDefined(def, ["bootstrap_agents", "bootstrapAgents"]);
+  const includeLastOutputDefault = pickDefined(def, ["include_last_output", "includeLastOutput"]);
   const gitBranchDefault =
     pickDefined(def, ["git_branch", "gitBranch"]) ||
     pickDefined(defaultGit, ["branch", "git_branch", "gitBranch"]);
@@ -446,6 +448,10 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     bootstrapAgents: coerceBoolean(
       flags["no-bootstrap-agents"] !== undefined ? !coerceBoolean(flags["no-bootstrap-agents"], false) : bootstrapAgentsDefault,
       DEFAULTS.bootstrapAgents
+    ),
+    includeLastOutput: coerceBoolean(
+      flags["include-last-output"] ?? fm.include_last_output ?? fm.includeLastOutput ?? includeLastOutputDefault,
+      DEFAULTS.includeLastOutput
     ),
   };
 }
