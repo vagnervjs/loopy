@@ -111,7 +111,7 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "- Scoped: small enough for < 1 day of work.",
     "- Clear: start with a strong verb (add/implement/update/remove/verify).",
     "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
-    "- Ensure phase_defaults.test_command is set (use npm test if unsure).",
+    "- Ensure phase_defaults.test_command is set (ask if unsure).",
     "- Quote every checklist item in YAML.",
     "- Prefer 5-10 tasks per phase.",
     "",

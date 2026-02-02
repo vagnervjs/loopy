@@ -130,6 +130,7 @@ function printHelp() {
     ],
     Files: [
       { label: "--plan-file <file>", desc: `Plan doc path (default: ${DEFAULTS.taskFile})` },
+      { label: "--test-command <cmd>", desc: "Test command for phases (required when generating plans)" },
       { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },
       { label: "--guardrails <file>", desc: "Guardrails file (default: .loopy/guardrails.md)" },
       { label: "--activity-log <file>", desc: "Activity log (default: .loopy/activity.log)" },

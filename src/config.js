@@ -324,7 +324,8 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     promptSeed: promptSeedFlag === true ? "" : String(promptSeedFlag || ""),
     agentCommand: normalizeCommand(flags.agent || fm.agent_command || fm.agentCommand || agentCommandDefault || ""),
     testCommand: normalizeCommand(
-      fm.test_command ||
+      flags["test-command"] ||
+        fm.test_command ||
         fm.testCommand ||
         phaseDefaults.test_command ||
         phaseDefaults.testCommand ||

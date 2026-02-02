@@ -877,7 +877,6 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   const cwd = config.cwd;
   const taskPath = config.taskFile;
   const shouldStop = () => Boolean(stopSignal && stopSignal.stopRequested);
-  const defaultTestCommand = config.testCommand || "npm test";
   const phaseAgentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
   const logPhasePlan = () => {
     printStep(`Generating phase plan${phaseAgentLabel}`, { kind: "plan" });
@@ -900,6 +899,18 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       );
     }
 
+    let testCommand = config.testCommand;
+    if (!String(testCommand || "").trim()) {
+      if (!process.stdin.isTTY) {
+        throw new Error("Missing test command for plan (set test_command in plan front matter or config).");
+      }
+      testCommand = await promptLine("Enter test command for this plan (required): ");
+    }
+    testCommand = String(testCommand || "").trim();
+    if (!testCommand) {
+      throw new Error("Missing test command for plan (required).");
+    }
+
     // If auto-phase is on, try to generate phases; otherwise create a minimal legacy task file.
     let nextText = "";
     if (config.autoPhase) {
@@ -917,16 +928,16 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
-        : fallbackPhasesFromSeed(seed, { testCommand: defaultTestCommand });
+        : fallbackPhasesFromSeed(seed, { testCommand });
       if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
         plan.phaseDefaults = {};
       }
       if (!String(plan.phaseDefaults.test_command || plan.phaseDefaults.testCommand || "").trim()) {
-        plan.phaseDefaults.test_command = defaultTestCommand;
+        plan.phaseDefaults.test_command = testCommand;
       }
       const fm = {
         agent_command: config.agentCommand || "",
-        test_command: defaultTestCommand,
+        test_command: testCommand,
         max_iterations: config.maxIterations,
         max_minutes: config.maxMinutes,
         backoff_ms: config.backoffMs,
@@ -951,7 +962,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         yaml.dump(
           {
             agent_command: config.agentCommand || "",
-            test_command: defaultTestCommand,
+            test_command: testCommand,
             max_iterations: config.maxIterations,
             max_minutes: config.maxMinutes,
             backoff_ms: config.backoffMs,
@@ -983,7 +994,17 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
     const seed = loaded.seed;
     const parsed = parseTask(existing);
     const fm = parsed.frontMatter || {};
-    const defaultTestCommand = config.testCommand || "npm test";
+    let testCommand = config.testCommand || fm.test_command || fm.testCommand || "";
+    if (!String(testCommand || "").trim()) {
+      if (!process.stdin.isTTY) {
+        throw new Error("Missing test command for plan update (set test_command in plan front matter or config).");
+      }
+      testCommand = await promptLine("Enter test command for this plan (required): ");
+    }
+    testCommand = String(testCommand || "").trim();
+    if (!testCommand) {
+      throw new Error("Missing test command for plan update (required).");
+    }
 
     let nextText = existing;
     if (config.autoPhase) {
@@ -1001,15 +1022,15 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       }
       const plan = proposed.ok
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
-        : fallbackPhasesFromSeed(seed, { testCommand: fm.test_command || fm.testCommand || defaultTestCommand });
+        : fallbackPhasesFromSeed(seed, { testCommand });
       if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
         plan.phaseDefaults = {};
       }
       if (!String(plan.phaseDefaults.test_command || plan.phaseDefaults.testCommand || "").trim()) {
-        plan.phaseDefaults.test_command = defaultTestCommand;
+        plan.phaseDefaults.test_command = testCommand;
       }
       if (!String(fm.test_command || fm.testCommand || "").trim()) {
-        fm.test_command = defaultTestCommand;
+        fm.test_command = testCommand;
       }
       nextText = renderTaskMarkdown({
         frontMatter: fm,
@@ -1067,12 +1088,22 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
         : null;
       if (plan) {
-        const defaultTestCommand = config.testCommand || "npm test";
+        let testCommand = config.testCommand || parsed.frontMatter.test_command || parsed.frontMatter.testCommand || "";
+        if (!String(testCommand || "").trim()) {
+          if (!process.stdin.isTTY) {
+            throw new Error("Missing test command for plan (set test_command in plan front matter or config).");
+          }
+          testCommand = await promptLine("Enter test command for this plan (required): ");
+        }
+        testCommand = String(testCommand || "").trim();
+        if (!testCommand) {
+          throw new Error("Missing test command for plan (required).");
+        }
         if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
           plan.phaseDefaults = {};
         }
         if (!String(plan.phaseDefaults.test_command || plan.phaseDefaults.testCommand || "").trim()) {
-          plan.phaseDefaults.test_command = defaultTestCommand;
+          plan.phaseDefaults.test_command = testCommand;
         }
         const nextText = renderTaskMarkdown({
           frontMatter: parsed.frontMatter || {},
