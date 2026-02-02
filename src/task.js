@@ -379,6 +379,48 @@ function detectMultiTaskCompletion(beforePlan, afterPlan, parsedTaskBefore = nul
   return false;
 }
 
+/**
+ * Detects if newly completed tasks span multiple phases.
+ *
+ * @param {string} beforePlan - Plan text before changes
+ * @param {string} afterPlan - Plan text after changes
+ * @returns {boolean} true if multiple phases were crossed
+ */
+function detectPhaseCrossing(beforePlan, afterPlan) {
+  const newlyChecked = compareCheckboxDiffs(beforePlan, afterPlan);
+
+  if (newlyChecked.length < 2) {
+    return false;
+  }
+
+  const phaseMap = new Map();
+  const lines = afterPlan.split(/\r?\n/);
+  let currentPhase = null;
+  let hasPhaseMarkers = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const phaseMatch = line.match(/<!--\s*loopy:phase\s+(\S+)\s*-->/);
+    if (phaseMatch) {
+      currentPhase = phaseMatch[1];
+      hasPhaseMarkers = true;
+    }
+    phaseMap.set(i + 1, currentPhase);
+  }
+
+  if (!hasPhaseMarkers) {
+    return false;
+  }
+
+  const phasesOfCheckedTasks = new Set();
+  for (const box of newlyChecked) {
+    const phase = phaseMap.get(box.line);
+    phasesOfCheckedTasks.add(phase ?? "__unphased__");
+  }
+
+  return phasesOfCheckedTasks.size > 1;
+}
+
 module.exports = {
   parseTask,
   getTaskLine,
@@ -388,4 +430,5 @@ module.exports = {
   parseCheckboxes,
   compareCheckboxDiffs,
   detectMultiTaskCompletion,
+  detectPhaseCrossing,
 };

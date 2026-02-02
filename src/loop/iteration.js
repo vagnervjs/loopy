@@ -13,6 +13,7 @@ const { loadState } = require("../state");
 const { endIteration, printBlankLine, printStep, startIteration } = require("../steps");
 const {
   detectMultiTaskCompletion,
+  detectPhaseCrossing,
   getCurrentPhaseSection,
   getCurrentTask,
   getTaskLine,
@@ -260,7 +261,7 @@ async function runIteration(config, { stopSignal } = {}) {
       if (multiTaskDetected) {
         status = "failure";
         // Determine if phase boundary was crossed
-        const hasPhaseCrossing = parsedTask && parsedTaskAfter;
+        const hasPhaseCrossing = detectPhaseCrossing(taskText, taskAfter);
         lastError = hasPhaseCrossing
           ? "Multiple phases crossed in single iteration (single-task mode enforced)"
           : "Multiple tasks completed in single iteration (single-task mode enforced)";
