@@ -193,7 +193,7 @@ async function runIteration(config, { stopSignal } = {}) {
     );
 
     printStep(
-      `Agent run ${redact(config.agentCommand)} (stream log: ${prettyPath(config.cwd, agentStreamLogPath)})`,
+      `Agent run ${redact(config.agentCommand)}`,
       { iteration, kind: "agent" }
     );
 
@@ -201,7 +201,7 @@ async function runIteration(config, { stopSignal } = {}) {
     const agentRunningState = { ...state, isAgentRunning: true };
     await writeText(config.stateFile, JSON.stringify(agentRunningState, null, 2) + "\n");
 
-    const spinner = new Spinner("Agent request in progress...", {
+    const spinner = new Spinner("🤖 Agent at work...", {
       plain: config.plain,
       noEmoji: config.noEmoji,
     });

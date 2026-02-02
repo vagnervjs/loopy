@@ -419,8 +419,10 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
   if (config.mode === "plan") {
     await writePromptPreview(config);
-    await appendActivity(config.activityLog, ["Plan-only mode: skipping build iterations."]);
-    printStep("Plan-only mode: skipping build iterations", { kind: "plan" });
+    const planOnlyMessage =
+      "Plan-only mode: skipping build iterations. Run `loopy` again to build from the plan.";
+    await appendActivity(config.activityLog, [planOnlyMessage]);
+    printStep(planOnlyMessage, { kind: "plan" });
     return;
   }
 
