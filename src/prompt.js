@@ -103,7 +103,7 @@ function formatPrompt({
     ? ["## Current Task", "", `- [ ] ${currentTask}`, ""].join("\n")
     : "";
   const lastOutputBlock = !rotationPending && lastOutput
-    ? ["## Last Agent Output (truncated)", String(lastOutput || "").trimEnd()].join("\n")
+    ? ["## Last Agent Output (truncated)", String(lastOutput).trimEnd()].join("\n")
     : "";
   const agentsBlock = String(agentsText || "").trim() ? ["## AGENTS", String(agentsText || "").trimEnd()].join("\n") : "";
   const specsBlock = String(specsText || "").trim()
