@@ -19,6 +19,8 @@ loopy
 
 In build mode (default), Loopy follows tasks from `LOOPY_PLAN.md` and updates progress/checkboxes as work completes.
 
+If no plan exists, running `loopy` starts plan mode and prompts for a seed.
+
 Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps `.loopy/AGENTS.md` unless `--no-bootstrap-agents` is set.
 
 **Start a new loop (non-interactive — for automation):**
@@ -38,6 +40,8 @@ Loopy follows the Ralph playbook structure with separate planning and building p
 
 - `--mode plan`: planning only (generates/updates `LOOPY_PLAN.md`, no build iterations)
 - `--mode build`: build loop (executes tasks from `LOOPY_PLAN.md`)
+- Build mode requires an existing plan; `--prompt` is ignored.
+- `--generate-prd` (plan mode): generate PRD first; uses `--prompt` as the PRD seed
 - Prompt templates: `PROMPT_plan.md` + `PROMPT_build.md` (or `--prompt-template` override)
 - `AGENTS.md` and `specs/` summary are injected into every prompt; `.loopy/AGENTS.md` is bootstrapped when missing (disable with `--no-bootstrap-agents`)
 - `test_command` is required when generating or updating plans; use `--test-command` in non-interactive runs
@@ -46,7 +50,7 @@ Resume a previous run (requires `.loopy/state.json`):
 ```bash
 loopy --resume
 ```
-Note: `--resume` is resume-only and cannot be combined with `--prompt` or `--prd`.
+Note: `--resume` is resume-only and cannot be combined with `--prompt`.
 
 Run a single iteration:
 ```bash
@@ -85,13 +89,16 @@ loopy --agent "cursor-agent" --prompt @./task.txt
 cat ./task.txt | loopy --agent "cursor-agent" --prompt -
 ```
 
-### Plan seed from a file or stdin (PRD-first)
+### PRD generation (plan mode)
 ```bash
 # file
-loopy --agent "cursor-agent" --prd @./problem.md
+loopy --agent "cursor-agent" --mode plan --prompt @./problem.md
 
 # stdin
-cat ./problem.md | loopy --agent "cursor-agent" --prd -
+cat ./problem.md | loopy --agent "cursor-agent" --mode plan --prompt -
+
+# skip PRD generation (plan directly from prompt)
+loopy --agent "cursor-agent" --mode plan --prompt "Seed" --generate-prd=false
 ```
 
 ## Log output
@@ -110,7 +117,7 @@ Completion is driven by checked items, not by agent confidence.
 
 ## How Loopy works
 1. Loopy reads a plan doc (default: `.loopy/LOOPY_PLAN.md`) on every iteration.
-2. If you provide a seed prompt (`--prompt`) or PRD seed (`--prd`), Loopy generates/updates the plan doc before looping.
+2. If you provide a seed prompt (`--prompt`), Loopy generates/updates the plan doc before looping (PRD-first when `--generate-prd` is enabled).
 3. When run interactively with a seed, Loopy pauses for plan review before starting iterations.
 4. Each iteration runs the agent, optional tests, and updates logs/state.
 5. The loop stops when all plan checkboxes are checked or when guardrails stop it.
@@ -151,13 +158,13 @@ hooks:
 You can also pass `--agent` to override the plan front matter.
 See `examples/LOOPY_PLAN.md` for a starter template.
 
-### PRD seed (`--prd`)
-The PRD seed is a raw problem statement. Loopy uses it to generate a PRD (`.loopy/PRD.md`) via the agent, then uses the PRD as the seed for the plan doc.
+### PRD generation (`--generate-prd`)
+When enabled in plan mode (default), Loopy uses the seed prompt (`--prompt`) to generate a PRD (`.loopy/PRD.md`) via the agent, then uses the PRD as the seed for the plan doc.
 
 How to provide it:
-- `--prd "<text>"`: inline text
-- `--prd @<path>`: read text from a file (any extension; `.md` recommended)
-- `--prd -`: read text from stdin
+- `--mode plan --prompt "<text>"`: inline text
+- `--mode plan --prompt @<path>`: read text from a file (any extension; `.md` recommended)
+- `--mode plan --prompt -`: read text from stdin
 
 Notes:
 - If you also provide `--prompt`, Loopy passes it as extra context during PRD generation.
@@ -272,7 +279,7 @@ Core loop:
 - `--dry-run` build prompt only, skip agent execution
 
 Input/output paths:
-- `--prd <text|@file|->` PRD seed to generate PRD + plan before looping
+- `--generate-prd` generate PRD + plan before looping (plan mode only)
 - `--plan-file <file>` plan doc path (default: `.loopy/LOOPY_PLAN.md`)
 - `--prompt <text|@file|->` seed prompt to generate/update the plan doc before looping
 
@@ -311,7 +318,7 @@ Output/utility:
 - `.loopy/agent_stream.log` live agent stdout/stderr stream (redacted)
 - `.loopy/last_test_output.txt` most recent test output (redacted)
 - `.loopy/PROMPT.md` generated prompt input for each iteration
-- `.loopy/PRD.md` generated PRD (when using `--prd`)
+- `.loopy/PRD.md` generated PRD (when `--generate-prd` is enabled)
 
 ## Git integration
 Loopy can:
@@ -372,11 +379,11 @@ Safety notes:
 - There is no explicit max size cap today; very large prompts can degrade planning quality.
 
 ## Troubleshooting
-- Missing plan doc: provide `--prompt` or `--prd` to generate one (or use `--plan-file <file>` to point to an existing file).
+- Missing plan doc: provide `--prompt` (plan mode) to generate one (or use `--plan-file <file>` to point to an existing file).
 - Agent exits immediately: verify `agent_command` is correct and accepts stdin.
 - Loop stops early: check `.loopy/progress.md` and `.loopy/activity.log` for caps or completion.
 - Guardrails growing: repeated failures or file thrashing were detected.
-- Resume errors: `--resume` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt` or `--prd`.
+- Resume errors: `--resume` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt`.
 - Flag errors: `--prompt` requires a value (`"<text>"`, `@<file>`, or `-`); `--prompt-out` requires a file path value.
 - Resetting state: use `loopy reset` to archive all `.loopy/` files to `.loopy/archive/reset-<timestamp>/` for a clean start; or delete the whole `.loopy/` directory for a full reset.
 

@@ -91,13 +91,10 @@ function printHelp() {
 
   const commonOptions = [
     { label: "--mode <build|plan>", desc: "Run in build mode (default) or plan-only mode" },
-    { label: "--prompt <text>", desc: "Seed prompt (inline) to generate/update the plan before looping" },
-    { label: "--prompt @<file>", desc: "Seed prompt from a file to generate/update the plan before looping" },
-    { label: "--prompt -", desc: "Seed prompt from stdin to generate/update the plan before looping" },
-    { label: "--prd <text>", desc: "PRD prompt (inline) to generate a PRD + plan before looping" },
-    { label: "--prd @<file>", desc: "PRD prompt from a file to generate a PRD + plan before looping" },
-    { label: "--prd -", desc: "PRD prompt from stdin to generate a PRD + plan before looping" },
-    { label: "--prompt-template <file>", desc: "Override prompt template file (build or plan)" },
+    { label: "--prompt <text>", desc: "Seed prompt (inline) for plan/PRD generation" },
+    { label: "--prompt @<file>", desc: "Seed prompt from a file for plan/PRD generation" },
+    { label: "--prompt -", desc: "Seed prompt from stdin for plan/PRD generation" },
+    { label: "--generate-prd", desc: "Generate a PRD before the plan (plan mode only; default true; set false to skip)" },
     {
       label: "--resume",
       desc: "Resume from saved state (requires existing `.loopy/state.json`); skips git switching",
@@ -130,6 +127,7 @@ function printHelp() {
     ],
     Files: [
       { label: "--plan-file <file>", desc: `Plan doc path (default: ${DEFAULTS.taskFile})` },
+      { label: "--prompt-template <file>", desc: "Override prompt template (build or plan)" },
       { label: "--test-command <cmd>", desc: "Test command for phases (required when generating plans)" },
       { label: "--progress <file>", desc: "Progress file (default: .loopy/progress.md)" },
       { label: "--guardrails <file>", desc: "Guardrails file (default: .loopy/guardrails.md)" },

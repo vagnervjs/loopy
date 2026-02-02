@@ -96,7 +96,7 @@ npm link
 loopy
 ```
 
-Defaults to build mode: Loopy follows tasks in `LOOPY_PLAN.md` and updates checkboxes as work completes.
+If no plan exists, Loopy starts in plan mode and asks for a seed; otherwise it runs build mode.
 
 Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps `.loopy/AGENTS.md` unless `--no-bootstrap-agents` is set.
 
@@ -162,15 +162,15 @@ loopy status
 
 Displays: iteration count, current phase, last status, test results, errors, output size, and timestamps.
 
-### Use a Predefined PRD
+### Generate a PRD + Plan
 
 ```bash
-loopy --prd examples/feature-prd.md
+loopy --mode plan --prompt @examples/feature-prd.md
 ```
 
 Use the PRD-first flow to generate/update `LOOPY_PLAN.md` from a PRD seed.
 
-If you already have a clear plan seed, use `--prompt` instead of `--prd`.
+If you already have a clear plan seed, run plan mode with `--generate-prd=false`.
 
 ### Plan-Only Mode
 

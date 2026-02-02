@@ -26,6 +26,7 @@ test("auto-phase task creation requires confirmation with `--confirm`", async ()
       "--dry-run",
       "--prompt",
       "build a thing",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--confirm",
@@ -42,7 +43,7 @@ test("auto-phase task creation requires confirmation with `--confirm`", async ()
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
 });
 
-test("`--prd` generates PRD and plan before looping", async () => {
+test("`--generate-prd` generates PRD and plan before looping", async () => {
   const tmp = await createTmp("loopy-plan-prd-");
   const prdCmd =
     'node -e "process.stdout.write(\\\"# PRD: Plan Flow\\\\n\\\\n## Problem Statement\\\\nValidate plan flow.\\\\n\\\")"';
@@ -51,8 +52,11 @@ test("`--prd` generates PRD and plan before looping", async () => {
     [
       CLI_PATH,
       "--dry-run",
-      "--prd",
+      "--mode",
+      "plan",
+      "--prompt",
       "build a thing",
+      "--generate-prd",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -76,7 +80,7 @@ test("`--prd` generates PRD and plan before looping", async () => {
   assert.match(plan, /# PRD: Plan Flow/);
 });
 
-test("`--prd` requires confirmation with `--confirm`", async () => {
+test("`--generate-prd` requires confirmation with `--confirm`", async () => {
   const tmp = await createTmp("loopy-plan-confirm-");
   const prdCmd =
     'node -e "process.stdout.write(\\\"# PRD: Plan Flow\\\\n\\\\n## Problem Statement\\\\nValidate plan flow.\\\\n\\\")"';
@@ -85,8 +89,11 @@ test("`--prd` requires confirmation with `--confirm`", async () => {
     [
       CLI_PATH,
       "--dry-run",
-      "--prd",
+      "--mode",
+      "plan",
+      "--prompt",
       "build a thing",
+      "--generate-prd",
       "--test-command",
       TEST_COMMAND,
       "--confirm",
@@ -104,7 +111,7 @@ test("`--prd` requires confirmation with `--confirm`", async () => {
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
 });
 
-test("`--prd @file` errors on missing file", async () => {
+test("`--prompt @file` errors on missing file when generating PRD", async () => {
   const tmp = await createTmp("loopy-plan-file-missing-");
   const prdCmd = 'node -e "process.exit(0)"';
 
@@ -112,8 +119,11 @@ test("`--prd @file` errors on missing file", async () => {
     [
       CLI_PATH,
       "--dry-run",
-      "--prd",
+      "--mode",
+      "plan",
+      "--prompt",
       "@nope.txt",
+      "--generate-prd",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -124,10 +134,10 @@ test("`--prd @file` errors on missing file", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 1);
-  assert.match(stderr, /PRD input file not found/i);
+  assert.match(stderr, /Seed prompt file not found/i);
 });
 
-test("`--prd @file` errors on empty file", async () => {
+test("`--prompt @file` errors on empty file when generating PRD", async () => {
   const tmp = await createTmp("loopy-plan-file-empty-");
   await fs.writeFile(path.join(tmp, "empty.txt"), "   \n\n", "utf8");
   const prdCmd = 'node -e "process.exit(0)"';
@@ -136,8 +146,11 @@ test("`--prd @file` errors on empty file", async () => {
     [
       CLI_PATH,
       "--dry-run",
-      "--prd",
+      "--mode",
+      "plan",
+      "--prompt",
       "@empty.txt",
+      "--generate-prd",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -148,7 +161,7 @@ test("`--prd @file` errors on empty file", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 1);
-  assert.match(stderr, /PRD input file is empty/i);
+  assert.match(stderr, /Seed prompt file is empty/i);
 });
 
 test("`--prompt` updates an existing plan without confirmation", async () => {
@@ -164,8 +177,11 @@ test("`--prompt` updates an existing plan without confirmation", async () => {
     [
       CLI_PATH,
       "--dry-run",
+      "--mode",
+      "plan",
       "--prompt",
       "new plan",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -179,6 +195,7 @@ test("`--prompt` updates an existing plan without confirmation", async () => {
 
   assert.equal(code, 0, stderr);
   assert.ok(stdout.includes("Plan updated before loop:"), stdout);
+  assert.ok(stdout.includes("Plan-only mode: skipping build iterations"), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /- \[ \]\s+new plan/);
@@ -198,8 +215,11 @@ test("`--prompt` update requires confirmation with `--confirm`", async () => {
     [
       CLI_PATH,
       "--dry-run",
+      "--mode",
+      "plan",
       "--prompt",
       "new plan",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--confirm",
@@ -230,8 +250,11 @@ test("`--prompt` generates phased `LOOPY_PLAN.md` before looping", async () => {
     [
       CLI_PATH,
       "--dry-run",
+      "--mode",
+      "plan",
       "--prompt",
       "build a thing",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -243,11 +266,7 @@ test("`--prompt` generates phased `LOOPY_PLAN.md` before looping", async () => {
   );
   assert.equal(code, 0, stderr);
   assert.ok(stdout.includes("Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("Iteration 1 start"), stdout);
-  assert.ok(
-    stdout.indexOf("Plan updated before loop:") < stdout.indexOf("Iteration 1 start"),
-    stdout
-  );
+  assert.ok(stdout.includes("Plan-only mode: skipping build iterations"), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
@@ -266,8 +285,11 @@ test("`--prompt @file` generates phased `LOOPY_PLAN.md` before looping", async (
     [
       CLI_PATH,
       "--dry-run",
+      "--mode",
+      "plan",
       "--prompt",
       "@task.txt",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -279,11 +301,7 @@ test("`--prompt @file` generates phased `LOOPY_PLAN.md` before looping", async (
   );
   assert.equal(code, 0, stderr);
   assert.ok(stdout.includes("Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("Iteration 1 start"), stdout);
-  assert.ok(
-    stdout.indexOf("Plan updated before loop:") < stdout.indexOf("Iteration 1 start"),
-    stdout
-  );
+  assert.ok(stdout.includes("Plan-only mode: skipping build iterations"), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
@@ -310,6 +328,7 @@ test("`--prompt @file` accepts markdown and includes it in `.loopy/PROMPT.md`", 
       "--dry-run",
       "--prompt",
       "@PRD.md",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -346,6 +365,7 @@ test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `.
       "--dry-run",
       "--prompt",
       "@spec.rst",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -373,8 +393,11 @@ test("`--prompt -` reads prompt from stdin", async () => {
     [
       CLI_PATH,
       "--dry-run",
+      "--mode",
+      "plan",
       "--prompt",
       "-",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -386,11 +409,7 @@ test("`--prompt -` reads prompt from stdin", async () => {
   );
   assert.equal(code, 0, stderr);
   assert.ok(stdout.includes("Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("Iteration 1 start"), stdout);
-  assert.ok(
-    stdout.indexOf("Plan updated before loop:") < stdout.indexOf("Iteration 1 start"),
-    stdout
-  );
+  assert.ok(stdout.includes("Plan-only mode: skipping build iterations"), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /## Phase:\s+build/);
@@ -406,6 +425,7 @@ test("`--prompt @file` errors on missing file", async () => {
       "--dry-run",
       "--prompt",
       "@nope.txt",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -430,6 +450,7 @@ test("`--prompt @file` errors on empty file", async () => {
       "--dry-run",
       "--prompt",
       "@empty.txt",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -458,6 +479,7 @@ test("`--prompt @file` errors on unreadable file", async () => {
       "--dry-run",
       "--prompt",
       "@secret.md",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -485,6 +507,7 @@ test("`--prompt @file` errors when path is a directory", async () => {
       "--dry-run",
       "--prompt",
       "@seedDir",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--agent",
@@ -519,6 +542,7 @@ test("unsupported legacy seed flag errors even when `--prompt` is provided", asy
       "--dry-run",
       "--prompt",
       "inline",
+      "--generate-prd=false",
       "--test-command",
       TEST_COMMAND,
       "--task-file",

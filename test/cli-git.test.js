@@ -136,5 +136,5 @@ test("`--resume` rejects `--prompt`", async () => {
   assert.equal(code, 1);
   assert.equal(stdout, "");
   assert.match(stderr, /--resume.*--prompt/i);
-  assert.match(stderr, /--prd/i);
+  assert.match(stderr, /--prompt/i);
 });

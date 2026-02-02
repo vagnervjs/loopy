@@ -285,16 +285,19 @@ test("`--no-stream` disables mirroring agent output to terminal", async () => {
 
 test("`--dry-run` stops after the first iteration (no backoff loop)", async () => {
   const tmp = await createTmp("loopy-dry-run-single-");
+  await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
+  await fs.writeFile(
+    path.join(tmp, ".loopy", "LOOPY_PLAN.md"),
+    ["---", "max_iterations: 1", "backoff_ms: 0", "---", "", "# Plan", "", "- [ ] seed", ""].join("\n"),
+    "utf8"
+  );
 
   const { code, stdout, stderr } = await runNodeCli(
     [
       CLI_PATH,
       "--dry-run",
-      "--prompt",
-      "seed",
       "--test-command",
       'node -e "process.exit(0)"',
-      "--auto-phase=false",
       "--agent",
       'node -e "process.exit(0)"',
       "--max-minutes",
@@ -436,6 +439,7 @@ test("creates a fresh plan on the next loop after archiving", async () => {
       "--dry-run",
       "--prompt",
       "new work",
+      "--generate-prd=false",
       "--test-command",
       'node -e "process.exit(0)"',
       "--auto-phase=false",

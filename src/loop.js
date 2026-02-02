@@ -29,13 +29,13 @@ const { runIteration } = require("./loop/iteration");
 const { formatPlanOverviewLines, printStepLines } = require("./loop/plan-overview");
 const { loadPromptTemplate } = require("./loop/prompt-templates");
 const { confirmPlanReview, ensureTaskBeforeLoop, writePromptPreview } = require("./loop/plan-ensure");
-const { loadPlanSeed, loadTaskSeed, readStdinText } = require("./loop/seed");
+const { loadTaskSeed, readStdinText } = require("./loop/seed");
 
 async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const stop = stopSignal || { stopRequested: false };
   const baseCwd = process.cwd();
   const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
-  const prdSeedProvided = hasOwn(flags, "prd") || hasOwn(flags, "plan");
+  const modeExplicit = hasOwn(flags, "mode");
   const promptSeedProvided = hasOwn(flags, "prompt");
   const phaseExplicit = hasOwn(flags, "phase") && flags.phase !== true;
   if (command === "run") {
@@ -49,14 +49,30 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
   const parsedTask = planText ? parseTask(planText) : { frontMatter: {} };
   let config = mergeConfig(flags, parsedTask.frontMatter, globalDefaults);
+  if (!modeExplicit && !flags.resume) {
+    config.mode = planText ? "build" : "plan";
+  }
   validateConfig({
     flags,
     config,
-    prdSeedProvided,
     promptSeedProvided,
-    defaultMode: DEFAULTS.mode,
+    defaultMode: config.mode || DEFAULTS.mode,
   });
   configureSteps({ noColor: config.noColor, noEmoji: config.noEmoji, plain: config.plain });
+
+  const generatePrdExplicit = hasOwn(flags, "generate-prd");
+  if (!generatePrdExplicit) {
+    config.generatePrd = config.mode === "plan";
+  }
+  if (config.mode !== "plan") {
+    config.generatePrd = false;
+  }
+
+  if (config.mode === "build" && !planText) {
+    throw new Error(
+      `Plan not found at ${prettyPath(baseCwd, resolveFrom(baseCwd, config.taskFile))}. Run \`loopy --mode plan --prompt "<seed>"\` first.`
+    );
+  }
 
   const fm0 = (parsedTask && parsedTask.frontMatter) || {};
   const fmGit = fm0.git && typeof fm0.git === "object" ? fm0.git : {};
@@ -215,7 +231,8 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   config.promptTemplateText = promptTemplate.text;
   config.promptTemplatePath = promptTemplate.path;
   let prdGenerated = false;
-  const planReviewRequired = !config.resume && (prdSeedProvided || promptSeedProvided);
+  const planReviewRequired =
+    !config.resume && config.mode === "plan" && (promptSeedProvided || !String(planText || "").trim());
   const stopBeforeLoop = async (message) => {
     const note = message || "Stop requested; exiting before loop";
     printStep(note, { kind: "result", level: "warn" });
@@ -265,68 +282,81 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     config.taskSeedText = "";
     config.taskSeedSource = "";
   } else {
-    const prdSeedRaw = String(config.prdSeed || "").trim();
     const promptSeedRaw = String(config.promptSeed || "").trim();
-    const usesPlanStdin = prdSeedRaw === "-";
     const usesPromptStdin = promptSeedRaw === "-";
-    if (usesPlanStdin && usesPromptStdin) {
-      throw new Error("Cannot read stdin for both --prd and --prompt.");
-    }
-    const stdinText = usesPlanStdin || usesPromptStdin ? await readStdinText() : undefined;
+    const stdinText = usesPromptStdin ? await readStdinText() : undefined;
 
-    const loadedPlanSeed = await loadPlanSeed(config, { stdinText });
     const loadedPromptSeed = await loadTaskSeed(config, { stdinText });
     let effectiveSeed = loadedPromptSeed;
 
-    if (loadedPlanSeed.seed) {
-      const agentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
-      printStep(`Generating PRD${agentLabel}`, { kind: "plan" });
-      const prdResult = await generatePrdWithAgent(config.agentCommand, loadedPlanSeed.seed, {
-        extraContext: loadedPromptSeed.seed || "",
-        cwd: config.cwd,
-        noColor: config.noColor,
-        stopSignal: stop,
-      });
-      if (prdResult.aborted || stop.stopRequested) {
-        await stopBeforeLoop("PRD generation aborted; exiting before loop");
+    if (config.mode === "build") {
+      if (loadedPromptSeed.seed) {
+        printStep("Ignoring --prompt in build mode", { kind: "plan", level: "warn" });
+      }
+      config.taskSeedText = "";
+      config.taskSeedSource = "";
+      effectiveSeed = { seed: "", source: "" };
+    } else {
+      if (config.generatePrd) {
+        let prdSeed = loadedPromptSeed.seed;
+        if (!prdSeed && !String(planText || "").trim()) {
+          if (!process.stdin.isTTY) {
+            throw new Error("Missing PRD seed. Provide --prompt when running --mode plan.");
+          }
+          prdSeed = await promptLine("Enter PRD seed for plan generation: ");
+        }
+        if (prdSeed) {
+          const agentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
+          printStep(`Generating PRD${agentLabel}`, { kind: "plan" });
+          const prdResult = await generatePrdWithAgent(config.agentCommand, prdSeed, {
+            extraContext: "",
+            cwd: config.cwd,
+            noColor: config.noColor,
+            stopSignal: stop,
+          });
+          if (prdResult.aborted || stop.stopRequested) {
+            await stopBeforeLoop("PRD generation aborted; exiting before loop");
+            return;
+          }
+          const prdText = prdResult.text;
+          const payload = `${prdText.trimEnd()}\n`;
+          await writeText(config.prdFile, payload);
+          prdGenerated = true;
+
+          config.taskSeedText = prdText;
+          config.taskSeedSource = "--generate-prd";
+          effectiveSeed = { seed: prdText, source: config.taskSeedSource };
+
+          await appendActivity(config.activityLog, [
+            `PRD generated: ${prettyPath(config.cwd, config.prdFile)}`,
+          ]);
+          printStep(`PRD generated: ${prettyPath(config.cwd, config.prdFile)}`, { kind: "plan" });
+        } else {
+          config.taskSeedText = "";
+          config.taskSeedSource = "";
+        }
+      } else {
+        config.taskSeedText = loadedPromptSeed.seed || "";
+        config.taskSeedSource = loadedPromptSeed.source || "";
+      }
+    }
+
+    if (config.mode === "plan") {
+      // Plan initialization / auto-phase planning happens once, before looping.
+      if (planReviewRequired) {
+        printStep("Preparing plan doc from seed", { kind: "plan" });
+      }
+      const ensured = await ensureTaskBeforeLoop(config, effectiveSeed, { stopSignal: stop });
+      if (ensured.aborted || stop.stopRequested) {
+        await stopBeforeLoop("Stop requested; exiting before loop");
         return;
       }
-      const prdText = prdResult.text;
-      const payload = `${prdText.trimEnd()}\n`;
-      await writeText(config.prdFile, payload);
-      prdGenerated = true;
-
-      const seedSources = [];
-      if (loadedPlanSeed.seed) seedSources.push(loadedPlanSeed.source);
-      if (loadedPromptSeed.seed) seedSources.push(loadedPromptSeed.source);
-      const combinedSource = seedSources.join(" + ");
-      config.taskSeedText = prdText;
-      config.taskSeedSource = combinedSource || loadedPlanSeed.source || "--prd";
-      effectiveSeed = { seed: prdText, source: config.taskSeedSource };
-
-      await appendActivity(config.activityLog, [
-        `PRD generated: ${prettyPath(config.cwd, config.prdFile)}`,
-      ]);
-      printStep(`PRD generated: ${prettyPath(config.cwd, config.prdFile)}`, { kind: "plan" });
-    } else {
-      config.taskSeedText = loadedPromptSeed.seed || "";
-      config.taskSeedSource = loadedPromptSeed.source || "";
-    }
-
-    // Plan initialization / auto-phase planning happens once, before looping.
-    if (planReviewRequired) {
-      printStep("Preparing plan doc from seed", { kind: "plan" });
-    }
-    const ensured = await ensureTaskBeforeLoop(config, effectiveSeed, { stopSignal: stop });
-    if (ensured.aborted || stop.stopRequested) {
-      await stopBeforeLoop("Stop requested; exiting before loop");
-      return;
-    }
-    if (ensured.rewritten) {
-      await appendActivity(config.activityLog, [
-        `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
-      ]);
-      printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, { kind: "plan" });
+      if (ensured.rewritten) {
+        await appendActivity(config.activityLog, [
+          `Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`,
+        ]);
+        printStep(`Plan updated before loop: ${prettyPath(config.cwd, config.taskFile)}`, { kind: "plan" });
+      }
     }
   }
 

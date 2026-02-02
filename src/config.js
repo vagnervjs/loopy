@@ -32,6 +32,7 @@ const DEFAULTS = {
   promptTemplate: "",
   bootstrapAgents: true,
   includeLastOutput: false,
+  generatePrd: true,
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -226,8 +227,6 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const defaultPhaseDefaults = def.phase_defaults || def.phaseDefaults || {};
   const hasPromptSeed = Object.prototype.hasOwnProperty.call(flags, "prompt");
   const promptSeedFlag = hasPromptSeed ? flags.prompt : undefined;
-  const hasPrdSeed = Object.prototype.hasOwnProperty.call(flags, "prd") || Object.prototype.hasOwnProperty.call(flags, "plan");
-  const prdSeedFlag = Object.prototype.hasOwnProperty.call(flags, "prd") ? flags.prd : flags.plan;
   const promptOutFlag = flags["prompt-out"];
   const promptOutDefault = pickDefined(def, ["prompt-out", "prompt_out", "promptOut", "promptFile", "prompt_file"]);
   const gitWorktreeFlag = flags["git-worktree"];
@@ -263,6 +262,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const promptTemplateDefault = pickDefined(def, ["prompt_template", "promptTemplate"]);
   const bootstrapAgentsDefault = pickDefined(def, ["bootstrap_agents", "bootstrapAgents"]);
   const includeLastOutputDefault = pickDefined(def, ["include_last_output", "includeLastOutput"]);
+  const generatePrdDefault = pickDefined(def, ["generate_prd", "generatePrd"]);
   const gitBranchDefault =
     pickDefined(def, ["git_branch", "gitBranch"]) ||
     pickDefined(defaultGit, ["branch", "git_branch", "gitBranch"]);
@@ -300,7 +300,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     cwd: process.cwd(),
     resume: coerceBoolean(flags.resume ?? resumeDefault, false),
     confirm: coerceBoolean(flags.confirm ?? confirmDefault, DEFAULTS.confirm),
-    // NOTE: `--prd` supplies the plan seed (PRD-first flow). Use `--plan-file` to override the plan doc path.
+    // NOTE: `--generate-prd` controls whether to generate a PRD before the plan. Use `--plan-file` to override the plan doc path.
     taskFile: planFileFlag || taskFileDefault,
     // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.
     promptFile: (promptOutValue === true ? "" : String(promptOutValue || "")) || DEFAULTS.promptFile,
@@ -312,11 +312,6 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     agentStreamLog: DEFAULTS.agentStreamLog,
     stateFile: flags.state || stateDefault,
     hintsFile: flags.hints || hintsDefault,
-    // PRD seed entrypoint (for PRD generation):
-    // - `--prd "<inline text>"`
-    // - `--prd @path/to/file`
-    // - `--prd -` (stdin)
-    prdSeed: prdSeedFlag === true ? "" : String(prdSeedFlag || ""),
     // New seed prompt entrypoint (preferred):
     // - `--prompt "<inline text>"`
     // - `--prompt @path/to/file`
@@ -450,6 +445,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
       flags["no-bootstrap-agents"] !== undefined ? !coerceBoolean(flags["no-bootstrap-agents"], false) : bootstrapAgentsDefault,
       DEFAULTS.bootstrapAgents
     ),
+    generatePrd: coerceBoolean(flags["generate-prd"] ?? generatePrdDefault, DEFAULTS.generatePrd),
     includeLastOutput: coerceBoolean(
       flags["include-last-output"] ?? fm.include_last_output ?? fm.includeLastOutput ?? includeLastOutputDefault,
       DEFAULTS.includeLastOutput

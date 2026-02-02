@@ -19,7 +19,6 @@ test("validateConfig - rejects resume with seed flags", () => {
       flags,
       config,
       promptSeedProvided: true,
-      planSeedProvided: false,
       defaultMode: "build",
     });
   }, /--resume/);

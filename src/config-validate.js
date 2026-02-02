@@ -2,7 +2,7 @@ function validateFlags(flags) {
   const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
   // No legacy flag compatibility: fail fast with a clear message.
-  if (hasOwn(flags, "task")) throw new Error("Unsupported legacy flag provided. Use `--prd <file>` instead.");
+  if (hasOwn(flags, "task")) throw new Error("Unsupported legacy flag provided. Use `--plan-file <file>` instead.");
   if (hasOwn(flags, "agent-cmd")) throw new Error("Unsupported legacy flag provided. Use `--agent <command>` instead.");
   if (hasOwn(flags, "task-prompt"))
     throw new Error("Unsupported legacy seed flag provided. Use `--prompt \"<text>\"` instead.");
@@ -10,6 +10,9 @@ function validateFlags(flags) {
     throw new Error("Unsupported legacy seed flag provided. Use `--prompt @<file>` (or `--prompt -`) instead.");
   if (hasOwn(flags, "prompt-file")) throw new Error("Unsupported legacy flag provided. Use `--prompt-out <file>` instead.");
   if (hasOwn(flags, "continue")) throw new Error("Unsupported legacy flag provided. Use `--resume` instead.");
+  if (hasOwn(flags, "plan") || hasOwn(flags, "prd")) {
+    throw new Error("Unsupported legacy flag provided. Use `--generate-prd` with `--prompt` instead.");
+  }
 
   // Validate seed prompt flag early.
   if (hasOwn(flags, "prompt")) {
@@ -23,22 +26,7 @@ function validateFlags(flags) {
     }
   }
 
-  if (hasOwn(flags, "plan") && hasOwn(flags, "prd")) {
-    throw new Error("Use only one of --prd or --plan.");
-  }
-
-  // Validate PRD seed flag early.
-  if (hasOwn(flags, "prd") || hasOwn(flags, "plan")) {
-    const raw = hasOwn(flags, "prd") ? flags.prd : flags.plan;
-    if (raw === true) {
-      throw new Error("Missing value for --prd (expected text, @<file>, or '-').");
-    }
-    const v = String(raw || "").trim();
-    if (!v) throw new Error("Missing value for --prd (expected text, @<file>, or '-').");
-    if (v.startsWith("@") && !v.slice(1).trim()) {
-      throw new Error("Missing file path after --prd @<file>.");
-    }
-  }
+  // No PRD seed flag; PRD generation uses --prompt as seed when enabled.
 
   // Validate prompt output flag.
   if (flags["prompt-out"] === true) {
@@ -58,7 +46,7 @@ function validateFlags(flags) {
   }
 }
 
-function validateConfig({ flags, config, prdSeedProvided, promptSeedProvided, defaultMode } = {}) {
+function validateConfig({ flags, config, promptSeedProvided, defaultMode } = {}) {
   validateFlags(flags || {});
   const normalizedMode = String((config && config.mode) || defaultMode || "").trim().toLowerCase();
   if (!normalizedMode) {
@@ -72,9 +60,9 @@ function validateConfig({ flags, config, prdSeedProvided, promptSeedProvided, de
   }
 
   // `--resume` is a "resume only" mode: don't accept seed prompt updates here.
-  if (config && config.resume && (promptSeedProvided || prdSeedProvided)) {
+  if (config && config.resume && promptSeedProvided) {
     throw new Error(
-      "`--resume` cannot be used with `--prompt` or `--prd`. Omit them to resume, or run without `--resume`."
+      "`--resume` cannot be used with `--prompt`. Omit it to resume, or run without `--resume`."
     );
   }
 
