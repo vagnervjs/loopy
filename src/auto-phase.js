@@ -58,9 +58,21 @@ function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
     { id: "verify", title: "Verify", stop_on: tc ? ["all_checked", "tests_pass"] : "all_checked", test_command: tc },
   ];
   const tasksByPhase = {
-    plan: [seed || "Clarify requirements and outline approach."],
-    implement: [seed ? `Implement: ${seed}` : "Implement the requested changes."],
-    verify: [tc ? `Run tests: ${tc}` : "Validate behavior and edge cases."],
+    plan: [
+      seed
+        ? `Plan: ${seed} — Acceptance: outline scope and milestones — Required tests: none`
+        : "Plan: Clarify requirements and outline approach — Acceptance: outline scope and milestones — Required tests: none",
+    ],
+    implement: [
+      seed
+        ? `Implement: ${seed} — Acceptance: behavior matches requirements — Required tests: none`
+        : "Implement: Apply the requested changes — Acceptance: behavior matches requirements — Required tests: none",
+    ],
+    verify: [
+      tc
+        ? `Verify: Run tests (${tc}) — Acceptance: test suite passes — Required tests: ${tc}`
+        : "Verify: Validate behavior and edge cases — Acceptance: expected behavior confirmed — Required tests: none",
+    ],
   };
   return { phases, phaseDefaults: { stop_on: "all_checked", test_command: tc }, tasksByPhase };
 }
@@ -95,10 +107,11 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "",
     "Break work into JIRA-sized tasks (as if assigning to a junior engineer):",
     "- Atomic: exactly ONE outcome per task (no compound items).",
-    "- Testable: include explicit acceptance criteria.",
+    "- Testable: include explicit acceptance criteria and required tests.",
     "- Scoped: small enough for < 1 day of work.",
     "- Clear: start with a strong verb (add/implement/update/remove/verify).",
-    "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
+    "- Format: \"<type>: <short summary> — Acceptance: <clear test/result> — Required tests: <command or none>\"",
+    "- If no tests are needed, use \"Required tests: none\".",
     "- Quote every checklist item in YAML.",
     "- Prefer 5-10 tasks per phase.",
     "",

@@ -23,7 +23,15 @@ const { runShellCommand } = require("./shell");
 const { Spinner } = require("./spinner");
 const { loadState } = require("./state");
 const { configureSteps, endIteration, formatDurationMs, printBlankLine, printStep, startIteration } = require("./steps");
-const { getTaskLine, parseTask, toSlug, getCurrentTask, getCurrentPhaseSection, detectMultiTaskCompletion } = require("./task");
+const {
+  getTaskLine,
+  parseTask,
+  toSlug,
+  getCurrentTask,
+  getCurrentPhaseSection,
+  detectMultiTaskCompletion,
+  extractRequiredTests,
+} = require("./task");
 const { formatLocalTimestamp, redact, truncate, normalizeTaskSeedText } = require("./text");
 const { proposePhasesWithAgent, fallbackPhasesFromSeed, renderTaskMarkdown } = require("./auto-phase");
 const { buildAgentChoiceOptions, detectAvailableAgents } = require("./agent");
@@ -471,6 +479,17 @@ function formatCompletedTaskLines(completedSections) {
     }
   }
   return lines;
+}
+
+function collectRequiredTestsFromCompleted(completedSections) {
+  const required = [];
+  for (const section of completedSections || []) {
+    for (const text of section.items || []) {
+      const tests = extractRequiredTests(text);
+      if (tests) required.push({ task: text, tests });
+    }
+  }
+  return required;
 }
 
 function countChecklist(items) {
@@ -1415,6 +1434,31 @@ async function runIteration(config, { stopSignal } = {}) {
     }
     const taskComplete = Boolean(parsedTaskAfter.allChecked);
     const completedSections = findNewlyCompletedTasks(parsedTask, parsedTaskAfter);
+    const requiredTests = collectRequiredTestsFromCompleted(completedSections);
+    const testsPassed = typeof testStatus === "string" && /^pass\b/i.test(testStatus.trim());
+    if (status === "success" && requiredTests.length && !testsPassed) {
+      status = "failure";
+      lastError = "Required tests not run or failing for completed tasks.";
+      errorSignature = "required-tests-missing";
+      printStep("Required tests missing: mark iteration as failure", {
+        iteration,
+        level: "error",
+        kind: "tests",
+      });
+      await appendActivity(config.activityLog, [
+        `Required tests missing for tasks: ${requiredTests.map((t) => t.tests).join("; ")}`,
+      ]);
+      const guardrailsText = await readText(config.guardrailsFile);
+      const guardrailsUpdated = appendSign(
+        guardrailsText,
+        `Required tests missing for completed tasks (iteration ${iteration})`
+      );
+      if (guardrailsUpdated !== guardrailsText) {
+        await writeText(config.guardrailsFile, guardrailsUpdated);
+        bytesWritten += Buffer.byteLength(guardrailsUpdated);
+      }
+    }
+
     printStepLines(formatCompletedTaskLines(completedSections), { iteration });
     printStepLines([formatProgressLine(summarizePlanProgress(parsedTaskAfter, currentPhaseId))], { iteration });
     const taskLine = getTaskLine(taskAfter || taskText, { phaseId: currentPhaseId });
