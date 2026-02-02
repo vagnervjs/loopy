@@ -27,7 +27,7 @@ const DEFAULTS = {
   confirm: false,
   stream: true,
   verbose: true,
-  singleTaskMode: false,
+  singleTaskMode: true,
   mode: "build",
   promptTemplate: "",
   bootstrapAgents: true,
