@@ -2,12 +2,13 @@ const { suite } = require("./test/suite");
 const { Spinner } = require("./src/spinner.js");
 
 const test = suite("test-spinner");
+const shouldSkip = !process.stdout.isTTY;
 
 function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-test("renders visually with updates", async () => {
+test("renders visually with updates", { skip: shouldSkip }, async () => {
   const spinner = new Spinner();
 
   console.log("Testing Spinner Component\n");

@@ -1,10 +1,12 @@
-const test = require("node:test");
+const { suite } = require("./suite");
 const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 
 const { CLI_PATH, runNodeCli } = require("./cli-helpers");
+
+const test = suite("cli-add-judge");
 
 test("add-judge scaffolds review fixture", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-add-judge-"));
