@@ -178,6 +178,8 @@ function printHelp() {
     "Commands:",
     ...formatHelpRows(commands, { indent: "  ", gap: 2 }),
     "",
+    "Tip: Plan mode writes the plan and exits. Run `loopy` to start build mode.",
+    "",
     "Common options:",
     ...(() => {
       const allAdvanced = Object.values(advancedByGroup).flat();

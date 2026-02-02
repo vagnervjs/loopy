@@ -178,7 +178,7 @@ If you already have a clear plan seed, run plan mode with `--generate-prd=false`
 loopy --mode plan --prompt "Add OAuth login to the app"
 ```
 
-Generates/updates `LOOPY_PLAN.md` and exits without running build iterations.
+Generates/updates `LOOPY_PLAN.md` and exits without running build iterations. Run `loopy` to start build mode.
 
 ### Prompt Templates
 

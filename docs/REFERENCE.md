@@ -28,7 +28,7 @@ Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENT
 loopy --agent "cursor-agent" --prompt "Add OAuth login to the app"
 ```
 
-Plan-only mode generates or updates `LOOPY_PLAN.md` and exits without running build iterations:
+Plan-only mode generates or updates `LOOPY_PLAN.md` and exits without running build iterations. Run `loopy` to start build mode:
 
 ```bash
 loopy --mode plan --prompt "Add OAuth login to the app"

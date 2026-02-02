@@ -196,7 +196,7 @@ test("`--prompt` updates an existing plan without confirmation", async () => {
 
   assert.equal(code, 0, stderr);
   assert.ok(stdout.includes("Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("Plan-only mode: skipping build iterations"), stdout);
+  assert.ok(stdout.includes("Plan ready. Run `loopy` to start build mode."), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /- \[ \]\s+new plan/);
@@ -267,7 +267,7 @@ test("`--prompt` generates phased `LOOPY_PLAN.md` before looping", async () => {
   );
   assert.equal(code, 0, stderr);
   assert.ok(stdout.includes("Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("Plan-only mode: skipping build iterations"), stdout);
+  assert.ok(stdout.includes("Plan ready. Run `loopy` to start build mode."), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
@@ -302,7 +302,7 @@ test("`--prompt @file` generates phased `LOOPY_PLAN.md` before looping", async (
   );
   assert.equal(code, 0, stderr);
   assert.ok(stdout.includes("Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("Plan-only mode: skipping build iterations"), stdout);
+  assert.ok(stdout.includes("Plan ready. Run `loopy` to start build mode."), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
@@ -410,7 +410,7 @@ test("`--prompt -` reads prompt from stdin", async () => {
   );
   assert.equal(code, 0, stderr);
   assert.ok(stdout.includes("Plan updated before loop:"), stdout);
-  assert.ok(stdout.includes("Plan-only mode: skipping build iterations"), stdout);
+  assert.ok(stdout.includes("Plan ready. Run `loopy` to start build mode."), stdout);
 
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /## Phase:\s+build/);

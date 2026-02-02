@@ -28,7 +28,7 @@ If `PROMPT_build.md` exists, it is used as the prompt template for iterations.
 
 ### 2) Plan-only mode
 
-Plan-only mode generates or updates the plan, writes a prompt preview, and exits without running any build iterations.
+Plan-only mode generates or updates the plan, writes a prompt preview, and exits without running any build iterations. Run `loopy` to start build mode.
 
 ```bash
 loopy --mode plan --prompt "Add OAuth2 login flow"
