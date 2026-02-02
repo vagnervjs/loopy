@@ -35,7 +35,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const stop = stopSignal || { stopRequested: false };
   const baseCwd = process.cwd();
   const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
-  const planSeedProvided = hasOwn(flags, "plan");
+  const prdSeedProvided = hasOwn(flags, "prd") || hasOwn(flags, "plan");
   const promptSeedProvided = hasOwn(flags, "prompt");
   const phaseExplicit = hasOwn(flags, "phase") && flags.phase !== true;
   if (command === "run") {
@@ -52,7 +52,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   validateConfig({
     flags,
     config,
-    planSeedProvided,
+    prdSeedProvided,
     promptSeedProvided,
     defaultMode: DEFAULTS.mode,
   });
@@ -215,7 +215,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   config.promptTemplateText = promptTemplate.text;
   config.promptTemplatePath = promptTemplate.path;
   let prdGenerated = false;
-  const planReviewRequired = !config.resume && (planSeedProvided || promptSeedProvided);
+  const planReviewRequired = !config.resume && (prdSeedProvided || promptSeedProvided);
   const stopBeforeLoop = async (message) => {
     const note = message || "Stop requested; exiting before loop";
     printStep(note, { kind: "result", level: "warn" });
@@ -265,12 +265,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     config.taskSeedText = "";
     config.taskSeedSource = "";
   } else {
-    const planSeedRaw = String(config.planSeed || "").trim();
+    const prdSeedRaw = String(config.prdSeed || "").trim();
     const promptSeedRaw = String(config.promptSeed || "").trim();
-    const usesPlanStdin = planSeedRaw === "-";
+    const usesPlanStdin = prdSeedRaw === "-";
     const usesPromptStdin = promptSeedRaw === "-";
     if (usesPlanStdin && usesPromptStdin) {
-      throw new Error("Cannot read stdin for both --plan and --prompt.");
+      throw new Error("Cannot read stdin for both --prd and --prompt.");
     }
     const stdinText = usesPlanStdin || usesPromptStdin ? await readStdinText() : undefined;
 
@@ -301,7 +301,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       if (loadedPromptSeed.seed) seedSources.push(loadedPromptSeed.source);
       const combinedSource = seedSources.join(" + ");
       config.taskSeedText = prdText;
-      config.taskSeedSource = combinedSource || loadedPlanSeed.source || "--plan";
+      config.taskSeedSource = combinedSource || loadedPlanSeed.source || "--prd";
       effectiveSeed = { seed: prdText, source: config.taskSeedSource };
 
       await appendActivity(config.activityLog, [

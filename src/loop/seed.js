@@ -89,8 +89,8 @@ async function readStdinText() {
 
 async function loadSeedFromFlag(rawValue, { flagName, cwd, stdinText } = {}) {
   const isPrompt = flagName === "prompt";
-  const label = isPrompt ? "Seed prompt" : "Plan input";
-  const flag = isPrompt ? "--prompt" : "--plan";
+  const label = isPrompt ? "Seed prompt" : "PRD input";
+  const flag = isPrompt ? "--prompt" : "--prd";
   const raw = rawValue == null ? "" : String(rawValue).trim();
   if (!raw) return { seed: "", source: "" };
 
@@ -139,7 +139,7 @@ async function loadTaskSeed(config, { stdinText } = {}) {
 }
 
 async function loadPlanSeed(config, { stdinText } = {}) {
-  return loadSeedFromFlag(config.planSeed, { flagName: "plan", cwd: config.cwd, stdinText });
+  return loadSeedFromFlag(config.prdSeed, { flagName: "prd", cwd: config.cwd, stdinText });
 }
 
 module.exports = {

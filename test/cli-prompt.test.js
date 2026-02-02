@@ -42,7 +42,7 @@ test("auto-phase task creation requires confirmation with `--confirm`", async ()
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
 });
 
-test("`--plan` generates PRD and plan before looping", async () => {
+test("`--prd` generates PRD and plan before looping", async () => {
   const tmp = await createTmp("loopy-plan-prd-");
   const prdCmd =
     'node -e "process.stdout.write(\\\"# PRD: Plan Flow\\\\n\\\\n## Problem Statement\\\\nValidate plan flow.\\\\n\\\")"';
@@ -51,7 +51,7 @@ test("`--plan` generates PRD and plan before looping", async () => {
     [
       CLI_PATH,
       "--dry-run",
-      "--plan",
+      "--prd",
       "build a thing",
       "--test-command",
       TEST_COMMAND,
@@ -76,7 +76,7 @@ test("`--plan` generates PRD and plan before looping", async () => {
   assert.match(plan, /# PRD: Plan Flow/);
 });
 
-test("`--plan` requires confirmation with `--confirm`", async () => {
+test("`--prd` requires confirmation with `--confirm`", async () => {
   const tmp = await createTmp("loopy-plan-confirm-");
   const prdCmd =
     'node -e "process.stdout.write(\\\"# PRD: Plan Flow\\\\n\\\\n## Problem Statement\\\\nValidate plan flow.\\\\n\\\")"';
@@ -85,7 +85,7 @@ test("`--plan` requires confirmation with `--confirm`", async () => {
     [
       CLI_PATH,
       "--dry-run",
-      "--plan",
+      "--prd",
       "build a thing",
       "--test-command",
       TEST_COMMAND,
@@ -104,7 +104,7 @@ test("`--plan` requires confirmation with `--confirm`", async () => {
   await assert.rejects(() => fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8"));
 });
 
-test("`--plan @file` errors on missing file", async () => {
+test("`--prd @file` errors on missing file", async () => {
   const tmp = await createTmp("loopy-plan-file-missing-");
   const prdCmd = 'node -e "process.exit(0)"';
 
@@ -112,7 +112,7 @@ test("`--plan @file` errors on missing file", async () => {
     [
       CLI_PATH,
       "--dry-run",
-      "--plan",
+      "--prd",
       "@nope.txt",
       "--test-command",
       TEST_COMMAND,
@@ -124,10 +124,10 @@ test("`--plan @file` errors on missing file", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 1);
-  assert.match(stderr, /Plan input file not found/i);
+  assert.match(stderr, /PRD input file not found/i);
 });
 
-test("`--plan @file` errors on empty file", async () => {
+test("`--prd @file` errors on empty file", async () => {
   const tmp = await createTmp("loopy-plan-file-empty-");
   await fs.writeFile(path.join(tmp, "empty.txt"), "   \n\n", "utf8");
   const prdCmd = 'node -e "process.exit(0)"';
@@ -136,7 +136,7 @@ test("`--plan @file` errors on empty file", async () => {
     [
       CLI_PATH,
       "--dry-run",
-      "--plan",
+      "--prd",
       "@empty.txt",
       "--test-command",
       TEST_COMMAND,
@@ -148,7 +148,7 @@ test("`--plan @file` errors on empty file", async () => {
     { cwd: tmp }
   );
   assert.equal(code, 1);
-  assert.match(stderr, /Plan input file is empty/i);
+  assert.match(stderr, /PRD input file is empty/i);
 });
 
 test("`--prompt` updates an existing plan without confirmation", async () => {

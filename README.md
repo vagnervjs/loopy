@@ -162,15 +162,15 @@ loopy status
 
 Displays: iteration count, current phase, last status, test results, errors, output size, and timestamps.
 
-### Use a Predefined Plan
+### Use a Predefined PRD
 
 ```bash
-loopy --plan examples/feature-prd.md
+loopy --prd examples/feature-prd.md
 ```
 
 Use the PRD-first flow to generate/update `LOOPY_PLAN.md` from a PRD seed.
 
-If you already have a clear plan seed, use `--prompt` instead of `--plan`.
+If you already have a clear plan seed, use `--prompt` instead of `--prd`.
 
 ### Plan-Only Mode
 

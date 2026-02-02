@@ -226,8 +226,8 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const defaultPhaseDefaults = def.phase_defaults || def.phaseDefaults || {};
   const hasPromptSeed = Object.prototype.hasOwnProperty.call(flags, "prompt");
   const promptSeedFlag = hasPromptSeed ? flags.prompt : undefined;
-  const hasPlanSeed = Object.prototype.hasOwnProperty.call(flags, "plan");
-  const planSeedFlag = hasPlanSeed ? flags.plan : undefined;
+  const hasPrdSeed = Object.prototype.hasOwnProperty.call(flags, "prd") || Object.prototype.hasOwnProperty.call(flags, "plan");
+  const prdSeedFlag = Object.prototype.hasOwnProperty.call(flags, "prd") ? flags.prd : flags.plan;
   const promptOutFlag = flags["prompt-out"];
   const promptOutDefault = pickDefined(def, ["prompt-out", "prompt_out", "promptOut", "promptFile", "prompt_file"]);
   const gitWorktreeFlag = flags["git-worktree"];
@@ -300,7 +300,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     cwd: process.cwd(),
     resume: coerceBoolean(flags.resume ?? resumeDefault, false),
     confirm: coerceBoolean(flags.confirm ?? confirmDefault, DEFAULTS.confirm),
-    // NOTE: `--plan` supplies the plan seed (PRD-first flow). Use `--plan-file` to override the plan doc path.
+    // NOTE: `--prd` supplies the plan seed (PRD-first flow). Use `--plan-file` to override the plan doc path.
     taskFile: planFileFlag || taskFileDefault,
     // NOTE: `--prompt` is reserved for the seed prompt. Use `--prompt-out` for the generated prompt markdown file.
     promptFile: (promptOutValue === true ? "" : String(promptOutValue || "")) || DEFAULTS.promptFile,
@@ -312,11 +312,11 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     agentStreamLog: DEFAULTS.agentStreamLog,
     stateFile: flags.state || stateDefault,
     hintsFile: flags.hints || hintsDefault,
-    // Plan seed entrypoint (for PRD generation):
-    // - `--plan "<inline text>"`
-    // - `--plan @path/to/file`
-    // - `--plan -` (stdin)
-    planSeed: planSeedFlag === true ? "" : String(planSeedFlag || ""),
+    // PRD seed entrypoint (for PRD generation):
+    // - `--prd "<inline text>"`
+    // - `--prd @path/to/file`
+    // - `--prd -` (stdin)
+    prdSeed: prdSeedFlag === true ? "" : String(prdSeedFlag || ""),
     // New seed prompt entrypoint (preferred):
     // - `--prompt "<inline text>"`
     // - `--prompt @path/to/file`

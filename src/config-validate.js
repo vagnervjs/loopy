@@ -2,7 +2,7 @@ function validateFlags(flags) {
   const hasOwn = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
   // No legacy flag compatibility: fail fast with a clear message.
-  if (hasOwn(flags, "task")) throw new Error("Unsupported legacy flag provided. Use `--plan <file>` instead.");
+  if (hasOwn(flags, "task")) throw new Error("Unsupported legacy flag provided. Use `--prd <file>` instead.");
   if (hasOwn(flags, "agent-cmd")) throw new Error("Unsupported legacy flag provided. Use `--agent <command>` instead.");
   if (hasOwn(flags, "task-prompt"))
     throw new Error("Unsupported legacy seed flag provided. Use `--prompt \"<text>\"` instead.");
@@ -23,15 +23,20 @@ function validateFlags(flags) {
     }
   }
 
-  // Validate plan seed flag early.
-  if (hasOwn(flags, "plan")) {
-    if (flags.plan === true) {
-      throw new Error("Missing value for --plan (expected text, @<file>, or '-').");
+  if (hasOwn(flags, "plan") && hasOwn(flags, "prd")) {
+    throw new Error("Use only one of --prd or --plan.");
+  }
+
+  // Validate PRD seed flag early.
+  if (hasOwn(flags, "prd") || hasOwn(flags, "plan")) {
+    const raw = hasOwn(flags, "prd") ? flags.prd : flags.plan;
+    if (raw === true) {
+      throw new Error("Missing value for --prd (expected text, @<file>, or '-').");
     }
-    const v = String(flags.plan || "").trim();
-    if (!v) throw new Error("Missing value for --plan (expected text, @<file>, or '-').");
+    const v = String(raw || "").trim();
+    if (!v) throw new Error("Missing value for --prd (expected text, @<file>, or '-').");
     if (v.startsWith("@") && !v.slice(1).trim()) {
-      throw new Error("Missing file path after --plan @<file>.");
+      throw new Error("Missing file path after --prd @<file>.");
     }
   }
 
@@ -53,7 +58,7 @@ function validateFlags(flags) {
   }
 }
 
-function validateConfig({ flags, config, planSeedProvided, promptSeedProvided, defaultMode } = {}) {
+function validateConfig({ flags, config, prdSeedProvided, promptSeedProvided, defaultMode } = {}) {
   validateFlags(flags || {});
   const normalizedMode = String((config && config.mode) || defaultMode || "").trim().toLowerCase();
   if (!normalizedMode) {
@@ -67,9 +72,9 @@ function validateConfig({ flags, config, planSeedProvided, promptSeedProvided, d
   }
 
   // `--resume` is a "resume only" mode: don't accept seed prompt updates here.
-  if (config && config.resume && (promptSeedProvided || planSeedProvided)) {
+  if (config && config.resume && (promptSeedProvided || prdSeedProvided)) {
     throw new Error(
-      "`--resume` cannot be used with `--prompt` or `--plan`. Omit them to resume, or run without `--resume`."
+      "`--resume` cannot be used with `--prompt` or `--prd`. Omit them to resume, or run without `--resume`."
     );
   }
 

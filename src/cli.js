@@ -90,13 +90,13 @@ function printHelp() {
   ];
 
   const commonOptions = [
+    { label: "--mode <build|plan>", desc: "Run in build mode (default) or plan-only mode" },
     { label: "--prompt <text>", desc: "Seed prompt (inline) to generate/update the plan before looping" },
     { label: "--prompt @<file>", desc: "Seed prompt from a file to generate/update the plan before looping" },
     { label: "--prompt -", desc: "Seed prompt from stdin to generate/update the plan before looping" },
-    { label: "--plan <text>", desc: "Plan prompt (inline) to generate a PRD + plan before looping" },
-    { label: "--plan @<file>", desc: "Plan prompt from a file to generate a PRD + plan before looping" },
-    { label: "--plan -", desc: "Plan prompt from stdin to generate a PRD + plan before looping" },
-    { label: "--mode <build|plan>", desc: "Run in build mode (default) or plan-only mode" },
+    { label: "--prd <text>", desc: "PRD prompt (inline) to generate a PRD + plan before looping" },
+    { label: "--prd @<file>", desc: "PRD prompt from a file to generate a PRD + plan before looping" },
+    { label: "--prd -", desc: "PRD prompt from stdin to generate a PRD + plan before looping" },
     { label: "--prompt-template <file>", desc: "Override prompt template file (build or plan)" },
     {
       label: "--resume",
@@ -176,10 +176,6 @@ function printHelp() {
     "  loopy help",
     "  loopy --help, -h",
     "  loopy --version",
-    "",
-    "Default behavior:",
-    "  Run iterations: build prompt -> run agent -> update state",
-    "  Stops when phase criteria are met, limits hit, guardrails trigger, or signal received",
     "",
     "Commands:",
     ...formatHelpRows(commands, { indent: "  ", gap: 2 }),
