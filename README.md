@@ -98,7 +98,7 @@ loopy
 
 If no plan exists, Loopy starts in plan mode and asks for a seed; otherwise it runs build mode.
 
-Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps `.loopy/AGENTS.md` unless `--no-bootstrap-agents` is set.
+Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps one in the project root (unless `--no-bootstrap-agents` is set).
 
 Loopy will interactively guide you through:
 1. 🤖 **Agent command** — Select or enter your agent CLI (e.g., `cursor-agent`, `copilot --allow-all`)

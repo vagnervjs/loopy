@@ -36,3 +36,16 @@ Artifacts (.loopy/):
 Notes:
 - `src/loop/plan-overview.js` and `src/loop/prompt-templates.js` are used by the loop orchestrator for summaries and template selection.
 - `src/loop/agents-doc.js` builds/loads `AGENTS.md` for prompt context.
+
+## Judge Scaffold Flow
+
+```text
+loopy add-judge
+  -> src/cli.js
+     -> src/scaffold.js
+        -> src/lib/llm-review.js (fixture)
+        -> src/lib/llm-review.test.js (examples)
+```
+
+Notes:
+- The scaffold is created in the target project, not in Loopy itself.

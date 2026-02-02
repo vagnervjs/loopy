@@ -35,13 +35,13 @@ test("`status` prints summary from `.loopy/state.json`", async () => {
   assert.equal(stderr, "");
   assert.match(stdout, /Loopy status/);
   assert.match(stdout, /📈 Progress/);
-  assert.match(stdout, /Tasks:\s+\[/);
+  assert.match(stdout, /\[[#-]+\]\s+(n\/a|\d+%)/);
   assert.match(stdout, /Phases:\s+n\/a|Phases:\s+\d+\/\d+/);
-  assert.match(stdout, /⏱️  Time/);
+  assert.match(stdout, /⏱️\s+Time/);
   assert.match(stdout, /Total duration:/);
   assert.match(stdout, /Elapsed:/);
   assert.match(stdout, /Updated at:\s+2026-01-26T01:16:24.741Z/);
-  assert.match(stdout, /ℹ️  Details/);
+  assert.match(stdout, /ℹ️\s+Details/);
   assert.match(stdout, /Current phase:\s+n\/a/);
   assert.match(stdout, /-\s+Iteration:\s+12/);
   assert.match(stdout, /-\s+Last status:\s+guardrail-stop/);

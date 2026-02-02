@@ -21,7 +21,7 @@ In build mode (default), Loopy follows tasks from `LOOPY_PLAN.md` and updates pr
 
 If no plan exists, running `loopy` starts plan mode and prompts for a seed.
 
-Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps `.loopy/AGENTS.md` unless `--no-bootstrap-agents` is set.
+Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps one in the project root unless `--no-bootstrap-agents` is set.
 
 **Start a new loop (non-interactive — for automation):**
 ```bash
@@ -43,8 +43,9 @@ Loopy follows the Ralph playbook structure with separate planning and building p
 - Build mode requires an existing plan; `--prompt` is ignored.
 - `--generate-prd` (plan mode): generate PRD first; uses `--prompt` as the PRD seed
 - Prompt templates: `PROMPT_plan.md` + `PROMPT_build.md` (or `--prompt-template` override)
-- `AGENTS.md` and `specs/` summary are injected into every prompt; `.loopy/AGENTS.md` is bootstrapped when missing (disable with `--no-bootstrap-agents`)
+- `AGENTS.md` and `specs/` summary are injected into every prompt; `AGENTS.md` is bootstrapped in the project root when missing (disable with `--no-bootstrap-agents`)
 - `test_command` is required when generating or updating plans; use `--test-command` in non-interactive runs
+- Use `loopy add-judge` to scaffold optional LLM judge tests for subjective criteria
 
 Resume a previous run (requires `.loopy/state.json`):
 ```bash
@@ -62,6 +63,18 @@ Check status:
 loopy status
 ```
 Status shows: iteration, current phase, last status, last test, last error, last hint + hint count, last bytes, updated at.
+
+Scaffold an LLM judge fixture for subjective acceptance criteria:
+```bash
+loopy add-judge
+```
+This creates `src/lib/llm-review.js` and `src/lib/llm-review.test.js` (use `--force` to overwrite).
+Set `LOOPY_AGENT_COMMAND` (or `JUDGE_AGENT_COMMAND`) when running judge tests.
+
+Overwrite existing judge fixtures:
+```bash
+loopy add-judge --force
+```
 
 Manage mid-loop hints:
 ```bash

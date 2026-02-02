@@ -26,9 +26,13 @@ Test command: <insert test command>
 
 ## Task Rules
 - Do not assume functionality is missing; search first.
+- Use subagents to study specs/code; use only one subagent for tests.
 - Complete only the current task.
 - Implement fully; no stubs or placeholders.
 - Run the required tests for the phase and fix failures.
 - Update the plan checkbox for the completed task.
+- If the plan is wrong or stale, switch to plan mode and regenerate it.
+- If acceptance criteria are subjective, add and run judge tests (see `loopy add-judge`).
+- If you discover new run/test commands, update AGENTS.md.
 
 {{instructions}}

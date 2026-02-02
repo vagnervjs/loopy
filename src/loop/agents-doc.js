@@ -7,6 +7,26 @@ const { generateAgentsWithAgent, buildAgentsStub, resolveAgentsPath } = require(
 const { printStep } = require("../steps");
 const { redact } = require("../text");
 
+async function writeAgentsDoc(config, { preferredPath, fallbackPath, text, label }) {
+  const payload = `${text.trimEnd()}\n`;
+  try {
+    await writeText(preferredPath, payload);
+    await appendActivity(config.activityLog, [
+      `${label}: ${prettyPath(config.cwd, preferredPath)}`,
+    ]);
+    printStep(`AGENTS saved to ${prettyPath(config.cwd, preferredPath)}`, { kind: "plan" });
+    return preferredPath;
+  } catch (err) {
+    if (!fallbackPath) throw err;
+    await writeText(fallbackPath, payload);
+    await appendActivity(config.activityLog, [
+      `${label}: ${prettyPath(config.cwd, fallbackPath)}`,
+    ]);
+    printStep(`AGENTS saved to ${prettyPath(config.cwd, fallbackPath)}`, { kind: "plan" });
+    return fallbackPath;
+  }
+}
+
 async function ensureAgentsDoc(config, { stopSignal } = {}) {
   const cwd = config.cwd;
   const rootPath = resolveAgentsPath(cwd);
@@ -28,13 +48,17 @@ async function ensureAgentsDoc(config, { stopSignal } = {}) {
 
   if (!process.stdin.isTTY) {
     const stub = buildAgentsStub();
-    const payload = `${stub.trimEnd()}\n`;
-    await writeText(loopyPath, payload);
-    await appendActivity(config.activityLog, [
-      `AGENTS stub generated (non-interactive): ${prettyPath(config.cwd, loopyPath)}`,
-    ]);
-    printStep(`AGENTS saved to ${prettyPath(config.cwd, loopyPath)}`, { kind: "plan" });
-    return { text: stub, path: loopyPath, source: "stub" };
+    const savedPath = await writeAgentsDoc(config, {
+      preferredPath: rootPath,
+      fallbackPath: loopyPath,
+      text: stub,
+      label: "AGENTS stub generated (non-interactive)",
+    });
+    return {
+      text: stub,
+      path: savedPath,
+      source: savedPath === rootPath ? "root" : "loopy",
+    };
   }
 
   const agentLabel = config.agentCommand ? ` with ${redact(config.agentCommand)}` : "";
@@ -58,13 +82,17 @@ async function ensureAgentsDoc(config, { stopSignal } = {}) {
   if (!String(agentsText || "").trim()) {
     agentsText = buildAgentsStub();
   }
-  const payload = `${agentsText.trimEnd()}\n`;
-  await writeText(loopyPath, payload);
-  await appendActivity(config.activityLog, [
-    `AGENTS generated: ${prettyPath(config.cwd, loopyPath)}`,
-  ]);
-  printStep(`AGENTS saved to ${prettyPath(config.cwd, loopyPath)}`, { kind: "plan" });
-  return { text: agentsText, path: loopyPath, source: "bootstrapped" };
+  const savedPath = await writeAgentsDoc(config, {
+    preferredPath: rootPath,
+    fallbackPath: loopyPath,
+    text: agentsText,
+    label: "AGENTS generated",
+  });
+  return {
+    text: agentsText,
+    path: savedPath,
+    source: savedPath === rootPath ? "bootstrapped-root" : "bootstrapped-loopy",
+  };
 }
 
 module.exports = {

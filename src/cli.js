@@ -6,6 +6,7 @@ const { parseArgs } = require("./args");
 const { DEFAULTS, resolveFrom } = require("./config");
 const { appendText, readText, writeText } = require("./fs");
 const { runLoop } = require("./loop");
+const { scaffoldJudge } = require("./scaffold");
 const { formatDurationMs, printStep } = require("./steps");
 const { loadState } = require("./state");
 const { parseTask, getCurrentTask } = require("./task");
@@ -94,6 +95,10 @@ function printHelp() {
       desc: "Save a hint for the next prompt\nAppends to `.loopy/hints.md` (included in the next prompt under \"Hints\")\nUse --reset to clear all hints, --pop to remove the last hint",
     },
     { label: "reset", desc: "Archive all files from `.loopy/` to `.loopy/archive/reset-<timestamp>/`\nClears loop state for a fresh start" },
+    {
+      label: "add-judge",
+      desc: "Scaffold LLM judge fixture into src/lib (llm-review.js + llm-review.test.js)\nUse --force to overwrite",
+    },
     { label: "help", desc: "Show help" },
   ];
 
@@ -179,6 +184,7 @@ function printHelp() {
     "  loopy status",
     '  loopy hint "<text>"',
     "  loopy reset",
+    "  loopy add-judge [--force]",
     "  loopy help",
     "  loopy --help, -h",
     "  loopy --version",
@@ -525,6 +531,28 @@ async function runReset(flags) {
   }
 }
 
+async function runAddJudge(flags) {
+  const cwd = process.cwd();
+  const force = Boolean(flags.force);
+  const result = await scaffoldJudge({ cwd, force });
+  const rel = (filePath) => path.relative(cwd, filePath) || filePath;
+  if (result.created.length) {
+    console.log("Scaffolded judge fixtures:");
+    for (const filePath of result.created) {
+      console.log(`- ${rel(filePath)}`);
+    }
+  }
+  if (result.skipped.length) {
+    console.log("Skipped existing files:");
+    for (const filePath of result.skipped) {
+      console.log(`- ${rel(filePath)}`);
+    }
+    if (!result.created.length) {
+      console.log("Nothing to do. Use --force to overwrite.");
+    }
+  }
+}
+
 async function runCli(argv) {
   let { command, flags } = parseArgs(argv);
 
@@ -559,6 +587,11 @@ async function runCli(argv) {
 
   if (command === "reset") {
     await runReset(flags);
+    return;
+  }
+
+  if (command === "add-judge") {
+    await runAddJudge(flags);
     return;
   }
 
