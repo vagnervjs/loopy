@@ -201,7 +201,7 @@ async function runIteration(config, { stopSignal } = {}) {
     const agentRunningState = { ...state, isAgentRunning: true };
     await writeText(config.stateFile, JSON.stringify(agentRunningState, null, 2) + "\n");
 
-    const spinner = new Spinner("🤖 Agent at work...", {
+    const spinner = new Spinner("🤖 Agent at work...\n", {
       plain: config.plain,
       noEmoji: config.noEmoji,
     });
