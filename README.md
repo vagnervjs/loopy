@@ -229,9 +229,9 @@ Loopy treats a **markdown plan document** as the source of truth and orchestrate
 | Resource | Description |
 |----------|-------------|
 | **[Complete Reference](./docs/REFERENCE.md)** | Full CLI reference, configuration options, git integration, and troubleshooting |
+| **[Architecture](./docs/ARCHITECTURE.md)** | Lightweight module diagram and system map |
 | **[Ralph Workflow](./docs/RALPH_WORKFLOW.md)** | Planning vs building guidance, templates, and workflow conventions |
 | **[Examples](./examples)** | Sample PRDs, prompts, and plan templates for common use cases |
-| **[API Documentation](./docs/API.md)** | Internal architecture for contributors |
 
 ---
 

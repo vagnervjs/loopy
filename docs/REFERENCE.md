@@ -68,7 +68,7 @@ loopy hint --reset
 
 Disable streaming when you only want logs:
 ```bash
-loopy --agent "cursor-agent" --prompt @examples/PRD.md --stream=false
+loopy --agent "cursor-agent" --prompt @examples/PRD.md --no-stream
 ```
 
 Help and version:
@@ -277,7 +277,7 @@ Input/output paths:
 - `--prompt <text|@file|->` seed prompt to generate/update the plan doc before looping
 
 Output/utility:
-- `--stream` mirror agent stdout/stderr to your terminal (default: true; disable with `--stream=false`)
+- `--no-stream` disable mirroring agent stdout/stderr to your terminal
 - `--verbose` print full checklist details in the plan summary (default: true; disable with `--verbose=false`)
 - `--version` print version and exit
 
@@ -379,6 +379,45 @@ Safety notes:
 - Resume errors: `--resume` requires an existing plan file and `.loopy/state.json`; it also cannot be combined with `--prompt` or `--plan`.
 - Flag errors: `--prompt` requires a value (`"<text>"`, `@<file>`, or `-`); `--prompt-out` requires a file path value.
 - Resetting state: use `loopy reset` to archive all `.loopy/` files to `.loopy/archive/reset-<timestamp>/` for a clean start; or delete the whole `.loopy/` directory for a full reset.
+
+---
+
+## Architecture Overview
+
+### System Map
+
+```text
+bin/loopy.js
+  -> src/cli.js
+     -> src/loop.js
+        -> src/loop/iteration.js
+        -> src/loop/plan-ensure.js
+        -> src/loop/prompt-templates.js
+        -> src/loop/agents-doc.js
+        -> src/loop/phases.js
+        -> src/loop/plan-overview.js
+        -> src/loop/archive.js
+        -> src/loop/seed.js
+
+Shared utilities:
+  src/config.js + src/config-validate.js
+  src/task.js, src/guardrails.js, src/prompt.js, src/text.js
+  src/git.js, src/shell.js, src/fs.js, src/state.js, src/steps.js
+
+Artifacts:
+  .loopy/ (PROMPT.md, state.json, progress.md, guardrails.md, logs)
+```
+
+### Responsibilities
+
+- **CLI entrypoint**: `bin/loopy.js` -> `src/cli.js` handles commands, help, signals, and status/hints/reset.
+- **Config + validation**: `src/config.js` merges defaults/front matter/flags; `src/config-validate.js` enforces flag rules.
+- **Loop orchestrator**: `src/loop.js` wires planning, git setup, prompt templates, and iteration control.
+- **Loop modules**: `src/loop/iteration.js` (single iteration), `src/loop/plan-ensure.js` (plan/PRD bootstrap + preview), `src/loop/prompt-templates.js` (template loading), `src/loop/agents-doc.js` (AGENTS bootstrap), `src/loop/phases.js` (phase logic), `src/loop/plan-overview.js` (plan summaries), `src/loop/archive.js` (artifact archiving), `src/loop/seed.js` (stdin/seed loading).
+- **Domain utilities**: `src/task.js` (plan parsing + task detection), `src/guardrails.js` (repeat/thrash detection), `src/prompt.js` (prompt assembly), `src/text.js` (redaction, truncation), `src/git.js` (git integration), `src/shell.js` (process execution).
+- **Artifacts**: `.loopy/` stores prompts, guardrails, progress, state, and agent/test outputs per run.
+
+For a lightweight module diagram, see `docs/ARCHITECTURE.md`.
 
 ## Notes
 - Logs redact common secret patterns, but avoid writing secrets to stdout/stderr.
