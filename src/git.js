@@ -125,35 +125,22 @@ async function gitCommitIfNeeded(
     .filter(Boolean)
     .some((line) => {
       const file = line.slice(3);
-      if (file === ".loopy/LOOPY_PLAN.md") return true;
+      if (file === "PROMPT.md") return false;
       if (line.startsWith("?? .loopy/")) return false;
       if (line.startsWith("?? .loopy")) return false;
-      if (line.startsWith("?? PROMPT.md")) return false;
       if (line.startsWith("?? .loopy/PROMPT.md")) return false;
+      if (file === ".loopy/LOOPY_PLAN.md") return false;
+      if (file.startsWith(".loopy/")) return false;
       return true;
     });
 
   if (!hasChanges) return { committed: false, reason: "no-changes" };
 
-  const taskPath = config && config.taskFile ? String(config.taskFile) : "";
-  const taskRelative = taskPath ? path.relative(config.cwd || process.cwd(), taskPath) : "";
-  const taskInLoopy =
-    taskRelative &&
-    !taskRelative.startsWith("..") &&
-    !path.isAbsolute(taskRelative) &&
-    (taskRelative === ".loopy" || taskRelative.startsWith(`.loopy${path.sep}`));
   const addArgs = ["add", "-A", "--", ".", ":!.loopy", ":!.loopy/**"];
   const addRes = await git(addArgs, { cwd: config.cwd });
   if (addRes.code !== 0) {
     const msg = (addRes.stderr || addRes.stdout || "").trim();
     throw new Error(msg || "Failed to stage changes (git add -A).");
-  }
-  if (taskInLoopy) {
-    const addPlanRes = await git(["add", "-A", "--", taskRelative], { cwd: config.cwd });
-    if (addPlanRes.code !== 0) {
-      const msg = (addPlanRes.stderr || addPlanRes.stdout || "").trim();
-      throw new Error(msg || "Failed to stage plan file.");
-    }
   }
 
   let branch = "";
