@@ -240,7 +240,8 @@ async function getGitModifiedFiles(cwd) {
     const files = stdout
       .split(/\r?\n/)
       .filter(Boolean)
-      .map((line) => line.slice(3));
+      .map((line) => parsePorcelainPath(line))
+      .filter(Boolean);
     return files;
   } catch (err) {
     return [];
@@ -252,6 +253,7 @@ module.exports = {
   getCurrentBranch,
   gitSwitchBranch,
   ensureGitWorktree,
+  resolveExcludedArtifactDirs,
   gitCommitIfNeeded,
   getGitModifiedFiles,
 };

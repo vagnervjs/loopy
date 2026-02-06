@@ -20,7 +20,7 @@ const {
   parseTask,
 } = require("../task");
 const { formatLocalTimestamp, redact, truncate } = require("../text");
-const { gitCommitIfNeeded, getGitModifiedFiles } = require("../git");
+const { ensureGitRepo, gitCommitIfNeeded, getGitModifiedFiles, resolveExcludedArtifactDirs } = require("../git");
 const { ensureAgentsDoc } = require("./agents-doc");
 const { pickCurrentPhaseId, resolvePhaseLabel, phaseTestCommand, isPhaseComplete, computeNextPhaseId } = require("./phases");
 const {
@@ -31,6 +31,105 @@ const {
   summarizePlanProgress,
 } = require("./plan-overview");
 const { buildSpecsSummary } = require("./specs");
+
+const NON_CODE_EXTENSIONS = new Set([
+  ".adoc",
+  ".asciidoc",
+  ".gif",
+  ".ico",
+  ".jpeg",
+  ".jpg",
+  ".md",
+  ".mdx",
+  ".org",
+  ".pdf",
+  ".png",
+  ".rst",
+  ".svg",
+  ".txt",
+  ".webp",
+]);
+
+const NON_CODE_BASENAMES = new Set([
+  "authors",
+  "changelog",
+  "codeowners",
+  "copying",
+  "license",
+  "notice",
+  "readme",
+]);
+
+function normalizeRepoPath(filePath) {
+  if (filePath === undefined || filePath === null) return "";
+  let normalized = String(filePath).trim();
+  if (!normalized) return "";
+  normalized = normalized.replace(/\\/g, "/");
+  normalized = normalized.replace(/^\.\/+/, "");
+  normalized = normalized.replace(/\/+/g, "/");
+  normalized = normalized.replace(/\/+$/, "");
+  return normalized;
+}
+
+function isPathInsideDir(filePath, dirPath) {
+  if (!filePath || !dirPath) return false;
+  if (filePath === dirPath) return true;
+  return filePath.startsWith(`${dirPath}/`);
+}
+
+function isCodeLikePath(filePath) {
+  const normalized = normalizeRepoPath(filePath);
+  if (!normalized) return false;
+  const basename = path.posix.basename(normalized).toLowerCase();
+  const basenameWithoutExt = basename.replace(/\.[^.]+$/, "");
+  if (NON_CODE_BASENAMES.has(basename) || NON_CODE_BASENAMES.has(basenameWithoutExt)) return false;
+  const ext = path.posix.extname(basename).toLowerCase();
+  if (ext && NON_CODE_EXTENSIONS.has(ext)) return false;
+  return true;
+}
+
+function isExplicitNonCodeTask(changeType, taskLine) {
+  const normalizedType = String(changeType || "").trim().toLowerCase();
+  const normalizedTask = String(taskLine || "").trim().toLowerCase();
+  if (normalizedType === "docs") return true;
+  return /\b(analysis|analyze|analysing|research|spike|documentation|docs?|readme)\b/.test(normalizedTask);
+}
+
+function currentPhaseRequiresTestsPass(parsedTask, phaseId) {
+  if (!parsedTask || !phaseId) return false;
+  const phase = (parsedTask.phases || []).find((item) => item && item.id === phaseId);
+  const stopOn = phase && Array.isArray(phase.stopOn) ? phase.stopOn : [];
+  return stopOn.some((item) => String(item || "").trim().toLowerCase() === "tests_pass");
+}
+
+async function shouldRunTestsForIteration(config, parsedTaskAfter, currentPhaseId, taskContext, effectiveTestCommand) {
+  if (!effectiveTestCommand) return { run: false, reason: "missing test command" };
+  if (currentPhaseRequiresTestsPass(parsedTaskAfter, currentPhaseId)) {
+    return { run: true, reason: "phase requires tests_pass" };
+  }
+
+  try {
+    await ensureGitRepo(config.cwd);
+  } catch (_) {
+    if (isExplicitNonCodeTask(taskContext.changeType, taskContext.taskLine)) {
+      return { run: false, reason: "no code changes detected" };
+    }
+    return { run: true, reason: "git unavailable; running tests" };
+  }
+
+  const excludedArtifactDirs = resolveExcludedArtifactDirs(config).map(normalizeRepoPath).filter(Boolean);
+  const changedFiles = (await getGitModifiedFiles(config.cwd)).map(normalizeRepoPath).filter(Boolean);
+  const relevantFiles = changedFiles.filter(
+    (filePath) => !excludedArtifactDirs.some((dirPath) => isPathInsideDir(filePath, dirPath))
+  );
+
+  if (!relevantFiles.length) return { run: false, reason: "no code changes detected" };
+
+  const hasCodeChanges = relevantFiles.some((filePath) => isCodeLikePath(filePath));
+  if (!hasCodeChanges) return { run: false, reason: "no code changes detected" };
+
+  return { run: true, reason: "code changes detected" };
+}
 
 async function runIteration(config, { stopSignal } = {}) {
   let bytesRead = 0;
@@ -288,43 +387,53 @@ async function runIteration(config, { stopSignal } = {}) {
       }
     }
 
+    const taskLine = getTaskLine(taskAfter || taskText, { phaseId: currentPhaseId });
+    const taskContext = extractChangeType(taskLine);
     const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTaskAfter, currentPhaseId) : config.testCommand;
     if (status === "success" && effectiveTestCommand) {
-      printStep(`Tests run ${redact(effectiveTestCommand)}`, { iteration, kind: "tests" });
-      const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
-        cwd: config.cwd,
-        noColor: config.noColor,
-        stopSignal,
-      });
-      if (testResult.aborted) {
-        return await abortIteration("tests");
-      }
-      const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
-      await writeText(lastTestOutputPath, testOutput);
-      bytesWritten += Buffer.byteLength(testOutput);
-      const testOutcome = testResult.code === 0 ? "pass" : "fail";
-      const testTimestamp = formatLocalTimestamp(new Date());
-      testStatus = testTimestamp ? `${testOutcome} @ ${testTimestamp}` : `${testOutcome}`;
-      if (testOutcome === "fail") {
-        printStep(
-          `Tests fail (see ${prettyPath(config.cwd, lastTestOutputPath)})`,
-          { iteration, level: "error", kind: "tests" }
-        );
+      const testDecision = await shouldRunTestsForIteration(config, parsedTaskAfter, currentPhaseId, {
+        ...taskContext,
+        taskLine,
+      }, effectiveTestCommand);
+      if (testDecision.run) {
+        printStep(`Tests run ${redact(effectiveTestCommand)}`, { iteration, kind: "tests" });
+        const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
+          cwd: config.cwd,
+          noColor: config.noColor,
+          stopSignal,
+        });
+        if (testResult.aborted) {
+          return await abortIteration("tests");
+        }
+        const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
+        await writeText(lastTestOutputPath, testOutput);
+        bytesWritten += Buffer.byteLength(testOutput);
+        const testOutcome = testResult.code === 0 ? "pass" : "fail";
+        const testTimestamp = formatLocalTimestamp(new Date());
+        testStatus = testTimestamp ? `${testOutcome} @ ${testTimestamp}` : `${testOutcome}`;
+        if (testOutcome === "fail") {
+          printStep(
+            `Tests fail (see ${prettyPath(config.cwd, lastTestOutputPath)})`,
+            { iteration, level: "error", kind: "tests" }
+          );
+        } else {
+          printStep("Tests pass", { iteration, kind: "tests", level: "success" });
+        }
+        if (testOutcome === "fail") {
+          status = "failure";
+          lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
+          errorSignature = `${effectiveTestCommand}::${lastError}`;
+        }
       } else {
-        printStep("Tests pass", { iteration, kind: "tests", level: "success" });
-      }
-      if (testOutcome === "fail") {
-        status = "failure";
-        lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
-        errorSignature = `${effectiveTestCommand}::${lastError}`;
+        testStatus = `skipped (${testDecision.reason})`;
+        printStep(`Tests skipped: ${testDecision.reason}`, { iteration, kind: "tests", level: "warn" });
+        await appendActivity(config.activityLog, [`tests skipped: ${testDecision.reason}`]);
       }
     }
     const taskComplete = Boolean(parsedTaskAfter.allChecked);
     const completedSections = findNewlyCompletedTasks(parsedTask, parsedTaskAfter);
     printStepLines(formatCompletedTaskLines(completedSections), { iteration });
     printStepLines([formatProgressLine(summarizePlanProgress(parsedTaskAfter, currentPhaseId))], { iteration });
-    const taskLine = getTaskLine(taskAfter || taskText, { phaseId: currentPhaseId });
-    const taskContext = extractChangeType(taskLine);
     const taskSummary = taskContext.summary;
     let changeType = taskContext.changeType;
     if (taskContext.changeType === "chore" && !/^[a-zA-Z]+\s*:/.test(taskLine || "")) {
