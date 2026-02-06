@@ -132,6 +132,71 @@ test("prints step status lines to terminal during loop", async () => {
   assert.ok(!/\x1b\[[0-9;]*m/.test(stdout));
 });
 
+test("skips tests when iteration changes only documentation files", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tests-skip-docs-"));
+  const gitEnv = await initGitRepo(tmp);
+
+  const agentCmd = 'node -e "require(\\"fs\\").writeFileSync(\\"README.md\\", \\"Updated docs\\\\n\\")"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--agent",
+      agentCmd,
+      "--git-branch",
+      "loopy/tests-skip-docs",
+      "--test-command",
+      'node -e "process.exit(1)"',
+      "--max-iterations",
+      "1",
+      "--backoff-ms",
+      "0",
+      "--max-minutes",
+      "1",
+      "--plain",
+    ],
+    { cwd: tmp, env: gitEnv }
+  );
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /Tests skipped: no code changes detected/);
+  assert.doesNotMatch(stdout, /Tests run /);
+
+  const state = JSON.parse(await fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
+  assert.equal(state.lastTest, "skipped (no code changes detected)");
+});
+
+test("runs tests when iteration changes code files", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tests-run-code-"));
+  const gitEnv = await initGitRepo(tmp);
+
+  const agentCmd =
+    'node -e "const fs=require(\\"fs\\");fs.mkdirSync(\\"src\\",{recursive:true});fs.writeFileSync(\\"src/app.js\\",\\"module.exports=1;\\\\n\\")"';
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--agent",
+      agentCmd,
+      "--git-branch",
+      "loopy/tests-run-code",
+      "--test-command",
+      'node -e "process.exit(1)"',
+      "--max-iterations",
+      "1",
+      "--backoff-ms",
+      "0",
+      "--max-minutes",
+      "1",
+      "--plain",
+    ],
+    { cwd: tmp, env: gitEnv }
+  );
+  assert.equal(code, 0, stderr);
+  assert.match(stdout, /Tests run /);
+  assert.match(stdout, /Tests fail/);
+
+  const state = JSON.parse(await fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
+  assert.match(String(state.lastTest || ""), /^fail\b/i);
+});
+
 test("NO_COLOR disables ANSI formatting in logs", async () => {
   const tmp = await createTmp("loopy-no-color-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });

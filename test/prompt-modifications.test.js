@@ -251,3 +251,51 @@ test("formatPrompt - includes AGENTS and specs summary when provided", () => {
   assert.match(prompt, /## AGENTS/);
   assert.match(prompt, /npm run dev/);
 });
+
+test("formatPrompt - fallback prompt includes test-gating rules", () => {
+  const prompt = formatPrompt({
+    iteration: 1,
+    taskText: "# Plan\n- [ ] task",
+    taskSeedText: "",
+    taskSeedSource: "",
+    guardrailsText: "# Guardrails\n",
+    progressText: "# Progress\n",
+    lastOutput: "",
+    rotationPending: false,
+    currentPhase: "",
+    taskFilePath: "LOOPY_PLAN.md",
+    hintsText: "",
+    currentTask: null,
+    filteredPlan: null,
+  });
+
+  assert.match(prompt, /Do NOT mark a task checkbox as \[x\] unless the full test command passes/);
+  assert.match(prompt, /Always run the plan's test_command to validate your work/);
+  assert.match(prompt, /If tests fail, leave the checkbox unchecked/);
+  assert.match(prompt, /3\+ consecutive iterations, reassess your approach/);
+});
+
+test("formatPrompt - {{instructions}} token includes test-gating rules", () => {
+  const template = "# Custom\n{{instructions}}";
+  const prompt = formatPrompt({
+    iteration: 1,
+    taskText: "# Plan\n- [ ] task",
+    taskSeedText: "",
+    taskSeedSource: "",
+    guardrailsText: "# Guardrails\n",
+    progressText: "# Progress\n",
+    lastOutput: "",
+    rotationPending: false,
+    currentPhase: "",
+    taskFilePath: "LOOPY_PLAN.md",
+    hintsText: "",
+    currentTask: null,
+    filteredPlan: null,
+    promptTemplate: template,
+  });
+
+  assert.match(prompt, /Do NOT mark a task checkbox as \[x\] unless the full test command passes/);
+  assert.match(prompt, /Always run the plan's test_command to validate your work/);
+  assert.match(prompt, /If tests fail, leave the checkbox unchecked/);
+  assert.match(prompt, /3\+ consecutive iterations, reassess your approach/);
+});

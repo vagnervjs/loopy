@@ -119,7 +119,14 @@ function resolvePhaseLabel(parsedTask, phaseId) {
   return title || String(phaseId);
 }
 
+function areAllPhasesComplete(parsedTask, state, { testStatus } = {}) {
+  const phases = (parsedTask && parsedTask.phases) || [];
+  if (!phases.length) return true;
+  return phases.every((phase) => isPhaseComplete(parsedTask, phase.id, state, { testStatus }));
+}
+
 module.exports = {
+  areAllPhasesComplete,
   computeNextPhaseId,
   isPhaseComplete,
   parseSkipPhaseList,

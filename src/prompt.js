@@ -118,7 +118,11 @@ function formatPrompt({
     `- Follow the plan checklist in ${planLabel}.`,
     "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
-    "- Keep changes focused and maintain repo state."
+    "- Keep changes focused and maintain repo state.",
+    "- Do NOT mark a task checkbox as [x] unless the full test command passes.",
+    "- Always run the plan's test_command to validate your work.",
+    "- If tests fail, leave the checkbox unchecked and fix the failures first.",
+    "- If the same task has failed for 3+ consecutive iterations, reassess your approach."
   );
   if (currentTask) instructionsLines.push("- **Complete only the Current Task in this iteration.**");
   const instructionsBlock = instructionsLines.filter(Boolean).join("\n");
@@ -215,6 +219,10 @@ function formatPrompt({
     "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",
+    "- Do NOT mark a task checkbox as [x] unless the full test command passes.",
+    "- Always run the plan's test_command to validate your work.",
+    "- If tests fail, leave the checkbox unchecked and fix the failures first.",
+    "- If the same task has failed for 3+ consecutive iterations, reassess your approach.",
     ""
   );
 
