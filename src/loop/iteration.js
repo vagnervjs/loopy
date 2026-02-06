@@ -92,7 +92,7 @@ function isExplicitNonCodeTask(changeType, taskLine) {
   const normalizedType = String(changeType || "").trim().toLowerCase();
   const normalizedTask = String(taskLine || "").trim().toLowerCase();
   if (normalizedType === "docs") return true;
-  return /\b(analysis|analyze|analysing|research|spike|documentation|docs?|readme)\b/.test(normalizedTask);
+  return /\b(analysis|analyze|analyzing|analysing|research|spike|documentation|docs?|readme)\b/.test(normalizedTask);
 }
 
 function currentPhaseRequiresTestsPass(parsedTask, phaseId) {
