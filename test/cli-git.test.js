@@ -56,6 +56,50 @@ test("default git commit commits changes after successful iteration", async () =
   assert.match(subject.stdout.trim(), /^it 1 success$/);
 });
 
+test("default git commit excludes configured `loopy_dir` artifacts", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-git-commit-custom-dir-"));
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-home-"));
+  const gitEnv = await initGitRepo(tmp);
+
+  await fs.mkdir(path.join(home, ".loopy"), { recursive: true });
+  await fs.writeFile(path.join(home, ".loopy", "config.yml"), ["defaults:", "  loopy_dir: ./loopy", ""].join("\n"), "utf8");
+
+  await fs.writeFile(path.join(tmp, "tracked.txt"), "one\n", "utf8");
+  await runCmd("git", ["add", "-A"], { cwd: tmp });
+  await runCmd("git", ["commit", "-m", "add tracked"], { cwd: tmp, env: gitEnv });
+
+  const agentCmd = 'node -e "require(\\"fs\\").writeFileSync(\\"tracked.txt\\", \\"two\\\\n\\")"';
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--agent",
+      agentCmd,
+      "--git-branch",
+      "loopy/test-custom-dir-commit",
+      "--git-commit-message",
+      "it {iteration} {status}",
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp, env: { ...gitEnv, HOME: home } }
+  );
+  assert.equal(code, 0, stderr);
+
+  const names = await runCmd("git", ["show", "--name-only", "--pretty=format:", "HEAD"], { cwd: tmp });
+  assert.equal(names.code, 0);
+  const committedFiles = names.stdout.split(/\r?\n/).filter(Boolean);
+  assert.ok(committedFiles.includes("tracked.txt"));
+  assert.equal(
+    committedFiles.some((filePath) => filePath === "loopy" || filePath.startsWith("loopy/")),
+    false,
+    `unexpected commit contents:\n${committedFiles.join("\n")}`
+  );
+
+  const status = await runCmd("git", ["status", "--porcelain"], { cwd: tmp });
+  assert.equal(status.code, 0);
+  assert.match(status.stdout, /\?\? loopy\//);
+});
+
 test("missing git branch name fails without a TTY", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-git-branch-tty-"));
   const gitEnv = await initGitRepo(tmp);
