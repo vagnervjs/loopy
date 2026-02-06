@@ -253,6 +253,8 @@ module.exports = {
   getCurrentBranch,
   gitSwitchBranch,
   ensureGitWorktree,
+  normalizeGitPath,
+  isPathInsideDir,
   resolveExcludedArtifactDirs,
   gitCommitIfNeeded,
   getGitModifiedFiles,

@@ -20,7 +20,7 @@ const {
   parseTask,
 } = require("../task");
 const { formatLocalTimestamp, redact, truncate } = require("../text");
-const { ensureGitRepo, gitCommitIfNeeded, getGitModifiedFiles, resolveExcludedArtifactDirs } = require("../git");
+const { ensureGitRepo, gitCommitIfNeeded, getGitModifiedFiles, normalizeGitPath, isPathInsideDir, resolveExcludedArtifactDirs } = require("../git");
 const { ensureAgentsDoc } = require("./agents-doc");
 const { areAllPhasesComplete, pickCurrentPhaseId, resolvePhaseLabel, phaseTestCommand, isPhaseComplete, computeNextPhaseId } = require("./phases");
 const {
@@ -60,25 +60,8 @@ const NON_CODE_BASENAMES = new Set([
   "readme",
 ]);
 
-function normalizeRepoPath(filePath) {
-  if (filePath === undefined || filePath === null) return "";
-  let normalized = String(filePath).trim();
-  if (!normalized) return "";
-  normalized = normalized.replace(/\\/g, "/");
-  normalized = normalized.replace(/^\.\/+/, "");
-  normalized = normalized.replace(/\/+/g, "/");
-  normalized = normalized.replace(/\/+$/, "");
-  return normalized;
-}
-
-function isPathInsideDir(filePath, dirPath) {
-  if (!filePath || !dirPath) return false;
-  if (filePath === dirPath) return true;
-  return filePath.startsWith(`${dirPath}/`);
-}
-
 function isCodeLikePath(filePath) {
-  const normalized = normalizeRepoPath(filePath);
+  const normalized = normalizeGitPath(filePath);
   if (!normalized) return false;
   const basename = path.posix.basename(normalized).toLowerCase();
   const basenameWithoutExt = basename.replace(/\.[^.]+$/, "");
@@ -117,8 +100,8 @@ async function shouldRunTestsForIteration(config, parsedTaskAfter, currentPhaseI
     return { run: true, reason: "git unavailable; running tests" };
   }
 
-  const excludedArtifactDirs = resolveExcludedArtifactDirs(config).map(normalizeRepoPath).filter(Boolean);
-  const changedFiles = (await getGitModifiedFiles(config.cwd)).map(normalizeRepoPath).filter(Boolean);
+  const excludedArtifactDirs = resolveExcludedArtifactDirs(config).map(normalizeGitPath).filter(Boolean);
+  const changedFiles = (await getGitModifiedFiles(config.cwd)).map(normalizeGitPath).filter(Boolean);
   const relevantFiles = changedFiles.filter(
     (filePath) => !excludedArtifactDirs.some((dirPath) => isPathInsideDir(filePath, dirPath))
   );
