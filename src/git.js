@@ -104,6 +104,55 @@ async function ensureGitWorktree(baseCwd, worktreePath, worktreeBranch) {
   return absPath;
 }
 
+function normalizeGitPath(value) {
+  if (value === undefined || value === null) return "";
+  let normalized = String(value).trim();
+  if (!normalized) return "";
+  normalized = normalized.replace(/\\/g, "/");
+  normalized = normalized.replace(/^\.\/+/, "");
+  normalized = normalized.replace(/\/+/g, "/");
+  normalized = normalized.replace(/\/+$/, "");
+  return normalized;
+}
+
+function parsePorcelainPath(line) {
+  const raw = String(line || "").slice(3).trim();
+  if (!raw) return "";
+  const arrowIndex = raw.lastIndexOf(" -> ");
+  const target = arrowIndex === -1 ? raw : raw.slice(arrowIndex + 4);
+  return normalizeGitPath(target);
+}
+
+function isPathInsideDir(filePath, dirPath) {
+  if (!filePath || !dirPath) return false;
+  if (filePath === dirPath) return true;
+  return filePath.startsWith(`${dirPath}/`);
+}
+
+function resolveExcludedArtifactDirs(config) {
+  const cwd = config && config.cwd ? String(config.cwd) : process.cwd();
+  const configured = config && config.loopyDir ? String(config.loopyDir) : "";
+  const dirs = new Set([".loopy"]);
+
+  const addCandidate = (candidate) => {
+    const normalized = normalizeGitPath(candidate);
+    if (!normalized || normalized === ".") return;
+    if (normalized.startsWith("../")) return;
+    dirs.add(normalized);
+  };
+
+  if (configured) {
+    if (path.isAbsolute(configured)) {
+      addCandidate(path.relative(cwd, configured));
+    } else {
+      addCandidate(configured);
+      addCandidate(path.relative(cwd, path.resolve(cwd, configured)));
+    }
+  }
+
+  return Array.from(dirs);
+}
+
 async function gitCommitIfNeeded(
   config,
   { iteration, status, testStatus, taskComplete, taskSummary, changeType } = {}
@@ -120,27 +169,34 @@ async function gitCommitIfNeeded(
     throw err;
   }
   const porcelain = await gitStatusPorcelain(config.cwd);
+  const excludedArtifactDirs = resolveExcludedArtifactDirs(config);
   const hasChanges = porcelain
     .split(/\r?\n/)
     .filter(Boolean)
     .some((line) => {
-      const file = line.slice(3);
+      const file = parsePorcelainPath(line);
+      if (!file) return false;
       if (file === "PROMPT.md") return false;
-      if (line.startsWith("?? .loopy/")) return false;
-      if (line.startsWith("?? .loopy")) return false;
-      if (line.startsWith("?? .loopy/PROMPT.md")) return false;
-      if (file === ".loopy/LOOPY_PLAN.md") return false;
-      if (file.startsWith(".loopy/")) return false;
+      if (excludedArtifactDirs.some((dirPath) => isPathInsideDir(file, dirPath))) return false;
       return true;
     });
 
   if (!hasChanges) return { committed: false, reason: "no-changes" };
 
-  const addArgs = ["add", "-A", "--", ".", ":!.loopy", ":!.loopy/**"];
-  const addRes = await git(addArgs, { cwd: config.cwd });
+  // Stage broadly first, then unstage Loopy artifact paths.
+  // This avoids relying on pathspec exclude magic, which can vary across git setups.
+  const addRes = await git(["add", "-A", "--", "."], { cwd: config.cwd });
   if (addRes.code !== 0) {
     const msg = (addRes.stderr || addRes.stdout || "").trim();
     throw new Error(msg || "Failed to stage changes (git add -A).");
+  }
+  for (const dirPath of excludedArtifactDirs) {
+    const resetRes = await git(["reset", "-q", "--", dirPath], { cwd: config.cwd });
+    if (resetRes.code !== 0) {
+      const msg = (resetRes.stderr || resetRes.stdout || "").trim();
+      if (/did not match any file/i.test(msg)) continue;
+      throw new Error(msg || `Failed to unstage excluded path: ${dirPath}`);
+    }
   }
 
   let branch = "";
