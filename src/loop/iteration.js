@@ -22,7 +22,7 @@ const {
 const { formatLocalTimestamp, redact, truncate } = require("../text");
 const { ensureGitRepo, gitCommitIfNeeded, getGitModifiedFiles, resolveExcludedArtifactDirs } = require("../git");
 const { ensureAgentsDoc } = require("./agents-doc");
-const { pickCurrentPhaseId, resolvePhaseLabel, phaseTestCommand, isPhaseComplete, computeNextPhaseId } = require("./phases");
+const { areAllPhasesComplete, pickCurrentPhaseId, resolvePhaseLabel, phaseTestCommand, isPhaseComplete, computeNextPhaseId } = require("./phases");
 const {
   findNewlyCompletedTasks,
   formatCompletedTaskLines,
@@ -164,7 +164,7 @@ async function runIteration(config, { stopSignal } = {}) {
   const state = loaded.state;
   bytesRead += loaded.bytes;
 
-  if (parsedTask.allChecked) {
+  if (parsedTask.allChecked && areAllPhasesComplete(parsedTask, state)) {
     await appendActivity(config.activityLog, ["Plan complete. Stopping loop."]);
     printStep(`Plan complete; stopping loop`, { kind: "plan" });
     return { status: "complete", bytes: 0 };
@@ -430,7 +430,10 @@ async function runIteration(config, { stopSignal } = {}) {
         await appendActivity(config.activityLog, [`tests skipped: ${testDecision.reason}`]);
       }
     }
-    const taskComplete = Boolean(parsedTaskAfter.allChecked);
+    const taskComplete = Boolean(
+      parsedTaskAfter.allChecked &&
+      areAllPhasesComplete(parsedTaskAfter, state, { testStatus })
+    );
     const completedSections = findNewlyCompletedTasks(parsedTask, parsedTaskAfter);
     printStepLines(formatCompletedTaskLines(completedSections), { iteration });
     printStepLines([formatProgressLine(summarizePlanProgress(parsedTaskAfter, currentPhaseId))], { iteration });
