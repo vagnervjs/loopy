@@ -332,6 +332,16 @@ async function runStatus(flags) {
     startedAt ? formatLabelLine("Started at", startedAt) : formatLabelLine("Started at", "n/a"),
     formatLabelLine("Updated at", (state && state.updatedAt) || "n/a"),
   ];
+  // Guardrail state
+  const thrashCount = state && state.fileThrashCount != null ? state.fileThrashCount : 0;
+  const errorCounts = state && state.errorCounts ? state.errorCounts : {};
+  const errorCountEntries = Object.entries(errorCounts);
+  const topErrors = errorCountEntries
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([sig, count]) => `${sig.slice(0, 60)}${sig.length > 60 ? "…" : ""} (${count}x)`)
+    .join("; ") || "none";
+
   const infoItems = [
     formatInfoLine("Iteration", state && state.iteration != null ? state.iteration : 0),
     formatInfoLine("Last status", (state && state.lastStatus) || "n/a"),
@@ -345,14 +355,22 @@ async function runStatus(flags) {
     formatInfoLine("Hints file", path.relative(cwd, hintsFile) || hintsFile),
   ];
 
+  const guardrailItems = [
+    formatInfoLine("File thrash count", thrashCount),
+    formatInfoLine("Last file signature", (state && state.lastFileSignature) || "n/a"),
+    formatInfoLine("Repeat errors", topErrors),
+  ];
+
   const indentLines = (items) => items.map((line) => (line ? `  - ${line}` : ""));
   const useEmojiHeaders = !(flags && (flags.noEmoji || flags.plain));
   const progressHeader = useEmojiHeaders ? "📈 Progress" : "Progress";
   const timeHeader = useEmojiHeaders ? "⏱️ Time" : "Time";
   const infoHeader = useEmojiHeaders ? "ℹ️ Details" : "Details";
+  const guardrailHeader = useEmojiHeaders ? "🛡️ Guardrails" : "Guardrails";
   const progressLines = [formatHeader(progressHeader), ...indentLines(progressItems)];
   const timeLines = [formatHeader(timeHeader), ...indentLines(timeItems)];
   const infoLines = [formatHeader(infoHeader), ...indentLines(infoItems)];
+  const guardrailLines = [formatHeader(guardrailHeader), ...indentLines(guardrailItems)];
 
   const lines = [
     `Loopy status (${path.relative(cwd, stateFile) || stateFile})`,
@@ -362,6 +380,8 @@ async function runStatus(flags) {
     ...timeLines,
     "",
     ...infoLines,
+    "",
+    ...guardrailLines,
     "",
   ];
   console.log(lines.join("\n"));
