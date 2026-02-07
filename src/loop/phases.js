@@ -30,18 +30,20 @@ function pickCurrentPhaseId(parsedTask, state, config, options = {}) {
     return start;
   }
 
-  // Prefer the next incomplete phase in plan order.
-  for (let i = 0; i < ids.length; i += 1) {
-    const candidate = ids[(startIdx + i) % ids.length];
+  // Prefer the next incomplete phase in strict forward order (no wrap-around).
+  // This ensures the plan sequence is respected: once a phase is passed,
+  // we never regress to an earlier phase.
+  for (let i = startIdx; i < ids.length; i += 1) {
+    const candidate = ids[i];
     if (skip.has(candidate)) continue;
     if (isPhaseComplete(parsedTask, candidate, state)) continue;
     return candidate;
   }
 
-  // All phases are complete or skipped; fall back to the next available.
-  for (let i = 0; i < ids.length; i += 1) {
-    const candidate = ids[(startIdx + i) % ids.length];
-    if (!skip.has(candidate)) return candidate;
+  // All phases from startIdx onward are complete or skipped;
+  // fall back to the last non-skipped phase.
+  for (let i = ids.length - 1; i >= 0; i -= 1) {
+    if (!skip.has(ids[i])) return ids[i];
   }
   return start;
 }
