@@ -423,13 +423,18 @@ async function runIteration(config, { stopSignal } = {}) {
     const taskSummary = taskContext.summary;
     let changeType = taskContext.changeType;
     if (taskContext.changeType === "chore" && !/^[a-zA-Z]+\s*:/.test(taskLine || "")) {
-      if (config.gitCommit) {
+      const heuristicType = inferChangeTypeHeuristic(taskLine);
+      // Only invoke the (expensive) agent classifier when the heuristic
+      // falls back to the generic "feat" default -- meaning it wasn't
+      // confident.  When the heuristic matches a specific keyword the
+      // result is already reliable, so we skip the extra agent call.
+      if (config.gitCommit && heuristicType === "feat") {
         const agentType = await inferChangeTypeFromAgent(config.agentCommand, taskLine, {
           noColor: config.noColor,
         });
-        changeType = agentType || inferChangeTypeHeuristic(taskLine);
+        changeType = agentType || heuristicType;
       } else {
-        changeType = inferChangeTypeHeuristic(taskLine);
+        changeType = heuristicType;
       }
     }
     await appendActivity(config.activityLog, [`change_type inferred: ${changeType} (task: ${taskLine})`]);

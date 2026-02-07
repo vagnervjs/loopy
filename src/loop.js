@@ -427,6 +427,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
 
   const start = Date.now();
   let iteration = 0;
+  let consecutiveFailures = 0;
 
   while (!stop.stopRequested) {
     const elapsedMinutes = (Date.now() - start) / 60000;
@@ -473,10 +474,24 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
       break;
     }
 
-    const sleepMs =
+    // Escalate backoff on consecutive failures: double the sleep each time,
+    // up to a cap of 5 minutes, then reset on any success.
+    if (result.status === "failure") {
+      consecutiveFailures += 1;
+    } else {
+      consecutiveFailures = 0;
+    }
+    const baseMs =
       result.guardrailCooldownMs && result.guardrailCooldownMs > 0 ? result.guardrailCooldownMs : config.backoffMs;
+    const MAX_BACKOFF_MS = 300_000; // 5 minutes
+    const escalatedMs =
+      consecutiveFailures > 1
+        ? Math.min(baseMs * Math.pow(2, consecutiveFailures - 1), MAX_BACKOFF_MS)
+        : baseMs;
+    const sleepMs = Math.max(0, escalatedMs);
     if (sleepMs > 0) {
-      printStep(`Sleeping ${sleepMs}ms before next iteration`, { kind: "sleep" });
+      const extra = consecutiveFailures > 1 ? ` (escalated, ${consecutiveFailures} consecutive failures)` : "";
+      printStep(`Sleeping ${sleepMs}ms before next iteration${extra}`, { kind: "sleep" });
     }
     await new Promise((resolve) => setTimeout(resolve, sleepMs));
   }
