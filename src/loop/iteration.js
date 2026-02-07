@@ -566,7 +566,7 @@ async function runIteration(config, { stopSignal } = {}) {
       const repeat = detectRepeatFailure(nextState, errorSignature, config.guardrailRepeatLimit);
       nextState = repeat.state;
 
-      const thrashCheck = detectThrash(nextState, modifiedFiles);
+      const thrashCheck = detectThrash(nextState, modifiedFiles, state);
       nextState = thrashCheck.state;
 
       let guardrailsUpdated = guardrailsText;
