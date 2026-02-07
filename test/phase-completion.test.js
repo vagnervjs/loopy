@@ -2,7 +2,7 @@ const { suite } = require("./suite");
 const test = suite("phase-completion");
 const assert = require("node:assert/strict");
 
-const { isPhaseComplete, areAllPhasesComplete } = require("../src/loop/phases");
+const { isPhaseComplete, areAllPhasesComplete, pickCurrentPhaseId } = require("../src/loop/phases");
 const { parseTask } = require("../src/task");
 
 // ---------------------------------------------------------------------------
@@ -268,4 +268,124 @@ test("isPhaseComplete: phase with tests_pass + tests passing → complete", () =
   const parsed = parseTask(text);
   const state = { lastTest: "pass @ 2026-02-06T12:00:00" };
   assert.equal(isPhaseComplete(parsed, "core", state), true);
+});
+
+// ---------------------------------------------------------------------------
+// pickCurrentPhaseId — sequence / no wrap-around tests
+// ---------------------------------------------------------------------------
+
+test("pickCurrentPhaseId: returns first phase when no state", () => {
+  const text = [
+    "---",
+    "phases:",
+    "  - id: plan",
+    "    stop_on: all_checked",
+    "  - id: implement",
+    "    stop_on: all_checked",
+    "  - id: verify",
+    "    stop_on: all_checked",
+    "---",
+    "",
+    "<!-- loopy:phase plan -->",
+    "- [ ] Plan task",
+    "",
+    "<!-- loopy:phase implement -->",
+    "- [ ] Implement task",
+    "",
+    "<!-- loopy:phase verify -->",
+    "- [ ] Verify task",
+    "",
+  ].join("\n");
+  const parsed = parseTask(text);
+  const result = pickCurrentPhaseId(parsed, {}, {});
+  assert.equal(result, "plan");
+});
+
+test("pickCurrentPhaseId: advances to next incomplete phase", () => {
+  const text = [
+    "---",
+    "phases:",
+    "  - id: plan",
+    "    stop_on: all_checked",
+    "  - id: implement",
+    "    stop_on: all_checked",
+    "  - id: verify",
+    "    stop_on: all_checked",
+    "---",
+    "",
+    "<!-- loopy:phase plan -->",
+    "- [x] Plan task",
+    "",
+    "<!-- loopy:phase implement -->",
+    "- [ ] Implement task",
+    "",
+    "<!-- loopy:phase verify -->",
+    "- [ ] Verify task",
+    "",
+  ].join("\n");
+  const parsed = parseTask(text);
+  const state = { currentPhase: "plan" };
+  const result = pickCurrentPhaseId(parsed, state, {});
+  assert.equal(result, "implement");
+});
+
+test("pickCurrentPhaseId: does NOT wrap back to earlier phase when later phases are complete", () => {
+  const text = [
+    "---",
+    "phases:",
+    "  - id: plan",
+    "    stop_on: all_checked",
+    "  - id: implement",
+    "    stop_on: all_checked",
+    "  - id: verify",
+    "    stop_on: all_checked",
+    "---",
+    "",
+    "<!-- loopy:phase plan -->",
+    "- [ ] Plan task still open",
+    "",
+    "<!-- loopy:phase implement -->",
+    "- [x] Implement task",
+    "",
+    "<!-- loopy:phase verify -->",
+    "- [x] Verify task",
+    "",
+  ].join("\n");
+  const parsed = parseTask(text);
+  // Current phase is implement, and both implement+verify are complete.
+  // The old buggy code would wrap around to "plan" because it has an unchecked item.
+  // The fix should return the last non-skipped phase instead ("verify").
+  const state = { currentPhase: "implement" };
+  const result = pickCurrentPhaseId(parsed, state, {});
+  assert.notEqual(result, "plan", "should NOT wrap back to earlier phase");
+});
+
+test("pickCurrentPhaseId: respects forward-only order from current phase", () => {
+  const text = [
+    "---",
+    "phases:",
+    "  - id: alpha",
+    "    stop_on: all_checked",
+    "  - id: beta",
+    "    stop_on: all_checked",
+    "  - id: gamma",
+    "    stop_on: all_checked",
+    "---",
+    "",
+    "<!-- loopy:phase alpha -->",
+    "- [ ] Alpha open task",
+    "",
+    "<!-- loopy:phase beta -->",
+    "- [x] Beta done",
+    "",
+    "<!-- loopy:phase gamma -->",
+    "- [ ] Gamma open task",
+    "",
+  ].join("\n");
+  const parsed = parseTask(text);
+  // State says we are on beta; beta is complete.
+  // Should advance to gamma (not wrap back to alpha).
+  const state = { currentPhase: "beta" };
+  const result = pickCurrentPhaseId(parsed, state, {});
+  assert.equal(result, "gamma");
 });
