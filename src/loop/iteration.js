@@ -434,6 +434,9 @@ async function runIteration(config, { stopSignal } = {}) {
     }
     await appendActivity(config.activityLog, [`change_type inferred: ${changeType} (task: ${taskLine})`]);
 
+    // Capture modified files *before* git commit so thrash detection can see them.
+    const modifiedFiles = await getGitModifiedFiles(config.cwd);
+
     let postIterationRan = false;
     if (status === "success" && config.postIteration) {
       printStep(`Hook post-iteration run ${redact(config.postIteration)}`, { iteration, kind: "hook" });
@@ -511,7 +514,6 @@ async function runIteration(config, { stopSignal } = {}) {
       printStep(`Hook post-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
 
-    const modifiedFiles = await getGitModifiedFiles(config.cwd);
     const iterationEndedAt = new Date();
     const iterationDurationMs = iterationEndedAt.getTime() - iterationStartedAt.getTime();
 
@@ -520,7 +522,7 @@ async function runIteration(config, { stopSignal } = {}) {
       iteration,
       lastStatus: taskComplete ? "complete" : status,
       lastTest: testStatus,
-      lastError: lastError || state.lastError || "",
+      lastError: lastError || (status === "failure" ? state.lastError : "") || "",
       lastBytes: bytesRead + bytesWritten,
       rotatePending: false,
       updatedAt: new Date().toISOString(),
@@ -550,15 +552,6 @@ async function runIteration(config, { stopSignal } = {}) {
             `${nextState.updatedAt} phase advanced: ${currentPhaseId} -> ${nextPhase}`,
           ]).slice(-100);
         }
-      }
-    }
-
-    if (!config.phaseOnly && parsedTaskAfter.phases && parsedTaskAfter.phases.length) {
-      const syncedPhase = pickCurrentPhaseId(parsedTaskAfter, nextState, config, {
-        phaseExplicit: Boolean(config.phaseExplicit),
-      });
-      if (syncedPhase && syncedPhase !== nextState.currentPhase) {
-        nextState.currentPhase = syncedPhase;
       }
     }
 
