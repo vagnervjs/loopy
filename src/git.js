@@ -231,6 +231,33 @@ async function gitCommitIfNeeded(
   return { committed: true, hash, message };
 }
 
+async function getMergeBase(cwd, baseBranch) {
+  const branch = baseBranch || "main";
+  try {
+    const res = await runProcess("git", ["merge-base", "HEAD", branch], {
+      cwd: cwd || process.cwd(),
+      maxOutputBytes: DEFAULTS.maxOutputBytes,
+    });
+    if (res.code === 0) {
+      const sha = (res.stdout || "").trim();
+      return sha || "";
+    }
+    // Try "master" as fallback if "main" was the default
+    if (!baseBranch || branch === "main") {
+      const fallback = await runProcess("git", ["merge-base", "HEAD", "master"], {
+        cwd: cwd || process.cwd(),
+        maxOutputBytes: DEFAULTS.maxOutputBytes,
+      });
+      if (fallback.code === 0) {
+        return (fallback.stdout || "").trim();
+      }
+    }
+    return "";
+  } catch (err) {
+    return "";
+  }
+}
+
 async function getGitModifiedFiles(cwd) {
   try {
     const { stdout } = await runProcess("git", ["status", "--porcelain"], {
@@ -251,6 +278,7 @@ async function getGitModifiedFiles(cwd) {
 module.exports = {
   ensureGitRepo,
   getCurrentBranch,
+  getMergeBase,
   gitSwitchBranch,
   ensureGitWorktree,
   normalizeGitPath,

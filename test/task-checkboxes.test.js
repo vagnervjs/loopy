@@ -274,3 +274,49 @@ test("compareCheckboxDiffs - handles duplicate task text", () => {
   assert.equal(diff[0].text, "duplicate task");
   assert.equal(diff[1].text, "duplicate task");
 });
+
+// ── Skip markers [~] and [-] ────────────────────────────────────────────
+
+test("parseCheckboxes - recognizes [~] as skipped and checked", () => {
+  const text = "- [~] Skipped task (not applicable)\n- [ ] Open task\n- [x] Done task\n";
+  const boxes = parseCheckboxes(text);
+  assert.equal(boxes.length, 3);
+
+  const skipped = boxes[0];
+  assert.equal(skipped.checked, true);
+  assert.equal(skipped.skipped, true);
+  assert.equal(skipped.text, "Skipped task (not applicable)");
+
+  const open = boxes[1];
+  assert.equal(open.checked, false);
+  assert.equal(open.skipped, undefined, "skipped not set on regular items");
+
+  const done = boxes[2];
+  assert.equal(done.checked, true);
+  assert.equal(done.skipped, undefined, "skipped not set on regular [x] items");
+});
+
+test("parseCheckboxes - recognizes [-] as skipped and checked", () => {
+  const text = "- [-] Cancelled task (duplicate)\n- [x] Done task\n";
+  const boxes = parseCheckboxes(text);
+  assert.equal(boxes.length, 2);
+
+  const cancelled = boxes[0];
+  assert.equal(cancelled.checked, true);
+  assert.equal(cancelled.skipped, true);
+  assert.equal(cancelled.text, "Cancelled task (duplicate)");
+});
+
+test("parseCheckboxes - skipped markers count toward allChecked", () => {
+  const text = "- [x] Done\n- [~] Skipped\n- [-] Cancelled\n";
+  const boxes = parseCheckboxes(text);
+  const allChecked = boxes.every((b) => b.checked);
+  assert.equal(allChecked, true, "All items should be considered checked");
+});
+
+test("parseCheckboxes - mix of open and skipped is not allChecked", () => {
+  const text = "- [x] Done\n- [~] Skipped\n- [ ] Still open\n";
+  const boxes = parseCheckboxes(text);
+  const allChecked = boxes.every((b) => b.checked);
+  assert.equal(allChecked, false, "Open task should prevent allChecked");
+});

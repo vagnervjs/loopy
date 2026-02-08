@@ -290,13 +290,17 @@ function parseCheckboxes(text) {
       }
     }
     
-    const itemMatch = effective.match(/^-\s*\[( |x|X)\]\s+(.*)$/);
+    const itemMatch = effective.match(/^-\s*\[( |x|X|~|-)\]\s+(.*)$/);
     if (itemMatch) {
-      checkboxes.push({
+      const marker = itemMatch[1];
+      const isSkipped = marker === "~" || marker === "-";
+      const entry = {
         line: i + 1,
-        checked: itemMatch[1].toLowerCase() === "x",
+        checked: marker.toLowerCase() === "x" || isSkipped,
         text: itemMatch[2],
-      });
+      };
+      if (isSkipped) entry.skipped = true;
+      checkboxes.push(entry);
     }
   }
   

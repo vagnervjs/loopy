@@ -20,9 +20,10 @@ const {
   parseTask,
 } = require("../task");
 const { formatLocalTimestamp, redact, truncate } = require("../text");
-const { ensureGitRepo, gitCommitIfNeeded, getGitModifiedFiles, normalizeGitPath, isPathInsideDir, resolveExcludedArtifactDirs } = require("../git");
+const { evaluateTestFailure } = require("../baseline");
+const { ensureGitRepo, gitCommitIfNeeded, getGitModifiedFiles, getMergeBase, normalizeGitPath, isPathInsideDir, resolveExcludedArtifactDirs } = require("../git");
 const { ensureAgentsDoc } = require("./agents-doc");
-const { areAllPhasesComplete, pickCurrentPhaseId, resolvePhaseLabel, phaseTestCommand, isPhaseComplete, computeNextPhaseId } = require("./phases");
+const { areAllPhasesComplete, pickCurrentPhaseId, resolvePhaseLabel, phaseTestCommand, isPhaseAllChecked, isPhaseComplete, computeNextPhaseId } = require("./phases");
 const {
   findNewlyCompletedTasks,
   formatCompletedTaskLines,
@@ -78,19 +79,22 @@ function isExplicitNonCodeTask(changeType, taskLine) {
   return /\b(analysis|analyze|analyzing|analysing|research|spike|documentation|docs?|readme)\b/.test(normalizedTask);
 }
 
-function currentPhaseRequiresTestsPass(parsedTask, phaseId) {
-  if (!parsedTask || !phaseId) return false;
-  const phase = (parsedTask.phases || []).find((item) => item && item.id === phaseId);
-  const stopOn = phase && Array.isArray(phase.stopOn) ? phase.stopOn : [];
-  return stopOn.some((item) => String(item || "").trim().toLowerCase() === "tests_pass");
-}
-
 async function shouldRunTestsForIteration(config, parsedTaskAfter, currentPhaseId, taskContext, effectiveTestCommand) {
   if (!effectiveTestCommand) return { run: false, reason: "missing test command" };
-  if (currentPhaseRequiresTestsPass(parsedTaskAfter, currentPhaseId)) {
-    return { run: true, reason: "phase requires tests_pass" };
+
+  // Two-gate model: In a phased plan, defer the test_command until all tasks
+  // in the current phase are checked (Gate 1).  Only after Gate 1 is met do
+  // we run the test command (Gate 2).
+  if (currentPhaseId && parsedTaskAfter.phases && parsedTaskAfter.phases.length) {
+    const allChecked = isPhaseAllChecked(parsedTaskAfter, currentPhaseId);
+    if (!allChecked) {
+      return { run: false, reason: "phase tasks still unchecked (tests deferred until all tasks complete)" };
+    }
+    // All phase tasks are checked — run tests regardless of file types
+    return { run: true, reason: "all phase tasks checked; running Gate 2 tests" };
   }
 
+  // Non-phased plans: keep original heuristic (run tests when code changes detected)
   try {
     await ensureGitRepo(config.cwd);
   } catch (_) {
@@ -403,9 +407,56 @@ async function runIteration(config, { stopSignal } = {}) {
           printStep("Tests pass", { iteration, kind: "tests", level: "success" });
         }
         if (testOutcome === "fail") {
-          status = "failure";
-          lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
-          errorSignature = `${effectiveTestCommand}::${lastError}`;
+          // --- Tiered failure recovery ---
+          const changedFilesForBaseline = await getGitModifiedFiles(config.cwd);
+          const evaluation = await evaluateTestFailure(config, state, {
+            testOutput,
+            testExitCode: testResult.code,
+            testCommand: effectiveTestCommand,
+            changedFiles: changedFilesForBaseline,
+            stopSignal,
+            getMergeBase: () => getMergeBase(config.cwd),
+          });
+
+          if (evaluation.aborted) {
+            return await abortIteration("baseline test");
+          }
+
+          // Cache baseline result if computed
+          if (evaluation.baselineResult) {
+            state.baselineTestResult = evaluation.baselineResult;
+          }
+
+          // Apply state updates from evaluation
+          if (evaluation.stateUpdates) {
+            Object.assign(state, evaluation.stateUpdates);
+          }
+
+          if (evaluation.action === "pass") {
+            // Pre-existing failures — treat as pass
+            const baselineMsg = `iteration ${iteration} success (test: pre-existing failures match baseline, treating as pass)`;
+            printStep(baselineMsg, { iteration, kind: "tests", level: "success" });
+            await appendActivity(config.activityLog, [baselineMsg]);
+            testStatus = testTimestamp ? `pass (baseline) @ ${testTimestamp}` : "pass (baseline)";
+            // Do NOT set status to failure — keep it as "success"
+          } else if (evaluation.action === "fix_attempt") {
+            const fixMsg = `iteration ${iteration} failure (test: ${evaluation.reason})`;
+            printStep(fixMsg, { iteration, kind: "tests", level: "warn" });
+            await appendActivity(config.activityLog, [fixMsg]);
+            status = "failure";
+            lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
+            errorSignature = `${effectiveTestCommand}::${lastError}`;
+          } else {
+            // action === "fail"
+            const failNewMsg = evaluation.newFailures && evaluation.newFailures.length
+              ? `iteration ${iteration} failure (test: ${evaluation.newFailures.length} new failures not in baseline)`
+              : `iteration ${iteration} failure (test: ${evaluation.reason})`;
+            printStep(failNewMsg, { iteration, level: "error", kind: "tests" });
+            await appendActivity(config.activityLog, [failNewMsg]);
+            status = "failure";
+            lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
+            errorSignature = `${effectiveTestCommand}::${lastError}`;
+          }
         }
       } else {
         testStatus = `skipped (${testDecision.reason})`;
@@ -538,10 +589,15 @@ async function runIteration(config, { stopSignal } = {}) {
       iterationDurations: [...(state.iterationDurations || []), iterationDurationMs],
     };
 
+    // Reset baseline fix attempts on genuine success (tests actually passed)
+    if (status === "success" && /^pass\b/i.test(testStatus)) {
+      nextState.baselineFixAttempts = 0;
+    }
+
     const historyEntry = `${nextState.updatedAt} iteration ${iteration} ${status} (test: ${testStatus})`;
     nextState.history = [...nextState.history, historyEntry].slice(-50);
 
-    // Phase completion / progression.
+    // Phase completion / progression (two-gate model).
     if (status === "success" && currentPhaseId && parsedTaskAfter.phases && parsedTaskAfter.phases.length) {
       const phaseComplete = isPhaseComplete(parsedTaskAfter, currentPhaseId, nextState, { testStatus });
       if (phaseComplete) {
@@ -549,6 +605,12 @@ async function runIteration(config, { stopSignal } = {}) {
         nextState.phaseHistory = [...(nextState.phaseHistory || [])].concat([
           `${nextState.updatedAt} phase ${currentPhaseId} complete`,
         ]).slice(-100);
+        printStep(`Phase ${currentPhaseId} complete (all tasks checked, tests pass)`, {
+          iteration,
+          kind: "plan",
+          level: "success",
+        });
+        await appendActivity(config.activityLog, [`phase ${currentPhaseId} complete`]);
         if (config.phaseOnly) {
           nextState.lastStatus = "phase-complete";
         } else if (nextPhase) {
@@ -556,6 +618,18 @@ async function runIteration(config, { stopSignal } = {}) {
           nextState.phaseHistory = [...(nextState.phaseHistory || [])].concat([
             `${nextState.updatedAt} phase advanced: ${currentPhaseId} -> ${nextPhase}`,
           ]).slice(-100);
+        }
+      } else {
+        // Check if all tasks are checked but tests are failing (Gate 1 passed, Gate 2 failed)
+        const allTasksChecked = isPhaseAllChecked(parsedTaskAfter, currentPhaseId);
+        if (allTasksChecked && status === "success" && /^fail\b/i.test(testStatus)) {
+          printStep(
+            `Phase ${currentPhaseId} tasks complete but tests failing — fixing`,
+            { iteration, kind: "plan", level: "warn" }
+          );
+          await appendActivity(config.activityLog, [
+            `phase ${currentPhaseId} tasks complete but tests failing`,
+          ]);
         }
       }
     }

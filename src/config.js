@@ -33,6 +33,7 @@ const DEFAULTS = {
   bootstrapAgents: true,
   includeLastOutput: false,
   generatePrd: true,
+  fixBudget: 1,
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -296,6 +297,7 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   ]);
   const dryRunDefault = pickDefined(def, ["dry_run", "dryRun"]);
   const singleTaskModeDefault = pickDefined(def, ["single_task_mode", "singleTaskMode", "singleTask"]);
+  const fixBudgetDefault = pickDefined(def, ["fix_budget", "fixBudget"]);
   return {
     cwd: process.cwd(),
     resume: coerceBoolean(flags.resume ?? resumeDefault, false),
@@ -449,6 +451,13 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
     includeLastOutput: coerceBoolean(
       flags["include-last-output"] ?? fm.include_last_output ?? fm.includeLastOutput ?? includeLastOutputDefault,
       DEFAULTS.includeLastOutput
+    ),
+    fixBudget: clampMin(
+      coerceNumber(
+        flags["fix-budget"] ?? fm.fix_budget ?? fm.fixBudget ?? fixBudgetDefault,
+        DEFAULTS.fixBudget
+      ),
+      0
     ),
   };
 }

@@ -252,7 +252,7 @@ test("formatPrompt - includes AGENTS and specs summary when provided", () => {
   assert.match(prompt, /npm run dev/);
 });
 
-test("formatPrompt - fallback prompt includes test-gating rules", () => {
+test("formatPrompt - fallback prompt includes two-gate rules", () => {
   const prompt = formatPrompt({
     iteration: 1,
     taskText: "# Plan\n- [ ] task",
@@ -269,13 +269,13 @@ test("formatPrompt - fallback prompt includes test-gating rules", () => {
     filteredPlan: null,
   });
 
-  assert.match(prompt, /Do NOT mark a task checkbox as \[x\] unless the full test command passes/);
-  assert.match(prompt, /Always run the plan's test_command to validate your work/);
-  assert.match(prompt, /If tests fail, leave the checkbox unchecked/);
+  assert.match(prompt, /Complete all unchecked tasks in the current phase before tests will be run/);
+  assert.match(prompt, /test_command runs after all phase tasks are checked/);
+  assert.match(prompt, /If tests fail after all tasks are checked, fix the failures first/);
   assert.match(prompt, /3\+ consecutive iterations, reassess your approach/);
 });
 
-test("formatPrompt - {{instructions}} token includes test-gating rules", () => {
+test("formatPrompt - {{instructions}} token includes two-gate rules", () => {
   const template = "# Custom\n{{instructions}}";
   const prompt = formatPrompt({
     iteration: 1,
@@ -294,8 +294,8 @@ test("formatPrompt - {{instructions}} token includes test-gating rules", () => {
     promptTemplate: template,
   });
 
-  assert.match(prompt, /Do NOT mark a task checkbox as \[x\] unless the full test command passes/);
-  assert.match(prompt, /Always run the plan's test_command to validate your work/);
-  assert.match(prompt, /If tests fail, leave the checkbox unchecked/);
+  assert.match(prompt, /Complete all unchecked tasks in the current phase before tests will be run/);
+  assert.match(prompt, /test_command runs automatically after all phase tasks are checked/);
+  assert.match(prompt, /If tests fail after all tasks are checked, fix the failures first/);
   assert.match(prompt, /3\+ consecutive iterations, reassess your approach/);
 });

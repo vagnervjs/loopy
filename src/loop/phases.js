@@ -48,6 +48,10 @@ function pickCurrentPhaseId(parsedTask, state, config, options = {}) {
   return start;
 }
 
+/**
+ * @deprecated stop_on is ignored under the two-gate model.
+ * Kept for backward compatibility of the API surface.
+ */
 function phaseStopOn(parsedTask, phaseId) {
   if (!phaseId) return [];
   const phase = (parsedTask.phases || []).find((p) => p.id === phaseId);
@@ -55,9 +59,21 @@ function phaseStopOn(parsedTask, phaseId) {
   return raw.map((s) => String(s || "").trim()).filter(Boolean);
 }
 
+/**
+ * @deprecated Criteria are now always all_checked (+ tests_pass when a
+ * test command exists). Kept for backward compatibility.
+ */
 function phaseCriteria(parsedTask, phaseId) {
   const stopOn = phaseStopOn(parsedTask, phaseId);
   return stopOn.length ? stopOn : ["all_checked"];
+}
+
+/**
+ * Returns true when the phase has a test_command configured (directly
+ * or via phase_defaults / global front-matter).
+ */
+function phaseHasTestCommand(parsedTask, phaseId) {
+  return Boolean(phaseTestCommand(parsedTask, phaseId));
 }
 
 function phaseTestCommand(parsedTask, phaseId) {
@@ -87,16 +103,27 @@ function didTestsPass(state) {
   return /^pass\b/i.test(last.trim());
 }
 
+/**
+ * Two-gate phase completion model:
+ *   Gate 1: All tasks in the phase must be checked [x] (or skipped [~]/[-]).
+ *   Gate 2: If the phase has a test_command, the tests must also pass.
+ *
+ * The legacy `stop_on` field is ignored — every phase uses the same gates.
+ */
 function isPhaseComplete(parsedTask, phaseId, state, { testStatus } = {}) {
   if (!hasPhase(parsedTask, phaseId)) return false;
-  const criteria = phaseCriteria(parsedTask, phaseId);
-  const needsAllChecked = criteria.includes("all_checked");
-  const needsTests = criteria.includes("tests_pass");
+
+  // Gate 1: all tasks checked
   const phaseChecked = isPhaseAllChecked(parsedTask, phaseId);
+  if (!phaseChecked) return false;
+
+  // Gate 2: tests pass (only enforced when a test command is configured)
+  const needsTests = phaseHasTestCommand(parsedTask, phaseId);
+  if (!needsTests) return true;
+
   const hasTestStatus = typeof testStatus === "string" && testStatus.trim() && testStatus !== "n/a";
-  const testsOk = !needsTests || (hasTestStatus ? /^pass\b/i.test(testStatus.trim()) : didTestsPass(state));
-  const phaseOk = !needsAllChecked || phaseChecked;
-  return phaseOk && testsOk;
+  const testsOk = hasTestStatus ? /^pass\b/i.test(testStatus.trim()) : didTestsPass(state);
+  return testsOk;
 }
 
 function computeNextPhaseId(parsedTask, currentPhaseId, config) {
@@ -130,8 +157,10 @@ function areAllPhasesComplete(parsedTask, state, { testStatus } = {}) {
 module.exports = {
   areAllPhasesComplete,
   computeNextPhaseId,
+  isPhaseAllChecked,
   isPhaseComplete,
   parseSkipPhaseList,
+  phaseHasTestCommand,
   phaseTestCommand,
   pickCurrentPhaseId,
   resolvePhaseLabel,

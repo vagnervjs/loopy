@@ -33,7 +33,7 @@ test("formatPrompt - uses template override when provided", () => {
   assert.doesNotMatch(prompt, /# Loopy Loop Prompt/);
 });
 
-test("built-in build template includes test-gating task rules", async () => {
+test("built-in build template includes two-gate task rules", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tpl-build-"));
   const loopyDir = path.join(tmp, ".loopy");
   await fs.mkdir(loopyDir, { recursive: true });
@@ -45,9 +45,9 @@ test("built-in build template includes test-gating task rules", async () => {
   });
 
   assert.equal(result.source, "built-in");
-  assert.match(result.text, /Do NOT mark a task checkbox as \[x\] unless the full test command/);
-  assert.match(result.text, /Always run the plan's test_command to validate your work/);
-  assert.match(result.text, /fix the failures before marking the task done/);
+  assert.match(result.text, /Complete all unchecked tasks in the current phase before tests will be run/);
+  assert.match(result.text, /test_command runs automatically after all phase tasks are checked/);
+  assert.match(result.text, /fix the failures before the phase can advance/);
   assert.match(result.text, /3\+ consecutive iterations, reassess your approach/);
 });
 
@@ -64,12 +64,13 @@ test("built-in build template includes Built-in Rules section", async () => {
 
   assert.equal(result.source, "built-in");
   assert.match(result.text, /## Built-in Rules/);
-  assert.match(result.text, /MUST run the test_command defined in the plan frontmatter/);
-  assert.match(result.text, /If tests fail, your iteration is not successful/);
+  assert.match(result.text, /two-gate lifecycle/);
+  assert.match(result.text, /test_command is NOT executed until every task/);
   assert.match(result.text, /Focus on one task at a time/);
+  assert.match(result.text, /Never cycle back to a previous phase/);
 });
 
-test("built-in plan template includes phase stop_on safeguard", async () => {
+test("built-in plan template includes two-gate model guidance", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tpl-plan-"));
   const loopyDir = path.join(tmp, ".loopy");
   await fs.mkdir(loopyDir, { recursive: true });
@@ -81,6 +82,7 @@ test("built-in plan template includes phase stop_on safeguard", async () => {
   });
 
   assert.equal(result.source, "built-in");
-  assert.match(result.text, /prefer stop_on: tests_pass over stop_on: all_checked/);
-  assert.match(result.text, /documentation-only or planning-only phases/);
+  assert.match(result.text, /two-gate completion model/);
+  assert.match(result.text, /stop_on field is deprecated/);
+  assert.match(result.text, /\[~\] or \[-\]/);
 });
