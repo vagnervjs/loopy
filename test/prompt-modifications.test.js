@@ -206,6 +206,42 @@ test("formatPrompt - uses filtered plan when provided", () => {
   assert.doesNotMatch(prompt, /## Phase: beta/);
 });
 
+test("getCurrentTask - skips blocked [!] tasks when searching for next open task", () => {
+  const planText = `---
+test: npm test
+---
+
+# Plan
+
+## Phase: alpha
+<!-- loopy:phase alpha -->
+- [x] completed task
+- [!] blocked task — BLOCKED: pre-existing issue
+- [ ] next open task
+`;
+
+  const task = getCurrentTask(planText, { phaseId: "alpha" });
+  assert.notEqual(task, null);
+  assert.equal(task.text, "next open task");
+});
+
+test("getCurrentTask - returns null when all tasks are checked or blocked", () => {
+  const planText = `---
+test: npm test
+---
+
+# Plan
+
+## Phase: alpha
+<!-- loopy:phase alpha -->
+- [x] done task
+- [!] blocked task — BLOCKED: reason
+`;
+
+  const task = getCurrentTask(planText, { phaseId: "alpha" });
+  assert.equal(task, null);
+});
+
 test("formatPrompt - does not include Current Task section when currentTask is null", () => {
   const prompt = formatPrompt({
     iteration: 1,
@@ -225,6 +261,26 @@ test("formatPrompt - does not include Current Task section when currentTask is n
 
   assert.doesNotMatch(prompt, /## Current Task/);
   assert.doesNotMatch(prompt, /\*\*Complete only the Current Task in this iteration\.\*\*/);
+});
+
+test("formatPrompt - fallback prompt includes blocked task instructions", () => {
+  const prompt = formatPrompt({
+    iteration: 1,
+    taskText: "# Plan\n- [ ] task",
+    taskSeedText: "",
+    taskSeedSource: "",
+    guardrailsText: "# Guardrails\n",
+    progressText: "# Progress\n",
+    lastOutput: "",
+    rotationPending: false,
+    currentPhase: "",
+    taskFilePath: "LOOPY_PLAN.md",
+    hintsText: "",
+    currentTask: null,
+    filteredPlan: null,
+  });
+
+  assert.match(prompt, /\[!\].*BLOCKED/);
 });
 
 test("formatPrompt - includes AGENTS and specs summary when provided", () => {

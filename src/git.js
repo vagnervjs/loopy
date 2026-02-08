@@ -153,6 +153,45 @@ function resolveExcludedArtifactDirs(config) {
   return Array.from(dirs);
 }
 
+/**
+ * Check whether a file path is plausibly related to the task description.
+ * Uses keyword overlap: extracts significant tokens from the task text and
+ * checks if any appear in the file path (basename, directory, or extension-
+ * stripped name).
+ */
+function isFileRelatedToTask(filePath, taskSummary) {
+  if (!filePath || !taskSummary) return true; // no info → assume related
+  const normalized = normalizeGitPath(filePath).toLowerCase();
+  if (!normalized) return true;
+  const basename = path.posix.basename(normalized);
+  const withoutExt = basename.replace(/\.[^.]+$/, "");
+
+  // Extract keywords from task summary (words >= 3 chars, excluding stop words)
+  const stopWords = new Set([
+    "the", "and", "for", "with", "that", "this", "from", "into", "have",
+    "has", "was", "are", "were", "been", "being", "will", "would", "could",
+    "should", "may", "can", "not", "but", "all", "any", "each", "every",
+    "add", "set", "get", "run", "use", "new", "old", "update", "change",
+    "make", "fix", "test", "file", "files", "task", "default",
+  ]);
+  const taskWords = String(taskSummary)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !stopWords.has(w));
+
+  // Need at least 2 meaningful keywords to make a relatedness determination.
+  // With fewer than 2, the task description is too vague to filter on.
+  if (taskWords.length < 2) return true;
+
+  for (const word of taskWords) {
+    if (normalized.includes(word)) return true;
+    if (basename.includes(word)) return true;
+    if (withoutExt.includes(word)) return true;
+  }
+  return false;
+}
+
 async function gitCommitIfNeeded(
   config,
   { iteration, status, testStatus, taskComplete, taskSummary, changeType } = {}
@@ -170,26 +209,54 @@ async function gitCommitIfNeeded(
   }
   const porcelain = await gitStatusPorcelain(config.cwd);
   const excludedArtifactDirs = resolveExcludedArtifactDirs(config);
-  const hasChanges = porcelain
+  const candidateFiles = porcelain
     .split(/\r?\n/)
     .filter(Boolean)
-    .some((line) => {
-      const file = parsePorcelainPath(line);
+    .map((line) => parsePorcelainPath(line))
+    .filter((file) => {
       if (!file) return false;
       if (file === "PROMPT.md") return false;
       if (excludedArtifactDirs.some((dirPath) => isPathInsideDir(file, dirPath))) return false;
       return true;
     });
 
-  if (!hasChanges) return { committed: false, reason: "no-changes" };
+  if (!candidateFiles.length) return { committed: false, reason: "no-changes" };
 
-  // Stage broadly first, then unstage Loopy artifact paths.
-  // This avoids relying on pathspec exclude magic, which can vary across git setups.
-  const addRes = await git(["add", "-A", "--", "."], { cwd: config.cwd });
-  if (addRes.code !== 0) {
-    const msg = (addRes.stderr || addRes.stdout || "").trim();
-    throw new Error(msg || "Failed to stage changes (git add -A).");
+  // Partition files into task-related and unrelated
+  const relatedFiles = candidateFiles.filter((f) => isFileRelatedToTask(f, taskSummary));
+  const unrelatedFiles = candidateFiles.filter((f) => !isFileRelatedToTask(f, taskSummary));
+
+  // If no files are related to the task, skip the commit entirely
+  if (relatedFiles.length === 0 && unrelatedFiles.length > 0) {
+    return {
+      committed: false,
+      reason: "unrelated-changes",
+      filesChanged: candidateFiles,
+      warning: "staged changes do not appear related to current task",
+    };
   }
+
+  // Stage only related files (selective staging) when there's a mix,
+  // or stage everything if all are related.
+  if (unrelatedFiles.length === 0) {
+    // All files are related — stage broadly
+    const addRes = await git(["add", "-A", "--", "."], { cwd: config.cwd });
+    if (addRes.code !== 0) {
+      const msg = (addRes.stderr || addRes.stdout || "").trim();
+      throw new Error(msg || "Failed to stage changes (git add -A).");
+    }
+  } else {
+    // Mixed: stage only related files
+    for (const file of relatedFiles) {
+      const addRes = await git(["add", "--", file], { cwd: config.cwd });
+      if (addRes.code !== 0) {
+        const msg = (addRes.stderr || addRes.stdout || "").trim();
+        throw new Error(msg || `Failed to stage file: ${file}`);
+      }
+    }
+  }
+
+  // Unstage Loopy artifact paths
   for (const dirPath of excludedArtifactDirs) {
     const resetRes = await git(["reset", "-q", "--", dirPath], { cwd: config.cwd });
     if (resetRes.code !== 0) {
@@ -228,7 +295,7 @@ async function gitCommitIfNeeded(
 
   const hashRes = await git(["rev-parse", "--short", "HEAD"], { cwd: config.cwd });
   const hash = hashRes.code === 0 ? (hashRes.stdout || "").trim() : "";
-  return { committed: true, hash, message };
+  return { committed: true, hash, message, filesChanged: relatedFiles };
 }
 
 async function getMergeBase(cwd, baseBranch) {
@@ -283,6 +350,7 @@ module.exports = {
   ensureGitWorktree,
   normalizeGitPath,
   isPathInsideDir,
+  isFileRelatedToTask,
   resolveExcludedArtifactDirs,
   gitCommitIfNeeded,
   getGitModifiedFiles,

@@ -34,6 +34,8 @@ const DEFAULTS = {
   includeLastOutput: false,
   generatePrd: true,
   fixBudget: 1,
+  allowBlocked: true,
+  blockedThreshold: 3,
 };
 
 const GLOBAL_CONFIG_FILES = ["config.yml", "config.yaml", "config.json"];
@@ -298,6 +300,8 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
   const dryRunDefault = pickDefined(def, ["dry_run", "dryRun"]);
   const singleTaskModeDefault = pickDefined(def, ["single_task_mode", "singleTaskMode", "singleTask"]);
   const fixBudgetDefault = pickDefined(def, ["fix_budget", "fixBudget"]);
+  const allowBlockedDefault = pickDefined(def, ["allow_blocked", "allowBlocked"]);
+  const blockedThresholdDefault = pickDefined(def, ["blocked_threshold", "blockedThreshold"]);
   return {
     cwd: process.cwd(),
     resume: coerceBoolean(flags.resume ?? resumeDefault, false),
@@ -458,6 +462,17 @@ function mergeConfig(flags, frontMatter, defaults = {}) {
         DEFAULTS.fixBudget
       ),
       0
+    ),
+    allowBlocked: coerceBoolean(
+      flags["allow-blocked"] ?? fm.allow_blocked ?? fm.allowBlocked ?? allowBlockedDefault,
+      DEFAULTS.allowBlocked
+    ),
+    blockedThreshold: clampMin(
+      coerceNumber(
+        flags["blocked-threshold"] ?? fm.blocked_threshold ?? fm.blockedThreshold ?? blockedThresholdDefault,
+        DEFAULTS.blockedThreshold
+      ),
+      1
     ),
   };
 }

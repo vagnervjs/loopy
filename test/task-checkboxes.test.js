@@ -320,3 +320,39 @@ test("parseCheckboxes - mix of open and skipped is not allChecked", () => {
   const allChecked = boxes.every((b) => b.checked);
   assert.equal(allChecked, false, "Open task should prevent allChecked");
 });
+
+// ── Blocked marker [!] ─────────────────────────────────────────────────
+
+test("parseCheckboxes - recognizes [!] as blocked and checked", () => {
+  const text = "- [!] Blocked task — BLOCKED: pre-existing Node 23 issue\n- [ ] Open task\n- [x] Done task\n";
+  const boxes = parseCheckboxes(text);
+  assert.equal(boxes.length, 3);
+
+  const blocked = boxes[0];
+  assert.equal(blocked.checked, true);
+  assert.equal(blocked.blocked, true);
+  assert.equal(blocked.skipped, undefined, "blocked tasks are not skipped");
+  assert.match(blocked.text, /Blocked task/);
+
+  const open = boxes[1];
+  assert.equal(open.checked, false);
+  assert.equal(open.blocked, undefined, "blocked not set on regular items");
+
+  const done = boxes[2];
+  assert.equal(done.checked, true);
+  assert.equal(done.blocked, undefined, "blocked not set on regular [x] items");
+});
+
+test("parseCheckboxes - blocked markers count toward allChecked", () => {
+  const text = "- [x] Done\n- [!] Blocked\n- [~] Skipped\n";
+  const boxes = parseCheckboxes(text);
+  const allChecked = boxes.every((b) => b.checked);
+  assert.equal(allChecked, true, "All items should be considered checked");
+});
+
+test("parseCheckboxes - mix of open and blocked is not allChecked", () => {
+  const text = "- [x] Done\n- [!] Blocked\n- [ ] Still open\n";
+  const boxes = parseCheckboxes(text);
+  const allChecked = boxes.every((b) => b.checked);
+  assert.equal(allChecked, false, "Open task should prevent allChecked");
+});

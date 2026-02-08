@@ -47,7 +47,8 @@ test("detectThrash - triggers thrash at count >= 3", () => {
   };
   const result = detectThrash(state, ["a.js", "b.js"]);
   assert.equal(result.thrash, true);
-  assert.equal(result.state.fileThrashCount, 3);
+  // After triggering, fileThrashCount resets to 1 so the next cycle starts fresh
+  assert.equal(result.state.fileThrashCount, 1);
 });
 
 test("detectThrash - resets count when file signature changes", () => {
@@ -78,6 +79,97 @@ test("detectThrash - does not mutate original state", () => {
   const original = { ...state };
   detectThrash(state, ["a.js"]);
   assert.deepStrictEqual(state, original);
+});
+
+// ── detectThrash escalation ─────────────────────────────────────────────
+
+test("detectThrash - returns level 0 when no thrashing", () => {
+  const state = {};
+  const result = detectThrash(state, ["a.js"]);
+  assert.equal(result.level, 0);
+  assert.deepStrictEqual(result.files, []);
+});
+
+test("detectThrash - first trigger returns level 1 and records thrashHistory", () => {
+  const state = {
+    lastFileSignature: "a.js",
+    lastStatus: "failure",
+    fileThrashCount: 2,
+  };
+  const result = detectThrash(state, ["a.js"]);
+  assert.equal(result.thrash, true);
+  assert.equal(result.level, 1);
+  assert.deepStrictEqual(result.files, ["a.js"]);
+  assert.equal(result.state.thrashHistory["a.js"], 1);
+  // immediate counter should be reset
+  assert.equal(result.state.fileThrashCount, 1);
+});
+
+test("detectThrash - second trigger on same file returns level 2", () => {
+  const state = {
+    lastFileSignature: "a.js",
+    lastStatus: "failure",
+    fileThrashCount: 2,
+    thrashHistory: { "a.js": 1 },
+  };
+  const result = detectThrash(state, ["a.js"]);
+  assert.equal(result.thrash, true);
+  assert.equal(result.level, 2);
+  assert.equal(result.state.thrashHistory["a.js"], 2);
+});
+
+test("detectThrash - third trigger on same file returns level 3", () => {
+  const state = {
+    lastFileSignature: "a.js",
+    lastStatus: "failure",
+    fileThrashCount: 2,
+    thrashHistory: { "a.js": 2 },
+  };
+  const result = detectThrash(state, ["a.js"]);
+  assert.equal(result.thrash, true);
+  assert.equal(result.level, 3);
+  assert.equal(result.state.thrashHistory["a.js"], 3);
+});
+
+test("detectThrash - level caps at 3 for higher counts", () => {
+  const state = {
+    lastFileSignature: "a.js",
+    lastStatus: "failure",
+    fileThrashCount: 2,
+    thrashHistory: { "a.js": 5 },
+  };
+  const result = detectThrash(state, ["a.js"]);
+  assert.equal(result.thrash, true);
+  assert.equal(result.level, 3);
+  assert.equal(result.state.thrashHistory["a.js"], 6);
+});
+
+test("detectThrash - multiple files uses max level across all", () => {
+  const state = {
+    lastFileSignature: "a.js,b.js",
+    lastStatus: "failure",
+    fileThrashCount: 2,
+    thrashHistory: { "a.js": 2, "b.js": 0 },
+  };
+  const result = detectThrash(state, ["a.js", "b.js"]);
+  assert.equal(result.thrash, true);
+  assert.equal(result.level, 3); // a.js goes to 3
+  assert.equal(result.state.thrashHistory["a.js"], 3);
+  assert.equal(result.state.thrashHistory["b.js"], 1);
+});
+
+test("detectThrash - different files have independent histories", () => {
+  const state = {
+    lastFileSignature: "c.js",
+    lastStatus: "failure",
+    fileThrashCount: 2,
+    thrashHistory: { "a.js": 2 },
+  };
+  const result = detectThrash(state, ["c.js"]);
+  assert.equal(result.thrash, true);
+  assert.equal(result.level, 1);
+  assert.equal(result.state.thrashHistory["c.js"], 1);
+  assert.equal(result.state.thrashHistory["a.js"], 2); // preserved
 });
 
 // ── detectRepeatFailure ────────────────────────────────────────────────

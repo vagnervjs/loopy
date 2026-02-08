@@ -510,6 +510,75 @@ test("phaseHasTestCommand: inherits from phase_defaults", () => {
 // pickCurrentPhaseId — sequence / no wrap-around tests
 // ---------------------------------------------------------------------------
 
+test("isPhaseComplete: blocked tasks [!] count as checked for Gate 1", () => {
+  const text = [
+    "---",
+    "phases:",
+    "  - id: impl",
+    "---",
+    "",
+    "<!-- loopy:phase impl -->",
+    "- [x] Task A",
+    "- [!] Task B — BLOCKED: pre-existing Node 23 incompatibility",
+    "",
+  ].join("\n");
+  const parsed = parseTask(text);
+  assert.equal(isPhaseComplete(parsed, "impl", {}), true, "Blocked tasks satisfy Gate 1");
+});
+
+test("isPhaseAllChecked: blocked tasks count as checked", () => {
+  const text = [
+    "---",
+    "phases:",
+    "  - id: impl",
+    "---",
+    "",
+    "<!-- loopy:phase impl -->",
+    "- [x] Done",
+    "- [!] Blocked task",
+    "- [~] Skipped",
+    "",
+  ].join("\n");
+  const parsed = parseTask(text);
+  assert.equal(isPhaseAllChecked(parsed, "impl"), true);
+});
+
+test("isPhaseComplete: blocked + test_command + tests failing → NOT complete", () => {
+  const text = [
+    "---",
+    "phases:",
+    "  - id: impl",
+    "    test_command: npm test",
+    "---",
+    "",
+    "<!-- loopy:phase impl -->",
+    "- [x] Task A",
+    "- [!] Task B — BLOCKED: reason",
+    "",
+  ].join("\n");
+  const parsed = parseTask(text);
+  const state = { lastTest: "fail @ 2026-02-06T12:00:00" };
+  assert.equal(isPhaseComplete(parsed, "impl", state), false, "Gate 2 still enforced");
+});
+
+test("isPhaseComplete: blocked + test_command + tests passing → complete", () => {
+  const text = [
+    "---",
+    "phases:",
+    "  - id: impl",
+    "    test_command: npm test",
+    "---",
+    "",
+    "<!-- loopy:phase impl -->",
+    "- [x] Task A",
+    "- [!] Task B — BLOCKED: reason",
+    "",
+  ].join("\n");
+  const parsed = parseTask(text);
+  const state = { lastTest: "pass @ 2026-02-06T12:00:00" };
+  assert.equal(isPhaseComplete(parsed, "impl", state), true, "Both gates met");
+});
+
 test("pickCurrentPhaseId: respects forward-only order from current phase", () => {
   const text = [
     "---",

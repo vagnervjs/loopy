@@ -509,6 +509,7 @@ async function runIteration(config, { stopSignal } = {}) {
       printStep(`Hook post-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
 
+    let committedFiles = [];
     if (status === "success") {
       try {
         if (config.gitCommit) {
@@ -523,8 +524,10 @@ async function runIteration(config, { stopSignal } = {}) {
           changeType,
         });
         if (commitResult.committed) {
+          committedFiles = commitResult.filesChanged || [];
           await appendActivity(config.activityLog, [
             `git commit: ${commitResult.hash || "(unknown hash)"} ${commitResult.message}`,
+            ...(committedFiles.length ? [`files committed: ${committedFiles.join(", ")}`] : []),
           ]);
           printStep(`Git commit ${commitResult.hash || "(unknown hash)"}`, {
             iteration,
@@ -532,7 +535,15 @@ async function runIteration(config, { stopSignal } = {}) {
             level: "success",
           });
         } else if (config.gitCommit) {
-          printStep(`Git commit skipped: ${commitResult.reason}`, { iteration, kind: "git" });
+          if (commitResult.warning) {
+            printStep(`commit skipped: ${commitResult.warning}`, { iteration, kind: "git", level: "warn" });
+            await appendActivity(config.activityLog, [
+              `commit skipped: ${commitResult.warning}`,
+              ...(commitResult.filesChanged ? [`unrelated files: ${commitResult.filesChanged.join(", ")}`] : []),
+            ]);
+          } else {
+            printStep(`Git commit skipped: ${commitResult.reason}`, { iteration, kind: "git" });
+          }
         }
       } catch (err) {
         status = "failure";
@@ -594,7 +605,8 @@ async function runIteration(config, { stopSignal } = {}) {
       nextState.baselineFixAttempts = 0;
     }
 
-    const historyEntry = `${nextState.updatedAt} iteration ${iteration} ${status} (test: ${testStatus})`;
+    const filesChangedSuffix = committedFiles.length ? ` [files: ${committedFiles.join(", ")}]` : "";
+    const historyEntry = `${nextState.updatedAt} iteration ${iteration} ${status} (test: ${testStatus})${filesChangedSuffix}`;
     nextState.history = [...nextState.history, historyEntry].slice(-50);
 
     // Phase completion / progression (two-gate model).
@@ -652,8 +664,50 @@ async function runIteration(config, { stopSignal } = {}) {
       }
 
       if (thrashCheck.thrash) {
-        guardrailsUpdated = appendSign(guardrailsUpdated, `File thrashing detected: ${modifiedFiles.join(", ")}`);
-        guardrailStopReasons.push("File thrashing detected (>= 3).");
+        const thrashFiles = thrashCheck.files.join(", ");
+        const thrashLevel = thrashCheck.level;
+
+        if (thrashLevel >= 3) {
+          // Third+ trigger: auto-block the current task and skip
+          guardrailsUpdated = appendSign(
+            guardrailsUpdated,
+            `File thrashing escalation (level ${thrashLevel}): ${thrashFiles} — task auto-blocked, skipping to next task`
+          );
+          guardrailStopReasons.push(`File thrashing escalated to level ${thrashLevel} on ${thrashFiles}. Task auto-blocked.`);
+          nextState.thrashBlockedTasks = [...(nextState.thrashBlockedTasks || []), {
+            task: taskSummary || taskLine || "",
+            files: thrashCheck.files,
+            iteration,
+            reason: `file thrashing escalation (level ${thrashLevel})`,
+          }];
+          printStep(
+            `Thrash escalation level ${thrashLevel}: auto-blocking task and skipping to next`,
+            { iteration, level: "error", kind: "guardrail" }
+          );
+          await appendActivity(config.activityLog, [
+            `thrash escalation level ${thrashLevel} on ${thrashFiles}: task auto-blocked`,
+          ]);
+        } else if (thrashLevel === 2) {
+          // Second trigger: force re-scope via guardrails text
+          guardrailsUpdated = appendSign(
+            guardrailsUpdated,
+            `File thrashing (2nd trigger) on ${thrashFiles}. ` +
+            `This task has thrashed on ${thrashFiles} twice. Re-evaluate your approach. ` +
+            `If the task is blocked by external factors, mark it as blocked.`
+          );
+          guardrailStopReasons.push("File thrashing detected (2nd trigger). Re-scope required.");
+          printStep(
+            `Thrash escalation level 2: forcing re-scope on ${thrashFiles}`,
+            { iteration, level: "warn", kind: "guardrail" }
+          );
+          await appendActivity(config.activityLog, [
+            `thrash escalation level 2 on ${thrashFiles}: re-scope required`,
+          ]);
+        } else {
+          // First trigger: pause (original behavior)
+          guardrailsUpdated = appendSign(guardrailsUpdated, `File thrashing detected: ${thrashFiles}`);
+          guardrailStopReasons.push("File thrashing detected (>= 3).");
+        }
       }
 
       if (guardrailsUpdated !== guardrailsText) {
