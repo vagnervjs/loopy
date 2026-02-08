@@ -123,6 +123,37 @@ function parsePorcelainPath(line) {
   return normalizeGitPath(target);
 }
 
+function parsePorcelainEntry(line) {
+  const filePath = parsePorcelainPath(line);
+  const status = String(line || "").slice(0, 2);
+  return { filePath, status };
+}
+
+function snapshotFingerprint(entry) {
+  if (!entry) return "";
+  return [
+    entry.status || "",
+    entry.exists === false ? "0" : "1",
+    Number.isFinite(entry.size) ? String(entry.size) : "",
+    Number.isFinite(entry.mtimeMs) ? String(entry.mtimeMs) : "",
+  ].join("|");
+}
+
+function diffGitWorktreeSnapshots(beforeSnapshot, afterSnapshot) {
+  if (!beforeSnapshot || !afterSnapshot) return [];
+
+  const before = beforeSnapshot || {};
+  const after = afterSnapshot || {};
+  const files = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const changed = [];
+  for (const filePath of files) {
+    if (snapshotFingerprint(before[filePath]) !== snapshotFingerprint(after[filePath])) {
+      changed.push(filePath);
+    }
+  }
+  return changed.sort();
+}
+
 function isPathInsideDir(filePath, dirPath) {
   if (!filePath || !dirPath) return false;
   if (filePath === dirPath) return true;
@@ -342,6 +373,41 @@ async function getGitModifiedFiles(cwd) {
   }
 }
 
+async function getGitWorktreeSnapshot(cwd) {
+  try {
+    const { stdout } = await runProcess("git", ["status", "--porcelain"], {
+      cwd: cwd || process.cwd(),
+      maxOutputBytes: DEFAULTS.maxOutputBytes,
+    });
+
+    const snapshot = {};
+    const lines = stdout.split(/\r?\n/).filter(Boolean);
+    for (const line of lines) {
+      const { filePath, status } = parsePorcelainEntry(line);
+      if (!filePath) continue;
+
+      const absolutePath = path.resolve(cwd || process.cwd(), filePath);
+      try {
+        const stat = await fs.stat(absolutePath);
+        snapshot[filePath] = {
+          status,
+          exists: true,
+          size: stat.size,
+          mtimeMs: Math.round(stat.mtimeMs),
+        };
+      } catch (_) {
+        snapshot[filePath] = {
+          status,
+          exists: false,
+        };
+      }
+    }
+    return snapshot;
+  } catch (_) {
+    return null;
+  }
+}
+
 module.exports = {
   ensureGitRepo,
   getCurrentBranch,
@@ -353,5 +419,7 @@ module.exports = {
   isFileRelatedToTask,
   resolveExcludedArtifactDirs,
   gitCommitIfNeeded,
+  diffGitWorktreeSnapshots,
   getGitModifiedFiles,
+  getGitWorktreeSnapshot,
 };

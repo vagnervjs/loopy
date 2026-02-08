@@ -21,7 +21,17 @@ const {
 } = require("../task");
 const { formatLocalTimestamp, redact, truncate } = require("../text");
 const { evaluateTestFailure } = require("../baseline");
-const { ensureGitRepo, gitCommitIfNeeded, getGitModifiedFiles, getMergeBase, normalizeGitPath, isPathInsideDir, resolveExcludedArtifactDirs } = require("../git");
+const {
+  ensureGitRepo,
+  gitCommitIfNeeded,
+  diffGitWorktreeSnapshots,
+  getGitModifiedFiles,
+  getGitWorktreeSnapshot,
+  getMergeBase,
+  normalizeGitPath,
+  isPathInsideDir,
+  resolveExcludedArtifactDirs,
+} = require("../git");
 const { ensureAgentsDoc } = require("./agents-doc");
 const { areAllPhasesComplete, pickCurrentPhaseId, resolvePhaseLabel, phaseTestCommand, isPhaseAllChecked, isPhaseComplete, computeNextPhaseId } = require("./phases");
 const {
@@ -263,6 +273,10 @@ async function runIteration(config, { stopSignal } = {}) {
       printStep(`Hook pre-iteration exit ${hookResult.code}`, { iteration, kind: "hook" });
     }
 
+    // Snapshot dirty worktree state after pre-iteration hooks so thrash detection
+    // can focus on files that actually changed during this iteration.
+    const preIterationSnapshot = await getGitWorktreeSnapshot(config.cwd);
+
     const agentStreamLogPath = config.agentStreamLog
       ? resolveFrom(config.cwd, config.agentStreamLog)
       : path.join(config.loopyDir, "agent_stream.log");
@@ -490,8 +504,13 @@ async function runIteration(config, { stopSignal } = {}) {
     }
     await appendActivity(config.activityLog, [`change_type inferred: ${changeType} (task: ${taskLine})`]);
 
-    // Capture modified files *before* git commit so thrash detection can see them.
-    const modifiedFiles = await getGitModifiedFiles(config.cwd);
+    // Capture iteration-local file deltas before git commit so thrash detection
+    // is based on files touched this iteration, not the entire dirty worktree.
+    const postIterationSnapshot = await getGitWorktreeSnapshot(config.cwd);
+    let modifiedFiles = diffGitWorktreeSnapshots(preIterationSnapshot, postIterationSnapshot);
+    if (!modifiedFiles.length) {
+      modifiedFiles = await getGitModifiedFiles(config.cwd);
+    }
 
     let postIterationRan = false;
     if (status === "success" && config.postIteration) {

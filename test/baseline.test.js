@@ -52,11 +52,28 @@ test("extractFailureSignatures - extracts Node.js test runner failures", () => {
   assert.ok(sigs.includes("TEST:my test case"));
 });
 
-test("extractFailureSignatures - extracts error patterns", () => {
-  const output = "TypeError: Cannot read properties of undefined (reading 'foo')\nReferenceError: bar is not defined";
+test("extractFailureSignatures - extracts error patterns when explicit failure markers exist", () => {
+  const output = [
+    "FAIL packages/core/src/__tests__/core.test.js",
+    "TypeError: Cannot read properties of undefined (reading 'foo')",
+    "ReferenceError: bar is not defined",
+  ].join("\n");
   const sigs = extractFailureSignatures(output);
   assert.ok(sigs.some((s) => s.startsWith("ERR:TypeError:")));
   assert.ok(sigs.some((s) => s.startsWith("ERR:ReferenceError:")));
+});
+
+test("extractFailureSignatures - ignores console noise in otherwise passing output", () => {
+  const output = [
+    "Test Suites: 5 passed, 5 total",
+    "Tests:       40 passed, 40 total",
+    "● Console",
+    "console.error",
+    "TypeError: Cannot read properties of undefined (reading 'foo')",
+    "Ran all test suites.",
+  ].join("\n");
+  const sigs = extractFailureSignatures(output);
+  assert.equal(sigs.length, 0);
 });
 
 test("extractFailureSignatures - deduplicates identical lines", () => {
@@ -385,4 +402,52 @@ test("evaluateTestFailure - new failures with budget remaining get fix attempt v
   });
   assert.equal(result.action, "fix_attempt");
   assert.ok(result.newFailures.includes("FAIL:brand-new.test.js"));
+});
+
+test("evaluateTestFailure - baseline pass + current fail uses testExitCode as regression signal", async () => {
+  const config = { fixBudget: 0, cwd: "/tmp" };
+  const baseline = {
+    commitSha: "abc123",
+    testCommand: "npm test",
+    exitCode: 0,
+    failureSignature: [],
+    cachedAt: "2025-01-01T00:00:00Z",
+  };
+  const state = {
+    baselineFixAttempts: 0,
+    baselineTestResult: baseline,
+  };
+  const result = await evaluateTestFailure(config, state, {
+    testOutput: "console.error noisy output without FAIL markers",
+    testExitCode: 1,
+    testCommand: "npm test",
+    changedFiles: ["something-unrelated.txt"],
+    getMergeBase: async () => "abc123",
+  });
+  assert.equal(result.action, "fail");
+  assert.ok(result.reason.includes("baseline exits 0"));
+});
+
+test("evaluateTestFailure - baseline pass + current fail allows fix attempt when budget remains", async () => {
+  const config = { fixBudget: 1, cwd: "/tmp" };
+  const baseline = {
+    commitSha: "abc123",
+    testCommand: "npm test",
+    exitCode: 0,
+    failureSignature: [],
+    cachedAt: "2025-01-01T00:00:00Z",
+  };
+  const state = {
+    baselineFixAttempts: 0,
+    baselineTestResult: baseline,
+  };
+  const result = await evaluateTestFailure(config, state, {
+    testOutput: "",
+    testExitCode: 2,
+    testCommand: "npm test",
+    changedFiles: ["something-unrelated.txt"],
+    getMergeBase: async () => "abc123",
+  });
+  assert.equal(result.action, "fix_attempt");
+  assert.ok(result.reason.includes("exited 2"));
 });
