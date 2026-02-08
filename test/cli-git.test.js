@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { CLI_PATH, runNodeCli, runCmd, initGitRepo } = require("./cli-helpers");
-const { isFileRelatedToTask } = require("../src/git");
+const { isFileRelatedToTask, diffGitWorktreeSnapshots } = require("../src/git");
 
 // ── isFileRelatedToTask unit tests ──────────────────────────────────────
 
@@ -48,6 +48,36 @@ test("isFileRelatedToTask: case insensitive matching", () => {
 
 test("isFileRelatedToTask: package.json not related to Jest config task", () => {
   assert.equal(isFileRelatedToTask("package.json", "update Jest config to disable coverage"), false);
+});
+
+test("diffGitWorktreeSnapshots: returns empty when snapshots are identical", () => {
+  const before = {
+    "a.js": { status: " M", exists: true, size: 10, mtimeMs: 1000 },
+  };
+  const after = {
+    "a.js": { status: " M", exists: true, size: 10, mtimeMs: 1000 },
+  };
+  assert.deepStrictEqual(diffGitWorktreeSnapshots(before, after), []);
+});
+
+test("diffGitWorktreeSnapshots: detects changed, added, and removed files", () => {
+  const before = {
+    "a.js": { status: " M", exists: true, size: 10, mtimeMs: 1000 },
+    "b.js": { status: " M", exists: true, size: 5, mtimeMs: 1000 },
+  };
+  const after = {
+    "a.js": { status: " M", exists: true, size: 11, mtimeMs: 1001 }, // changed
+    "c.js": { status: "??", exists: true, size: 1, mtimeMs: 1002 }, // added
+  };
+  assert.deepStrictEqual(diffGitWorktreeSnapshots(before, after), ["a.js", "b.js", "c.js"]);
+});
+
+test("diffGitWorktreeSnapshots: returns empty when either snapshot is missing", () => {
+  const snapshot = {
+    "a.js": { status: " M", exists: true, size: 10, mtimeMs: 1000 },
+  };
+  assert.deepStrictEqual(diffGitWorktreeSnapshots(null, snapshot), []);
+  assert.deepStrictEqual(diffGitWorktreeSnapshots(snapshot, null), []);
 });
 
 test("`--git-branch` creates/switches branch before iteration", async () => {

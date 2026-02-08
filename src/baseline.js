@@ -14,6 +14,15 @@ function extractFailureSignatures(testOutput) {
 
   const signatures = new Set();
   const lines = String(testOutput).split(/\r?\n/);
+  const hasExplicitFailureMarkers = lines.some((line) => {
+    const trimmed = String(line || "").trim();
+    return (
+      /^FAIL\s+/.test(trimmed) ||
+      /^[✕×✗✖]\s+/.test(trimmed) ||
+      /^not ok\s+\d+\s+-?\s*/.test(trimmed) ||
+      /^Test suite failed to run\b/.test(trimmed)
+    );
+  });
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -36,7 +45,11 @@ function extractFailureSignatures(testOutput) {
     // Jest style: "● Suite > test name"
     const jestSuiteMatch = trimmed.match(/^●\s+(.+)/);
     if (jestSuiteMatch) {
-      signatures.add(`TEST:${jestSuiteMatch[1].trim()}`);
+      const suiteText = jestSuiteMatch[1].trim();
+      if (/^Console\b/i.test(suiteText)) {
+        continue;
+      }
+      signatures.add(`TEST:${suiteText}`);
       continue;
     }
 
@@ -48,8 +61,11 @@ function extractFailureSignatures(testOutput) {
     }
 
     // Generic error pattern: "Error: message" or "TypeError: message"
+    // Only treat generic error lines as failure signatures when explicit
+    // failure markers are present in the run output, to avoid console noise
+    // from otherwise passing test runs.
     const errorMatch = trimmed.match(/^(\w*Error):\s+(.+)/);
-    if (errorMatch) {
+    if (errorMatch && hasExplicitFailureMarkers) {
       // Normalize by taking just the error type and first meaningful portion
       const errorType = errorMatch[1];
       const message = errorMatch[2].trim().slice(0, 120);
@@ -250,6 +266,7 @@ async function evaluateTestFailure(config, state, {
 } = {}) {
   const fixBudget = Number.isFinite(config.fixBudget) ? config.fixBudget : 1;
   const fixAttempts = (state && state.baselineFixAttempts) || 0;
+  const normalizedExitCode = Number.isInteger(testExitCode) ? testExitCode : 1;
 
   const currentSignatures = extractFailureSignatures(testOutput);
 
@@ -306,6 +323,27 @@ async function evaluateTestFailure(config, state, {
     }
 
     baseline = buildBaselineResult(mergeBaseSha, testCommand, baselineRun.exitCode, baselineRun.failureSignature);
+  }
+
+  // If baseline test command passed, any current non-zero exit is a regression
+  // regardless of extracted signatures.
+  if (baseline.exitCode === 0 && normalizedExitCode !== 0) {
+    if (fixAttempts < fixBudget) {
+      return {
+        action: "fix_attempt",
+        reason: `test command exited ${normalizedExitCode} but baseline exits 0; fix attempt allowed`,
+        newFailures: currentSignatures,
+        baselineResult: baseline,
+        stateUpdates: { baselineFixAttempts: fixAttempts + 1 },
+      };
+    }
+    return {
+      action: "fail",
+      reason: `test command exited ${normalizedExitCode} but baseline exits 0, fix budget exhausted`,
+      newFailures: currentSignatures,
+      baselineResult: baseline,
+      stateUpdates: { baselineFixAttempts: fixAttempts + 1 },
+    };
   }
 
   const diff = diffFailures(baseline.failureSignature, currentSignatures);
