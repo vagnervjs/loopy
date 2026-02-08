@@ -122,10 +122,12 @@ function parseTask(text) {
   result.phases = phases;
   result.phaseDefaults = phaseDefaults;
 
-  const checklist = parseCheckboxes(text).map((item) => ({
-    checked: item.checked,
-    text: item.text,
-  }));
+  const checklist = parseCheckboxes(text).map((item) => {
+    const entry = { checked: item.checked, text: item.text };
+    if (item.skipped) entry.skipped = true;
+    if (item.blocked) entry.blocked = true;
+    return entry;
+  });
 
   result.checklist = checklist;
   result.allChecked = checklist.length > 0 && checklist.every((item) => item.checked);
@@ -144,10 +146,12 @@ function parseTask(text) {
       const start = currentStart >= 0 ? currentStart : 0;
       const end = Math.max(start, endLineExclusive);
       const slice = bodyLines.slice(start, end).join("\n");
-      const items = parseCheckboxes(slice).map((item) => ({
-        checked: item.checked,
-        text: item.text,
-      }));
+      const items = parseCheckboxes(slice).map((item) => {
+        const entry = { checked: item.checked, text: item.text };
+        if (item.skipped) entry.skipped = true;
+        if (item.blocked) entry.blocked = true;
+        return entry;
+      });
       sections[currentPhase] = {
         checklist: items,
         allChecked: items.length > 0 && items.every((it) => it.checked),
@@ -215,7 +219,8 @@ function getCurrentTask(text, options = {}) {
       ? parsed.phaseSections[phaseId].checklist
       : null;
   const list = phaseChecklist || parsed.checklist;
-  const firstOpen = list.find((item) => !item.checked);
+  // Skip blocked [!] tasks when searching for the next open task
+  const firstOpen = list.find((item) => !item.checked && !item.blocked);
   return firstOpen || null;
 }
 
@@ -290,13 +295,19 @@ function parseCheckboxes(text) {
       }
     }
     
-    const itemMatch = effective.match(/^-\s*\[( |x|X)\]\s+(.*)$/);
+    const itemMatch = effective.match(/^-\s*\[( |x|X|~|-|!)\]\s+(.*)$/);
     if (itemMatch) {
-      checkboxes.push({
+      const marker = itemMatch[1];
+      const isSkipped = marker === "~" || marker === "-";
+      const isBlocked = marker === "!";
+      const entry = {
         line: i + 1,
-        checked: itemMatch[1].toLowerCase() === "x",
+        checked: marker.toLowerCase() === "x" || isSkipped || isBlocked,
         text: itemMatch[2],
-      });
+      };
+      if (isSkipped) entry.skipped = true;
+      if (isBlocked) entry.blocked = true;
+      checkboxes.push(entry);
     }
   }
   

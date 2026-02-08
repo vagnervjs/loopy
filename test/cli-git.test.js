@@ -6,6 +6,49 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { CLI_PATH, runNodeCli, runCmd, initGitRepo } = require("./cli-helpers");
+const { isFileRelatedToTask } = require("../src/git");
+
+// ── isFileRelatedToTask unit tests ──────────────────────────────────────
+
+test("isFileRelatedToTask: returns true when task keywords appear in file path", () => {
+  assert.equal(isFileRelatedToTask("jest.config.js", "update Jest config to disable coverage"), true);
+});
+
+test("isFileRelatedToTask: returns false when task keywords (2+) do not match file path", () => {
+  assert.equal(isFileRelatedToTask("README.md", "update Jest config to disable coverage"), false);
+});
+
+test("isFileRelatedToTask: returns true when file basename matches task keyword", () => {
+  assert.equal(isFileRelatedToTask("src/config/jest.config.ts", "configure jest"), true);
+});
+
+test("isFileRelatedToTask: returns true with no task summary (assumes related)", () => {
+  assert.equal(isFileRelatedToTask("anything.js", ""), true);
+});
+
+test("isFileRelatedToTask: returns true with no file path (assumes related)", () => {
+  assert.equal(isFileRelatedToTask("", "update something"), true);
+});
+
+test("isFileRelatedToTask: returns true when only stop words in task (no meaningful keywords)", () => {
+  assert.equal(isFileRelatedToTask("random.js", "add the new file"), true);
+});
+
+test("isFileRelatedToTask: returns true when only 1 meaningful keyword (too vague to filter)", () => {
+  assert.equal(isFileRelatedToTask("random.js", "do something"), true);
+});
+
+test("isFileRelatedToTask: handles directory path matching", () => {
+  assert.equal(isFileRelatedToTask("src/authentication/login.js", "implement authentication"), true);
+});
+
+test("isFileRelatedToTask: case insensitive matching", () => {
+  assert.equal(isFileRelatedToTask("src/Router.jsx", "implement router navigation"), true);
+});
+
+test("isFileRelatedToTask: package.json not related to Jest config task", () => {
+  assert.equal(isFileRelatedToTask("package.json", "update Jest config to disable coverage"), false);
+});
 
 test("`--git-branch` creates/switches branch before iteration", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-git-branch-"));

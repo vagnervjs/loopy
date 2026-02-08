@@ -29,6 +29,20 @@ function formatProgress(state) {
     }
   }
 
+  if (state.blockedTasks && state.blockedTasks.length) {
+    lines.push("", "## Blocked Tasks");
+    for (const bt of state.blockedTasks) {
+      lines.push(`- [!] ${bt.task}${bt.reason ? ` — ${bt.reason}` : ""} (iteration ${bt.iteration || "?"})`);
+    }
+  }
+
+  if (state.thrashBlockedTasks && state.thrashBlockedTasks.length) {
+    lines.push("", "## Thrash-Blocked Tasks");
+    for (const bt of state.thrashBlockedTasks) {
+      lines.push(`- ${bt.task} — ${bt.reason || "file thrashing"} [files: ${(bt.files || []).join(", ")}] (iteration ${bt.iteration || "?"})`);
+    }
+  }
+
   return lines.join("\n") + "\n";
 }
 
@@ -119,9 +133,11 @@ function formatPrompt({
     "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",
-    "- Do NOT mark a task checkbox as [x] unless the full test command passes.",
-    "- Always run the plan's test_command to validate your work.",
-    "- If tests fail, leave the checkbox unchecked and fix the failures first.",
+    "- Complete all unchecked tasks in the current phase before tests will be run.",
+    "- Mark a task [x] when the implementation is done. The test_command runs automatically after all phase tasks are checked.",
+    "- If a task should be skipped, mark it with [~] or [-] and note the reason.",
+    "- If a task is blocked by external factors after 3+ consecutive failures, mark it as [!] with a reason: `[!] task — BLOCKED: reason`. Blocked tasks do not block phase advancement.",
+    "- If tests fail after all tasks are checked, fix the failures first.",
     "- If the same task has failed for 3+ consecutive iterations, reassess your approach."
   );
   if (currentTask) instructionsLines.push("- **Complete only the Current Task in this iteration.**");
@@ -219,9 +235,11 @@ function formatPrompt({
     "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",
-    "- Do NOT mark a task checkbox as [x] unless the full test command passes.",
-    "- Always run the plan's test_command to validate your work.",
-    "- If tests fail, leave the checkbox unchecked and fix the failures first.",
+    "- Complete all unchecked tasks in the current phase before tests will be run.",
+    "- Mark a task [x] when the implementation is done. The test_command runs after all phase tasks are checked.",
+    "- If a task should be skipped, mark it with [~] or [-] and note the reason.",
+    "- If a task is blocked by external factors after 3+ consecutive failures, mark it as [!] with a reason: `[!] task — BLOCKED: reason`.",
+    "- If tests fail after all tasks are checked, fix the failures first.",
     "- If the same task has failed for 3+ consecutive iterations, reassess your approach.",
     ""
   );

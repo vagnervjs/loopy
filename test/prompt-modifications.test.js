@@ -206,6 +206,42 @@ test("formatPrompt - uses filtered plan when provided", () => {
   assert.doesNotMatch(prompt, /## Phase: beta/);
 });
 
+test("getCurrentTask - skips blocked [!] tasks when searching for next open task", () => {
+  const planText = `---
+test: npm test
+---
+
+# Plan
+
+## Phase: alpha
+<!-- loopy:phase alpha -->
+- [x] completed task
+- [!] blocked task — BLOCKED: pre-existing issue
+- [ ] next open task
+`;
+
+  const task = getCurrentTask(planText, { phaseId: "alpha" });
+  assert.notEqual(task, null);
+  assert.equal(task.text, "next open task");
+});
+
+test("getCurrentTask - returns null when all tasks are checked or blocked", () => {
+  const planText = `---
+test: npm test
+---
+
+# Plan
+
+## Phase: alpha
+<!-- loopy:phase alpha -->
+- [x] done task
+- [!] blocked task — BLOCKED: reason
+`;
+
+  const task = getCurrentTask(planText, { phaseId: "alpha" });
+  assert.equal(task, null);
+});
+
 test("formatPrompt - does not include Current Task section when currentTask is null", () => {
   const prompt = formatPrompt({
     iteration: 1,
@@ -225,6 +261,26 @@ test("formatPrompt - does not include Current Task section when currentTask is n
 
   assert.doesNotMatch(prompt, /## Current Task/);
   assert.doesNotMatch(prompt, /\*\*Complete only the Current Task in this iteration\.\*\*/);
+});
+
+test("formatPrompt - fallback prompt includes blocked task instructions", () => {
+  const prompt = formatPrompt({
+    iteration: 1,
+    taskText: "# Plan\n- [ ] task",
+    taskSeedText: "",
+    taskSeedSource: "",
+    guardrailsText: "# Guardrails\n",
+    progressText: "# Progress\n",
+    lastOutput: "",
+    rotationPending: false,
+    currentPhase: "",
+    taskFilePath: "LOOPY_PLAN.md",
+    hintsText: "",
+    currentTask: null,
+    filteredPlan: null,
+  });
+
+  assert.match(prompt, /\[!\].*BLOCKED/);
 });
 
 test("formatPrompt - includes AGENTS and specs summary when provided", () => {
@@ -252,7 +308,7 @@ test("formatPrompt - includes AGENTS and specs summary when provided", () => {
   assert.match(prompt, /npm run dev/);
 });
 
-test("formatPrompt - fallback prompt includes test-gating rules", () => {
+test("formatPrompt - fallback prompt includes two-gate rules", () => {
   const prompt = formatPrompt({
     iteration: 1,
     taskText: "# Plan\n- [ ] task",
@@ -269,13 +325,13 @@ test("formatPrompt - fallback prompt includes test-gating rules", () => {
     filteredPlan: null,
   });
 
-  assert.match(prompt, /Do NOT mark a task checkbox as \[x\] unless the full test command passes/);
-  assert.match(prompt, /Always run the plan's test_command to validate your work/);
-  assert.match(prompt, /If tests fail, leave the checkbox unchecked/);
+  assert.match(prompt, /Complete all unchecked tasks in the current phase before tests will be run/);
+  assert.match(prompt, /test_command runs after all phase tasks are checked/);
+  assert.match(prompt, /If tests fail after all tasks are checked, fix the failures first/);
   assert.match(prompt, /3\+ consecutive iterations, reassess your approach/);
 });
 
-test("formatPrompt - {{instructions}} token includes test-gating rules", () => {
+test("formatPrompt - {{instructions}} token includes two-gate rules", () => {
   const template = "# Custom\n{{instructions}}";
   const prompt = formatPrompt({
     iteration: 1,
@@ -294,8 +350,8 @@ test("formatPrompt - {{instructions}} token includes test-gating rules", () => {
     promptTemplate: template,
   });
 
-  assert.match(prompt, /Do NOT mark a task checkbox as \[x\] unless the full test command passes/);
-  assert.match(prompt, /Always run the plan's test_command to validate your work/);
-  assert.match(prompt, /If tests fail, leave the checkbox unchecked/);
+  assert.match(prompt, /Complete all unchecked tasks in the current phase before tests will be run/);
+  assert.match(prompt, /test_command runs automatically after all phase tasks are checked/);
+  assert.match(prompt, /If tests fail after all tasks are checked, fix the failures first/);
   assert.match(prompt, /3\+ consecutive iterations, reassess your approach/);
 });
