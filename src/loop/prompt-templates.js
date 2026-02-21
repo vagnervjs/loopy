@@ -28,6 +28,8 @@ const DEFAULT_PLAN_PROMPT_TEMPLATE = [
   "Compare specs against code. Produce a prioritized plan that closes gaps.",
   "If the existing plan is wrong or stale, replace it.",
   "Keep tasks atomic, testable, and outcome-focused.",
+  "Tasks must be specific: include file paths, function names, or config keys when the target is known or discoverable.",
+  "Remove or rephrase tasks that a code agent cannot complete in a single session (long-running monitoring, manual approvals, multi-week tracking).",
   "Do not assume anything is missing; search first.",
   "If acceptance criteria are subjective, add judge tests (see `loopy add-judge`).",
   "- Use explicit `prd_refs` in tasks/phases when requirements are not obvious from the task text.",

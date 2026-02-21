@@ -42,6 +42,16 @@ function normalizePhaseOutput(parsed) {
     tasksByPhase[key] = items.map((t) => String(t || "").trim()).filter(Boolean);
   }
 
+  const counts = Object.values(tasksByPhase).map((t) => t.length);
+  const allSame = counts.length > 1 && counts.every((c) => c === counts[0]);
+  const anyOversize = counts.some((c) => c > 8);
+  if (allSame && counts[0] > 3) {
+    console.warn(`[loopy] Warning: all ${counts.length} phases have exactly ${counts[0]} tasks -- plan may be formulaic.`);
+  }
+  if (anyOversize) {
+    console.warn(`[loopy] Warning: phase has ${Math.max(...counts)} tasks (>8) -- consider splitting.`);
+  }
+
   return {
     phaseDefaults,
     phases: out,
@@ -60,18 +70,18 @@ function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
   const tasksByPhase = {
     plan: [
       seed
-        ? `Plan: ${seed} — Acceptance: outline scope and milestones`
-        : "Plan: Clarify requirements and outline approach — Acceptance: outline scope and milestones",
+        ? `Plan: [needs refinement] ${seed} — Acceptance: outline scope and milestones`
+        : "Plan: [needs refinement] Clarify requirements and outline approach — Acceptance: outline scope and milestones",
     ],
     implement: [
       seed
-        ? `Implement: ${seed} — Acceptance: behavior matches requirements`
-        : "Implement: Apply the requested changes — Acceptance: behavior matches requirements",
+        ? `Implement: [needs refinement] ${seed} — Acceptance: behavior matches requirements`
+        : "Implement: [needs refinement] Apply the requested changes — Acceptance: behavior matches requirements",
     ],
     verify: [
       tc
-        ? `Verify: Run tests (${tc}) — Acceptance: test suite passes`
-        : "Verify: Validate behavior and edge cases — Acceptance: expected behavior confirmed",
+        ? `Verify: [needs refinement] Run tests (${tc}) — Acceptance: test suite passes`
+        : "Verify: [needs refinement] Validate behavior and edge cases — Acceptance: expected behavior confirmed",
     ],
   };
   return { phases, phaseDefaults: { stop_on: "all_checked", test_command: tc }, tasksByPhase };
@@ -105,17 +115,24 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "  <phase id>:",
     "    - \"<checklist item text>\"",
     "",
-    "Break work into JIRA-sized tasks (as if assigning to a junior engineer):",
+    "Break work into tasks that an AI code agent can execute in a single session:",
+    "- Specific: say HOW, not just WHAT. Name the file, function, config key, or mechanism when known.",
     "- Atomic: exactly ONE outcome per task (no compound items).",
-    "- Testable: include explicit acceptance criteria.",
+    "- Testable: include explicit acceptance criteria that can be verified programmatically or by inspecting output.",
     "- Scoped: small enough for < 1 day of work.",
-    "- Clear: start with a strong verb (add/implement/update/remove/verify).",
+    "- Executable: every task must be completable by a code agent (read/search/edit files, run commands). Exclude tasks requiring human judgment over time, multi-day monitoring, or manual approval gates.",
     "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
+    "- Start with a strong verb: add / implement / update / remove / verify.",
+    "- Before planning, explore the codebase to understand its structure, key files, and existing patterns. Ground your tasks in what you find.",
+    "- Reference actual file paths, function names, or config keys in task descriptions when discoverable.",
+    "- Use 2-8 tasks per phase, sized to actual work. Do NOT pad to reach a minimum count.",
     "- Ensure phase_defaults.test_command is set (ask if unsure).",
     "- Quote every checklist item in YAML.",
-    "- Prefer 5-10 tasks per phase.",
     "",
-    "Keep phases small (3-6). Prefer stable ids. Ensure every phase has at least 1 checklist item.",
+    "BAD task: 'implement: optimize the data pipeline' (vague, no mechanism, no target file).",
+    "GOOD task: 'implement: add Redis caching to `src/services/user-service.ts` getUser() — Acceptance: cache-hit path returns in <10ms in test.'",
+    "",
+    "Keep phases small (2-5). Prefer stable ids. Ensure every phase has at least 1 checklist item.",
     "",
     `Task:\n${String(seedText || "").trim()}`,
     "",
