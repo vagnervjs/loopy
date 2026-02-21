@@ -28,7 +28,7 @@ const { archiveCompletedLoop } = require("./loop/archive");
 const { runIteration } = require("./loop/iteration");
 const { formatPlanOverviewLines, printStepLines } = require("./loop/plan-overview");
 const { loadPromptTemplate } = require("./loop/prompt-templates");
-const { confirmPlanReview, ensureTaskBeforeLoop, writePromptPreview } = require("./loop/plan-ensure");
+const { confirmPlanReview, enforcePrdRefsCoverage, ensureTaskBeforeLoop, writePromptPreview } = require("./loop/plan-ensure");
 const { loadTaskSeed, readStdinText } = require("./loop/seed");
 
 async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
@@ -405,6 +405,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     if (Object.keys(git).length) next.git = git;
     return next;
   });
+
+  const prdCoverage = await enforcePrdRefsCoverage(config);
+  if (prdCoverage.changed) {
+    printStep(`Plan updated with PRD refs defaults in ${prettyPath(config.cwd, config.taskFile)}`, { kind: "plan" });
+    await appendActivity(config.activityLog, ["Plan updated with PRD refs defaults (auto-enforced)."]);
+  }
 
   const summaryText = await readText(config.taskFile);
   const parsedSummary = summaryText ? parseTask(summaryText) : null;

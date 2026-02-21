@@ -32,6 +32,105 @@ async function recordPlanGenerationFailure(config, { output, error, seedSource }
   ]);
 }
 
+function isImplementationTaskText(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return false;
+  if (/\b(analysis|analyze|analyzing|analysing|research|spike|document|documentation|docs?|readme|changelog|license)\b/.test(text)) {
+    return false;
+  }
+  return true;
+}
+
+function collectMissingPrdRefs(parsedTask) {
+  const missing = [];
+  if (!parsedTask || !Array.isArray(parsedTask.checklist) || !parsedTask.checklist.length) return missing;
+  if (Array.isArray(parsedTask.phases) && parsedTask.phases.length) {
+    for (const phase of parsedTask.phases) {
+      const phaseId = String((phase && phase.id) || "").trim();
+      if (!phaseId) continue;
+      const sec = parsedTask.phaseSections && parsedTask.phaseSections[phaseId];
+      const list = sec && Array.isArray(sec.checklist) ? sec.checklist : [];
+      for (const item of list) {
+        if (!item || !isImplementationTaskText(item.text)) continue;
+        const refs = resolvePrdRefsForCurrentTask(parsedTask, phaseId, item);
+        if (!Array.isArray(refs) || refs.length === 0) {
+          missing.push({ phaseId, task: String(item.text || "").trim() });
+        }
+      }
+    }
+    return missing;
+  }
+  for (const item of parsedTask.checklist) {
+    if (!item || !isImplementationTaskText(item.text)) continue;
+    const refs = resolvePrdRefsForCurrentTask(parsedTask, "", item);
+    if (!Array.isArray(refs) || refs.length === 0) {
+      missing.push({ phaseId: "", task: String(item.text || "").trim() });
+    }
+  }
+  return missing;
+}
+
+function derivePrdRefsDefaults(prdText) {
+  const text = String(prdText || "");
+  const refs = [];
+  const headings = text.match(/^#{1,6}\s+(.+)$/gm) || [];
+  for (const line of headings) {
+    const section = String(line || "").replace(/^#{1,6}\s+/, "").trim();
+    if (!section) continue;
+    if (/^prd\b/i.test(section)) continue;
+    refs.push({ section });
+    if (refs.length >= 6) break;
+  }
+  if (refs.length) return refs;
+  return [{ section: "Goals" }, { section: "Acceptance Criteria" }];
+}
+
+function upsertPrdRefsDefaults(taskText, refs) {
+  const text = String(taskText || "");
+  const defaults = Array.isArray(refs) ? refs : [];
+  const match = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+  let fm = {};
+  let body = text;
+  if (match) {
+    try {
+      fm = yaml.load(match[1]) || {};
+    } catch (_) {
+      fm = {};
+    }
+    body = text.slice(match[0].length);
+  }
+  fm = fm && typeof fm === "object" ? { ...fm } : {};
+  if (!Array.isArray(fm.prd_refs_defaults) || !fm.prd_refs_defaults.length) {
+    fm.prd_refs_defaults = defaults;
+  }
+  const yamlText = yaml.dump(fm, { lineWidth: 120 }).trimEnd();
+  const normalizedBody = String(body || "").replace(/^\n+/, "");
+  return ["---", yamlText, "---", "", normalizedBody].join("\n");
+}
+
+async function enforcePrdRefsCoverage(config) {
+  const taskText = await readText(config.taskFile);
+  if (!taskText) return { changed: false, missing: [] };
+  const parsed = parseTask(taskText);
+  const missing = collectMissingPrdRefs(parsed);
+  if (!missing.length) return { changed: false, missing: [] };
+
+  const prdText = await readText(config.prdFile);
+  const defaults = derivePrdRefsDefaults(prdText);
+  const nextText = upsertPrdRefsDefaults(taskText, defaults);
+  if (nextText !== taskText) {
+    await writeText(config.taskFile, nextText);
+  }
+
+  const reParsed = parseTask(nextText);
+  const remaining = collectMissingPrdRefs(reParsed);
+  if (remaining.length) {
+    const sample = remaining.slice(0, 3).map((entry) => entry.phaseId ? `[${entry.phaseId}] ${entry.task}` : entry.task).join("; ");
+    throw new Error(`Plan requires PRD references for implementation tasks. Missing refs: ${sample}`);
+  }
+  return { changed: nextText !== taskText, missing };
+}
+
 async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   const cwd = config.cwd;
   const taskPath = config.taskFile;
@@ -351,6 +450,7 @@ async function writePromptPreview(config) {
 
 module.exports = {
   confirmPlanReview,
+  enforcePrdRefsCoverage,
   ensureTaskBeforeLoop,
   recordPlanGenerationFailure,
   writePromptPreview,
