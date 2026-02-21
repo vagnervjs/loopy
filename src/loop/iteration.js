@@ -18,22 +18,16 @@ const {
   getCurrentTask,
   getTaskLine,
   parseTask,
+  resolvePrdRefsForCurrentTask,
 } = require("../task");
 const { formatLocalTimestamp, redact, truncate } = require("../text");
-const { evaluateTestFailure } = require("../baseline");
 const {
-  ensureGitRepo,
   gitCommitIfNeeded,
   diffGitWorktreeSnapshots,
   getGitModifiedFiles,
   getGitWorktreeSnapshot,
-  getMergeBase,
-  normalizeGitPath,
-  isPathInsideDir,
-  resolveExcludedArtifactDirs,
 } = require("../git");
-const { ensureAgentsDoc } = require("./agents-doc");
-const { areAllPhasesComplete, pickCurrentPhaseId, resolvePhaseLabel, phaseTestCommand, isPhaseAllChecked, isPhaseComplete, computeNextPhaseId } = require("./phases");
+const { areAllPhasesComplete, pickCurrentPhaseId, resolvePhaseLabel, phaseNeedsValidation, isPhaseAllChecked, isPhaseComplete, computeNextPhaseId } = require("./phases");
 const {
   findNewlyCompletedTasks,
   formatCompletedTaskLines,
@@ -41,91 +35,29 @@ const {
   printStepLines,
   summarizePlanProgress,
 } = require("./plan-overview");
-const { buildSpecsSummary } = require("./specs");
-
-const NON_CODE_EXTENSIONS = new Set([
-  ".adoc",
-  ".asciidoc",
-  ".gif",
-  ".ico",
-  ".jpeg",
-  ".jpg",
-  ".md",
-  ".mdx",
-  ".org",
-  ".pdf",
-  ".png",
-  ".rst",
-  ".svg",
-  ".txt",
-  ".webp",
-]);
-
-const NON_CODE_BASENAMES = new Set([
-  "authors",
-  "changelog",
-  "codeowners",
-  "copying",
-  "license",
-  "notice",
-  "readme",
-]);
-
-function isCodeLikePath(filePath) {
-  const normalized = normalizeGitPath(filePath);
-  if (!normalized) return false;
-  const basename = path.posix.basename(normalized).toLowerCase();
-  const basenameWithoutExt = basename.replace(/\.[^.]+$/, "");
-  if (NON_CODE_BASENAMES.has(basename) || NON_CODE_BASENAMES.has(basenameWithoutExt)) return false;
-  const ext = path.posix.extname(basename).toLowerCase();
-  if (ext && NON_CODE_EXTENSIONS.has(ext)) return false;
-  return true;
-}
-
-function isExplicitNonCodeTask(changeType, taskLine) {
-  const normalizedType = String(changeType || "").trim().toLowerCase();
-  const normalizedTask = String(taskLine || "").trim().toLowerCase();
-  if (normalizedType === "docs") return true;
-  return /\b(analysis|analyze|analyzing|analysing|research|spike|documentation|docs?|readme)\b/.test(normalizedTask);
-}
-
-async function shouldRunTestsForIteration(config, parsedTaskAfter, currentPhaseId, taskContext, effectiveTestCommand) {
-  if (!effectiveTestCommand) return { run: false, reason: "missing test command" };
-
-  // Two-gate model: In a phased plan, defer the test_command until all tasks
-  // in the current phase are checked (Gate 1).  Only after Gate 1 is met do
-  // we run the test command (Gate 2).
-  if (currentPhaseId && parsedTaskAfter.phases && parsedTaskAfter.phases.length) {
-    const allChecked = isPhaseAllChecked(parsedTaskAfter, currentPhaseId);
-    if (!allChecked) {
-      return { run: false, reason: "phase tasks still unchecked (tests deferred until all tasks complete)" };
-    }
-    // All phase tasks are checked — run tests regardless of file types
-    return { run: true, reason: "all phase tasks checked; running Gate 2 tests" };
-  }
-
-  // Non-phased plans: keep original heuristic (run tests when code changes detected)
+function parseLoopyTestReport(text) {
+  const raw = String(text || "");
+  const match = raw.match(/```loopy_test_report\s*([\s\S]*?)```/i);
+  if (!match) return { ok: false, reason: "missing_test_report" };
+  const payload = String(match[1] || "").trim();
+  if (!payload) return { ok: false, reason: "invalid_test_report", detail: "empty payload" };
+  let parsed = null;
   try {
-    await ensureGitRepo(config.cwd);
-  } catch (_) {
-    if (isExplicitNonCodeTask(taskContext.changeType, taskContext.taskLine)) {
-      return { run: false, reason: "no code changes detected" };
-    }
-    return { run: true, reason: "git unavailable; running tests" };
+    parsed = JSON.parse(payload);
+  } catch (err) {
+    return { ok: false, reason: "invalid_test_report", detail: err && err.message ? err.message : String(err) };
   }
-
-  const excludedArtifactDirs = resolveExcludedArtifactDirs(config).map(normalizeGitPath).filter(Boolean);
-  const changedFiles = (await getGitModifiedFiles(config.cwd)).map(normalizeGitPath).filter(Boolean);
-  const relevantFiles = changedFiles.filter(
-    (filePath) => !excludedArtifactDirs.some((dirPath) => isPathInsideDir(filePath, dirPath))
-  );
-
-  if (!relevantFiles.length) return { run: false, reason: "no code changes detected" };
-
-  const hasCodeChanges = relevantFiles.some((filePath) => isCodeLikePath(filePath));
-  if (!hasCodeChanges) return { run: false, reason: "no code changes detected" };
-
-  return { run: true, reason: "code changes detected" };
+  if (!parsed || typeof parsed !== "object") {
+    return { ok: false, reason: "invalid_test_report", detail: "payload is not an object" };
+  }
+  const status = String(parsed.status || "").trim().toLowerCase();
+  const command = String(parsed.command || "").trim();
+  const summary = String(parsed.summary || "").trim();
+  const evidence = String(parsed.evidence || "").trim();
+  if (!["pass", "fail", "skipped"].includes(status) || !command || !summary || !evidence) {
+    return { ok: false, reason: "invalid_test_report", detail: "missing required fields" };
+  }
+  return { ok: true, report: { status, command, summary, evidence } };
 }
 
 async function runIteration(config, { stopSignal } = {}) {
@@ -211,12 +143,10 @@ async function runIteration(config, { stopSignal } = {}) {
     bytesRead += Buffer.byteLength(hintsTextRaw);
     const hintsText = truncate(hintsTextRaw, 8000);
 
-    const specsSummary = await buildSpecsSummary(config.cwd);
-    const agentsDoc = await ensureAgentsDoc(config, { stopSignal });
-
     const currentTaskObj = getCurrentTask(taskText, { phaseId: currentPhaseId });
     const currentTaskText = currentTaskObj ? currentTaskObj.text.trim() : null;
     const filteredPlan = currentPhaseId ? getCurrentPhaseSection(taskText, currentPhaseId) : taskText;
+    const prdRefs = resolvePrdRefsForCurrentTask(parsedTask, currentPhaseId, currentTaskObj);
 
     const prompt = formatPrompt({
       iteration,
@@ -230,8 +160,7 @@ async function runIteration(config, { stopSignal } = {}) {
       currentPhase: currentPhaseId,
       taskFilePath: config.taskFile,
       hintsText,
-      agentsText: agentsDoc.text || "",
-      specsText: specsSummary || "",
+      prdRefs,
       currentTask: currentTaskText,
       filteredPlan,
       promptTemplate: config.promptTemplateText || "",
@@ -390,93 +319,53 @@ async function runIteration(config, { stopSignal } = {}) {
 
     const taskLine = getTaskLine(taskAfter || taskText, { phaseId: currentPhaseId });
     const taskContext = extractChangeType(taskLine);
-    const effectiveTestCommand = currentPhaseId ? phaseTestCommand(parsedTaskAfter, currentPhaseId) : config.testCommand;
-    if (status === "success" && effectiveTestCommand) {
-      const testDecision = await shouldRunTestsForIteration(config, parsedTaskAfter, currentPhaseId, {
-        ...taskContext,
-        taskLine,
-      }, effectiveTestCommand);
-      if (testDecision.run) {
-        printStep(`Tests run ${redact(effectiveTestCommand)}`, { iteration, kind: "tests" });
-        const testResult = await runShellCommand(effectiveTestCommand, "", DEFAULTS.maxOutputBytes, {
-          cwd: config.cwd,
-          noColor: config.noColor,
-          stopSignal,
-        });
-        if (testResult.aborted) {
-          return await abortIteration("tests");
-        }
-        const testOutput = truncate(redact(`${testResult.stdout}\n${testResult.stderr}`), DEFAULTS.maxOutputBytes);
-        await writeText(lastTestOutputPath, testOutput);
-        bytesWritten += Buffer.byteLength(testOutput);
-        const testOutcome = testResult.code === 0 ? "pass" : "fail";
-        const testTimestamp = formatLocalTimestamp(new Date());
-        testStatus = testTimestamp ? `${testOutcome} @ ${testTimestamp}` : `${testOutcome}`;
-        if (testOutcome === "fail") {
-          printStep(
-            `Tests fail (see ${prettyPath(config.cwd, lastTestOutputPath)})`,
-            { iteration, level: "error", kind: "tests" }
-          );
-        } else {
-          printStep("Tests pass", { iteration, kind: "tests", level: "success" });
-        }
-        if (testOutcome === "fail") {
-          // --- Tiered failure recovery ---
-          const changedFilesForBaseline = await getGitModifiedFiles(config.cwd);
-          const evaluation = await evaluateTestFailure(config, state, {
-            testOutput,
-            testExitCode: testResult.code,
-            testCommand: effectiveTestCommand,
-            changedFiles: changedFilesForBaseline,
-            stopSignal,
-            getMergeBase: () => getMergeBase(config.cwd),
-          });
-
-          if (evaluation.aborted) {
-            return await abortIteration("baseline test");
-          }
-
-          // Cache baseline result if computed
-          if (evaluation.baselineResult) {
-            state.baselineTestResult = evaluation.baselineResult;
-          }
-
-          // Apply state updates from evaluation
-          if (evaluation.stateUpdates) {
-            Object.assign(state, evaluation.stateUpdates);
-          }
-
-          if (evaluation.action === "pass") {
-            // Pre-existing failures — treat as pass
-            const baselineMsg = `iteration ${iteration} success (test: pre-existing failures match baseline, treating as pass)`;
-            printStep(baselineMsg, { iteration, kind: "tests", level: "success" });
-            await appendActivity(config.activityLog, [baselineMsg]);
-            testStatus = testTimestamp ? `pass (baseline) @ ${testTimestamp}` : "pass (baseline)";
-            // Do NOT set status to failure — keep it as "success"
-          } else if (evaluation.action === "fix_attempt") {
-            const fixMsg = `iteration ${iteration} failure (test: ${evaluation.reason})`;
-            printStep(fixMsg, { iteration, kind: "tests", level: "warn" });
-            await appendActivity(config.activityLog, [fixMsg]);
-            status = "failure";
-            lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
-            errorSignature = `${effectiveTestCommand}::${lastError}`;
-          } else {
-            // action === "fail"
-            const failNewMsg = evaluation.newFailures && evaluation.newFailures.length
-              ? `iteration ${iteration} failure (test: ${evaluation.newFailures.length} new failures not in baseline)`
-              : `iteration ${iteration} failure (test: ${evaluation.reason})`;
-            printStep(failNewMsg, { iteration, level: "error", kind: "tests" });
-            await appendActivity(config.activityLog, [failNewMsg]);
-            status = "failure";
-            lastError = testOutput.split(/\r?\n/).find(Boolean) || "test failure";
-            errorSignature = `${effectiveTestCommand}::${lastError}`;
-          }
-        }
-      } else {
-        testStatus = `skipped (${testDecision.reason})`;
-        printStep(`Tests skipped: ${testDecision.reason}`, { iteration, kind: "tests", level: "warn" });
-        await appendActivity(config.activityLog, [`tests skipped: ${testDecision.reason}`]);
+    const reportParse = parseLoopyTestReport(combinedOutput);
+    const phaseValidationRequired = Boolean(
+      currentPhaseId &&
+      parsedTaskAfter.phases &&
+      parsedTaskAfter.phases.length &&
+      isPhaseAllChecked(parsedTaskAfter, currentPhaseId) &&
+      phaseNeedsValidation(parsedTaskAfter, currentPhaseId)
+    );
+    if (reportParse.ok) {
+      const report = reportParse.report;
+      const testTimestamp = formatLocalTimestamp(new Date());
+      testStatus = testTimestamp ? `${report.status} @ ${testTimestamp}` : report.status;
+      const reportPayload = truncate(
+        redact(
+          JSON.stringify(
+            {
+              status: report.status,
+              command: report.command,
+              summary: report.summary,
+              evidence: report.evidence,
+            },
+            null,
+            2
+          )
+        ),
+        DEFAULTS.maxOutputBytes
+      );
+      await writeText(
+        lastTestOutputPath,
+        reportPayload
+      );
+      bytesWritten += Buffer.byteLength(reportPayload);
+      await appendActivity(config.activityLog, [`test-report parsed: ${report.status}`]);
+      if (report.status === "fail" && status === "success") {
+        status = "failure";
+        lastError = report.summary || "test failure";
+        errorSignature = `test-report::${lastError}`;
       }
+    } else if (phaseValidationRequired && status === "success") {
+      status = "failure";
+      testStatus = `fail (${reportParse.reason})`;
+      lastError = `${reportParse.reason}${reportParse.detail ? `: ${reportParse.detail}` : ""}`;
+      errorSignature = `test-report::${reportParse.reason}`;
+      await appendActivity(config.activityLog, [`test-report error: ${lastError}`]);
+      printStep(`Test report invalid: ${lastError}`, { iteration, level: "error", kind: "tests" });
+    } else {
+      testStatus = "n/a";
     }
     const taskComplete = Boolean(
       parsedTaskAfter.allChecked &&
@@ -608,6 +497,12 @@ async function runIteration(config, { stopSignal } = {}) {
       iteration,
       lastStatus: taskComplete ? "complete" : status,
       lastTest: testStatus,
+      lastContractError: reportParse.ok ? "" : reportParse.reason,
+      lastPrdRefs: prdRefs,
+      lastTestReport: reportParse.ok ? reportParse.report : null,
+      lastTestReportStatus: reportParse.ok ? reportParse.report.status : "",
+      lastTestReportCommand: reportParse.ok ? reportParse.report.command : "",
+      lastTestReportEvidence: reportParse.ok ? reportParse.report.evidence : "",
       lastError: lastError || (status === "failure" ? state.lastError : "") || "",
       lastBytes: bytesRead + bytesWritten,
       rotatePending: false,
@@ -618,11 +513,6 @@ async function runIteration(config, { stopSignal } = {}) {
       phaseHistory: state.phaseHistory || [],
       iterationDurations: [...(state.iterationDurations || []), iterationDurationMs],
     };
-
-    // Reset baseline fix attempts on genuine success (tests actually passed)
-    if (status === "success" && /^pass\b/i.test(testStatus)) {
-      nextState.baselineFixAttempts = 0;
-    }
 
     const filesChangedSuffix = committedFiles.length ? ` [files: ${committedFiles.join(", ")}]` : "";
     const historyEntry = `${nextState.updatedAt} iteration ${iteration} ${status} (test: ${testStatus})${filesChangedSuffix}`;

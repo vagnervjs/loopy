@@ -283,7 +283,7 @@ test("formatPrompt - fallback prompt includes blocked task instructions", () => 
   assert.match(prompt, /\[!\].*BLOCKED/);
 });
 
-test("formatPrompt - includes AGENTS and specs summary when provided", () => {
+test("formatPrompt - includes PRD references when provided", () => {
   const prompt = formatPrompt({
     iteration: 1,
     taskText: "# Plan\n- [ ] task",
@@ -298,14 +298,12 @@ test("formatPrompt - includes AGENTS and specs summary when provided", () => {
     hintsText: "",
     currentTask: null,
     filteredPlan: null,
-    agentsText: "## Build & Run\n- npm run dev",
-    specsText: "- auth.md — Auth",
+    prdRefs: [{ section: "Auth Requirements" }, { anchor: "oauth-callback" }],
   });
 
-  assert.match(prompt, /## Specs Summary/);
-  assert.match(prompt, /auth\.md — Auth/);
-  assert.match(prompt, /## AGENTS/);
-  assert.match(prompt, /npm run dev/);
+  assert.match(prompt, /## PRD References/);
+  assert.match(prompt, /section: Auth Requirements/);
+  assert.match(prompt, /anchor: oauth-callback/);
 });
 
 test("formatPrompt - fallback prompt includes two-gate rules", () => {
@@ -326,8 +324,8 @@ test("formatPrompt - fallback prompt includes two-gate rules", () => {
   });
 
   assert.match(prompt, /Complete all unchecked tasks in the current phase before tests will be run/);
-  assert.match(prompt, /test_command runs after all phase tasks are checked/);
-  assert.match(prompt, /If tests fail after all tasks are checked, fix the failures first/);
+  assert.match(prompt, /Run tests in the agent workflow and report them in a ```loopy_test_report``` JSON block/);
+  assert.match(prompt, /If tests fail, fix the failures first/);
   assert.match(prompt, /3\+ consecutive iterations, reassess your approach/);
 });
 
@@ -351,7 +349,7 @@ test("formatPrompt - {{instructions}} token includes two-gate rules", () => {
   });
 
   assert.match(prompt, /Complete all unchecked tasks in the current phase before tests will be run/);
-  assert.match(prompt, /test_command runs automatically after all phase tasks are checked/);
-  assert.match(prompt, /If tests fail after all tasks are checked, fix the failures first/);
+  assert.match(prompt, /Run tests in the agent workflow and report them in a ```loopy_test_report``` JSON block/);
+  assert.match(prompt, /If tests fail, fix the failures first/);
   assert.match(prompt, /3\+ consecutive iterations, reassess your approach/);
 });

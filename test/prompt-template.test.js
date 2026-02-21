@@ -46,7 +46,7 @@ test("built-in build template includes two-gate task rules", async () => {
 
   assert.equal(result.source, "built-in");
   assert.match(result.text, /Complete all unchecked tasks in the current phase before tests will be run/);
-  assert.match(result.text, /test_command runs automatically after all phase tasks are checked/);
+  assert.match(result.text, /loopy_test_report/);
   assert.match(result.text, /fix the failures before the phase can advance/);
   assert.match(result.text, /3\+ consecutive iterations, reassess your approach/);
 });
@@ -65,7 +65,7 @@ test("built-in build template includes Built-in Rules section", async () => {
   assert.equal(result.source, "built-in");
   assert.match(result.text, /## Built-in Rules/);
   assert.match(result.text, /two-gate lifecycle/);
-  assert.match(result.text, /test_command is NOT executed until every task/);
+  assert.match(result.text, /validation report gate is NOT evaluated until every task/i);
   assert.match(result.text, /Focus on one task at a time/);
   assert.match(result.text, /Never cycle back to a previous phase/);
 });
@@ -116,7 +116,7 @@ test("built-in plan template includes two-gate model guidance", async () => {
 
   assert.equal(result.source, "built-in");
   assert.match(result.text, /two-gate completion model/);
-  assert.match(result.text, /stop_on field is deprecated/);
+  assert.match(result.text, /validation report passes/);
   assert.match(result.text, /\[~\] or \[-\]/);
 });
 

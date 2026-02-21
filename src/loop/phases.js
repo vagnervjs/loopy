@@ -68,23 +68,9 @@ function phaseCriteria(parsedTask, phaseId) {
   return stopOn.length ? stopOn : ["all_checked"];
 }
 
-/**
- * Returns true when the phase has a test_command configured (directly
- * or via phase_defaults / global front-matter).
- */
-function phaseHasTestCommand(parsedTask, phaseId) {
-  return Boolean(phaseTestCommand(parsedTask, phaseId));
-}
-
-function phaseTestCommand(parsedTask, phaseId) {
-  if (!phaseId) return "";
-  const fm = parsedTask.frontMatter || {};
-  const phaseDefaults = parsedTask.phaseDefaults || {};
-  const phase = (parsedTask.phases || []).find((p) => p.id === phaseId);
-  const fromPhase = phase && phase.testCommand ? String(phase.testCommand).trim() : "";
-  const fromDefaults = String(phaseDefaults.test_command || phaseDefaults.testCommand || "").trim();
-  const fromGlobal = String(fm.test_command || fm.testCommand || "").trim();
-  return fromPhase || fromDefaults || fromGlobal || "";
+function phaseHasTestCommand() {
+  // Kept for API compatibility. Validation is now agent-report driven.
+  return true;
 }
 
 function hasPhase(parsedTask, phaseId) {
@@ -99,14 +85,33 @@ function isPhaseAllChecked(parsedTask, phaseId) {
 }
 
 function didTestsPass(state) {
-  const last = String((state && state.lastTest) || "");
-  return /^pass\b/i.test(last.trim());
+  const reportStatus = String((state && state.lastTestReportStatus) || "").trim().toLowerCase();
+  if (reportStatus) return reportStatus === "pass";
+  const last = String((state && state.lastTest) || "").trim().toLowerCase();
+  return /^pass\b/i.test(last);
+}
+
+function isCodeLikeTaskText(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return false;
+  if (/\b(analysis|analyze|analyzing|analysing|research|spike|document|documentation|docs?|readme|changelog|license)\b/.test(text)) {
+    return false;
+  }
+  return true;
+}
+
+function phaseNeedsValidation(parsedTask, phaseId) {
+  if (!hasPhase(parsedTask, phaseId)) return false;
+  const sec = parsedTask.phaseSections && parsedTask.phaseSections[phaseId];
+  const checklist = sec && Array.isArray(sec.checklist) ? sec.checklist : [];
+  if (!checklist.length) return false;
+  return checklist.some((item) => isCodeLikeTaskText(item.text));
 }
 
 /**
  * Two-gate phase completion model:
  *   Gate 1: All tasks in the phase must be checked [x] (or skipped [~]/[-]).
- *   Gate 2: If the phase has a test_command, the tests must also pass.
+ *   Gate 2: If the phase contains implementation work, the agent test report must pass.
  *
  * The legacy `stop_on` field is ignored — every phase uses the same gates.
  */
@@ -117,8 +122,8 @@ function isPhaseComplete(parsedTask, phaseId, state, { testStatus } = {}) {
   const phaseChecked = isPhaseAllChecked(parsedTask, phaseId);
   if (!phaseChecked) return false;
 
-  // Gate 2: tests pass (only enforced when a test command is configured)
-  const needsTests = phaseHasTestCommand(parsedTask, phaseId);
+  // Gate 2: tests pass (only enforced when the phase appears to include code work)
+  const needsTests = phaseNeedsValidation(parsedTask, phaseId);
   if (!needsTests) return true;
 
   const hasTestStatus = typeof testStatus === "string" && testStatus.trim() && testStatus !== "n/a";
@@ -160,8 +165,8 @@ module.exports = {
   isPhaseAllChecked,
   isPhaseComplete,
   parseSkipPhaseList,
+  phaseNeedsValidation,
   phaseHasTestCommand,
-  phaseTestCommand,
   pickCurrentPhaseId,
   resolvePhaseLabel,
 };

@@ -17,9 +17,12 @@ function normalizeStopOn(value) {
 function parsePhases(frontMatter) {
   const fm = frontMatter || {};
   const phaseDefaults = fm.phase_defaults || fm.phaseDefaults || {};
+  const defaultPrdRefs = normalizePrdRefs(
+    fm.prd_refs_defaults || fm.prdRefsDefaults || phaseDefaults.prd_refs || phaseDefaults.prdRefs || []
+  );
   const raw = fm.phases;
   if (!Array.isArray(raw)) {
-    return { phases: [], phaseDefaults: phaseDefaults || {} };
+    return { phases: [], phaseDefaults: phaseDefaults || {}, prdRefsDefaults: defaultPrdRefs };
   }
 
   const phases = [];
@@ -32,6 +35,7 @@ function parsePhases(frontMatter) {
         title: title || id,
         stopOn: normalizeStopOn(phaseDefaults.stop_on || phaseDefaults.stopOn),
         testCommand: phaseDefaults.test_command || phaseDefaults.testCommand || "",
+        prdRefs: defaultPrdRefs,
       });
       continue;
     }
@@ -53,11 +57,12 @@ function parsePhases(frontMatter) {
         title: String(titleRaw || id).trim() || id,
         stopOn,
         testCommand,
+        prdRefs: normalizePrdRefs(entry.prd_refs || entry.prdRefs || defaultPrdRefs),
       });
     }
   }
 
-  return { phases, phaseDefaults: phaseDefaults || {} };
+  return { phases, phaseDefaults: phaseDefaults || {}, prdRefsDefaults: defaultPrdRefs };
 }
 
 function extractPhaseIdFromLine(line, phaseIdSet) {
@@ -105,6 +110,8 @@ function parseTask(text) {
     allChecked: false,
     phases: [],
     phaseDefaults: {},
+    prdRefsDefaults: [],
+    prdRefsByTaskText: {},
     phaseSections: {}, // id -> { checklist, allChecked, startLine, endLine }
   };
 
@@ -118,12 +125,14 @@ function parseTask(text) {
     result.body = text.slice(match[0].length);
   }
 
-  const { phases, phaseDefaults } = parsePhases(result.frontMatter);
+  const { phases, phaseDefaults, prdRefsDefaults } = parsePhases(result.frontMatter);
   result.phases = phases;
   result.phaseDefaults = phaseDefaults;
+  result.prdRefsDefaults = prdRefsDefaults;
+  result.prdRefsByTaskText = parseInlinePrdRefsByTaskText(text);
 
   const checklist = parseCheckboxes(text).map((item) => {
-    const entry = { checked: item.checked, text: item.text };
+    const entry = { line: item.line, checked: item.checked, text: item.text };
     if (item.skipped) entry.skipped = true;
     if (item.blocked) entry.blocked = true;
     return entry;
@@ -147,7 +156,7 @@ function parseTask(text) {
       const end = Math.max(start, endLineExclusive);
       const slice = bodyLines.slice(start, end).join("\n");
       const items = parseCheckboxes(slice).map((item) => {
-        const entry = { checked: item.checked, text: item.text };
+        const entry = { line: item.line + start, checked: item.checked, text: item.text };
         if (item.skipped) entry.skipped = true;
         if (item.blocked) entry.blocked = true;
         return entry;
@@ -187,6 +196,133 @@ function parseTask(text) {
   }
 
   return result;
+}
+
+function normalizePrdRefs(value) {
+  const list = Array.isArray(value) ? value : value == null ? [] : [value];
+  const normalized = [];
+  for (const item of list) {
+    if (!item) continue;
+    if (typeof item === "string") {
+      const section = item.trim();
+      if (section) normalized.push({ section });
+      continue;
+    }
+    if (typeof item !== "object") continue;
+    const section = String(item.section || "").trim();
+    const anchor = String(item.anchor || "").trim();
+    const quote = String(item.quote || "").trim();
+    if (!section && !anchor && !quote) continue;
+    const ref = {};
+    if (section) ref.section = section;
+    if (anchor) ref.anchor = anchor;
+    if (quote) ref.quote = quote;
+    normalized.push(ref);
+  }
+  return dedupePrdRefs(normalized);
+}
+
+function dedupePrdRefs(refs) {
+  const out = [];
+  const seen = new Set();
+  for (const ref of refs || []) {
+    const key = `${String(ref.section || "").trim()}::${String(ref.anchor || "").trim()}::${String(ref.quote || "").trim()}`;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
+  }
+  return out;
+}
+
+function parsePrdRefsPayload(rawPayload) {
+  const raw = String(rawPayload || "").trim();
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizePrdRefs(parsed);
+  } catch (_) {
+    return [];
+  }
+}
+
+function parseInlinePrdRefsByTaskText(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  const byTaskText = {};
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    const taskMatch = line.match(/^\s*-\s*\[( |x|X|~|-|!)\]\s+(.*)$/);
+    if (!taskMatch) continue;
+    const taskText = String(taskMatch[2] || "").trim();
+    if (!taskText) continue;
+    const refs = [];
+    const consumeLine = (sourceLine) => {
+      const matches = sourceLine.match(/<!--\s*loopy:prd_refs\s*([\s\S]*?)-->/gi) || [];
+      for (const match of matches) {
+        const payload = match.replace(/^<!--\s*loopy:prd_refs\s*/i, "").replace(/\s*-->$/i, "");
+        refs.push(...parsePrdRefsPayload(payload));
+      }
+    };
+    consumeLine(line);
+
+    let j = i + 1;
+    while (j < lines.length) {
+      const peek = String(lines[j] || "");
+      const trimmed = peek.trim();
+      if (!trimmed) {
+        j += 1;
+        continue;
+      }
+      if (/^\s*-\s*\[( |x|X|~|-|!)\]\s+/.test(peek) || /^#{1,6}\s+/.test(peek) || /<!--\s*loopy:phase\b/i.test(peek)) {
+        break;
+      }
+      if (/^<!--\s*loopy:prd_refs\b/i.test(trimmed)) {
+        consumeLine(trimmed);
+        j += 1;
+        continue;
+      }
+      break;
+    }
+
+    if (refs.length) {
+      byTaskText[taskText] = dedupePrdRefs([...(byTaskText[taskText] || []), ...refs]);
+    }
+  }
+  return byTaskText;
+}
+
+function formatPrdRef(ref) {
+  if (!ref || typeof ref !== "object") return "";
+  const parts = [];
+  if (ref.section) parts.push(`section: ${ref.section}`);
+  if (ref.anchor) parts.push(`anchor: ${ref.anchor}`);
+  if (ref.quote) parts.push(`quote: ${ref.quote}`);
+  return parts.join(" | ");
+}
+
+function formatPrdRefsBlock(refs) {
+  const normalized = normalizePrdRefs(refs);
+  if (!normalized.length) return "";
+  const lines = ["## PRD References"];
+  for (const ref of normalized) {
+    const formatted = formatPrdRef(ref);
+    if (formatted) lines.push(`- ${formatted}`);
+  }
+  return lines.join("\n");
+}
+
+function resolvePrdRefsForCurrentTask(parsedTask, phaseId, currentTask) {
+  const task = parsedTask && parsedTask.phases ? parsedTask : parseTask(String(parsedTask || ""));
+  const refs = [];
+  const defaults = normalizePrdRefs(task.prdRefsDefaults || []);
+  refs.push(...defaults);
+  if (phaseId) {
+    const phase = (task.phases || []).find((entry) => entry && entry.id === phaseId);
+    if (phase && Array.isArray(phase.prdRefs)) refs.push(...phase.prdRefs);
+  }
+  const taskText = currentTask && typeof currentTask === "object" ? currentTask.text : currentTask;
+  const byText = taskText ? task.prdRefsByTaskText && task.prdRefsByTaskText[String(taskText).trim()] : null;
+  if (Array.isArray(byText)) refs.push(...byText);
+  return dedupePrdRefs(refs);
 }
 
 function getTaskLine(text, options = {}) {
@@ -437,6 +573,8 @@ module.exports = {
   getTaskLine,
   getCurrentTask,
   getCurrentPhaseSection,
+  resolvePrdRefsForCurrentTask,
+  formatPrdRefsBlock,
   toSlug,
   parseCheckboxes,
   compareCheckboxDiffs,

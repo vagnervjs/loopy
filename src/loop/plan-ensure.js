@@ -7,11 +7,9 @@ const { confirm, promptLine } = require("../confirm");
 const { readText, writeText } = require("../fs");
 const { ensureGuardrails, formatPrompt } = require("../prompt");
 const { printStep } = require("../steps");
-const { getCurrentPhaseSection, getCurrentTask, parseTask } = require("../task");
+const { getCurrentPhaseSection, getCurrentTask, parseTask, resolvePrdRefsForCurrentTask } = require("../task");
 const { redact, truncate } = require("../text");
 const { fallbackPhasesFromSeed, proposePhasesWithAgent, renderTaskMarkdown } = require("../auto-phase");
-const { buildSpecsSummary } = require("./specs");
-const { ensureAgentsDoc } = require("./agents-doc");
 const { pickCurrentPhaseId } = require("./phases");
 const { loadTaskSeed } = require("./seed");
 
@@ -323,13 +321,11 @@ async function writePromptPreview(config) {
   const hintsTextRaw = await readText(config.hintsFile);
   const hintsText = truncate(hintsTextRaw, 8000);
 
-  const specsSummary = await buildSpecsSummary(config.cwd);
-  const agentsDoc = await ensureAgentsDoc(config, { stopSignal: null });
-
   const currentPhaseId = pickCurrentPhaseId(parsedTask, {}, config, { phaseExplicit: false });
   const currentTaskObj = getCurrentTask(taskText, { phaseId: currentPhaseId });
   const currentTaskText = currentTaskObj ? currentTaskObj.text.trim() : null;
   const filteredPlan = currentPhaseId ? getCurrentPhaseSection(taskText, currentPhaseId) : taskText;
+  const prdRefs = resolvePrdRefsForCurrentTask(parsedTask, currentPhaseId, currentTaskObj);
 
   const prompt = formatPrompt({
     iteration: 0,
@@ -343,8 +339,7 @@ async function writePromptPreview(config) {
     currentPhase: currentPhaseId,
     taskFilePath: config.taskFile,
     hintsText,
-    agentsText: agentsDoc.text || "",
-    specsText: specsSummary || "",
+    prdRefs,
     currentTask: currentTaskText,
     filteredPlan,
     promptTemplate: config.promptTemplateText || "",
