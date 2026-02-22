@@ -1,4 +1,5 @@
 const fs = require("fs/promises");
+const os = require("os");
 const path = require("path");
 const { spawn } = require("child_process");
 
@@ -40,6 +41,13 @@ function buildShellCommand(command, inputFile) {
   }
   const shell = process.env.SHELL || "/bin/bash";
   return { shell, args: ["-lc", wrappedCommand] };
+}
+
+async function writeTempInputFile(input) {
+  const name = `loopy-input-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`;
+  const filePath = path.join(os.tmpdir(), name);
+  await fs.writeFile(filePath, String(input || ""), "utf8");
+  return filePath;
 }
 
 async function runShellCommand(command, input, maxOutputBytes, options = {}) {
@@ -154,7 +162,15 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
   }
 
   if (pty) {
-    const { shell, args } = buildShellCommand(command);
+    let inputFile = "";
+    if (input) {
+      try {
+        inputFile = await writeTempInputFile(input);
+      } catch (_) {
+        inputFile = "";
+      }
+    }
+    const { shell, args } = buildShellCommand(command, inputFile || "");
     let child = null;
     try {
       child = pty.spawn(shell, args, {
@@ -171,6 +187,12 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
     if (child) {
       return new Promise((resolve) => {
         let stdout = "";
+        const cleanupInputFile = () => {
+          if (!inputFile) return Promise.resolve();
+          const target = inputFile;
+          inputFile = "";
+          return fs.rm(target, { force: true }).catch(() => {});
+        };
 
         attachStopListener(child);
         child.onData((data) => {
@@ -184,16 +206,19 @@ async function runShellCommand(command, input, maxOutputBytes, options = {}) {
         child.onExit(({ exitCode }) => {
           cleanupStop();
           Promise.resolve(appendQueue).finally(() => {
-            resolve({ code: exitCode ?? 1, stdout, stderr: "", aborted, abortReason });
+            Promise.resolve(cleanupInputFile()).finally(() => {
+              resolve({ code: exitCode ?? 1, stdout, stderr: "", aborted, abortReason });
+            });
           });
         });
-
-        if (input) {
-          child.write(input);
-          if (!input.endsWith("\n")) child.write("\n");
-          child.write("\x04");
-        }
       });
+    }
+    if (inputFile) {
+      try {
+        await fs.rm(inputFile, { force: true });
+      } catch (_) {
+        // ignore
+      }
     }
   }
 
