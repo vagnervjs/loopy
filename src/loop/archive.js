@@ -7,6 +7,7 @@ const { readText } = require("../fs");
 const { parseTask } = require("../task");
 
 const ARCHIVE_DIRNAME = "archive";
+const FOLLOW_UP_FILE = "FOLLOW_UP.md";
 
 function stripLoopyPrefix(branch) {
   const raw = String(branch || "").trim();
@@ -92,6 +93,17 @@ async function archiveCompletedLoop(config) {
 
   const prettyArchive = prettyPath(config.cwd, archiveDir);
   await appendActivity(config.activityLog, [`Loop archived: ${prettyArchive}`]);
+
+  const followUpSource = path.join(baseDir, FOLLOW_UP_FILE);
+  try {
+    await fs.access(followUpSource);
+    const cwd = config.cwd || path.dirname(baseDir);
+    const followUpDest = path.join(cwd, FOLLOW_UP_FILE);
+    await fs.copyFile(followUpSource, followUpDest);
+    await appendActivity(config.activityLog, [`Follow-up items copied to ${prettyPath(cwd, followUpDest)}`]);
+  } catch (_) {
+    // no FOLLOW_UP.md — nothing to promote
+  }
 
   const entries = await fs.readdir(baseDir);
   for (const entry of entries) {

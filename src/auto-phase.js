@@ -42,6 +42,11 @@ function normalizePhaseOutput(parsed) {
     tasksByPhase[key] = items.map((t) => String(t || "").trim()).filter(Boolean);
   }
 
+  const followUpRaw = parsed && (parsed.follow_up || parsed.followUp) ? parsed.follow_up || parsed.followUp : [];
+  const followUp = (Array.isArray(followUpRaw) ? followUpRaw : [])
+    .map((t) => String(t || "").trim())
+    .filter(Boolean);
+
   const counts = Object.values(tasksByPhase).map((t) => t.length);
   const allSame = counts.length > 1 && counts.every((c) => c === counts[0]);
   const anyOversize = counts.some((c) => c > 8);
@@ -56,6 +61,7 @@ function normalizePhaseOutput(parsed) {
     phaseDefaults,
     phases: out,
     tasksByPhase,
+    followUp,
   };
 }
 
@@ -191,6 +197,18 @@ function validatePlanSchema(parsed) {
     }
   }
 
+  const followUp = parsed.follow_up || parsed.followUp;
+  if (followUp != null) {
+    if (!Array.isArray(followUp)) {
+      return "follow_up must be an array";
+    }
+    for (let i = 0; i < followUp.length; i += 1) {
+      if (typeof followUp[i] !== "string" || !followUp[i].trim()) {
+        return `follow_up[${i}] must be a non-empty string`;
+      }
+    }
+  }
+
   return "";
 }
 
@@ -227,13 +245,16 @@ async function proposePhasesWithAgent(
     "phase_tasks:",
     "  <phase id>:",
     "    - \"<checklist item text>\"",
+    "follow_up: # optional — items that require future data or human action after the plan completes",
+    "  - \"<description of what to validate, when, and how>\"",
     "",
     "Break work into tasks that an AI code agent can execute in a single session:",
     "- Specific: say HOW, not just WHAT. Name the file, function, config key, or mechanism when known.",
     "- Atomic: exactly ONE outcome per task (no compound items).",
     "- Testable: include explicit acceptance criteria that can be verified programmatically or by inspecting output.",
     "- Scoped: small enough for < 1 day of work.",
-    "- Executable: every task must be completable by a code agent (read/search/edit files, run commands). Exclude tasks requiring human judgment over time, multi-day monitoring, or manual approval gates.",
+    "- Executable: every task must be completable by a code agent RIGHT NOW (read/search/edit files, run commands). Exclude tasks requiring human judgment over time, multi-day monitoring, or manual approval gates.",
+    "- Immediate: every task must be implementable, testable, and verifiable in the current session using current data. Never put tasks that depend on future events into phase_tasks. Instead, put them in the top-level `follow_up` list. Examples of follow_up items: 'after 10+ CI runs on main, compare p50/p95 workflow duration against baseline using scripts/ci/metrics.mjs', 'validate artifact parity on first production deploy', 'review error rate 1 week post-merge'.",
     "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
     "- Start with a strong verb: add / implement / update / remove / verify / investigate / measure / analyze.",
     "- Before planning, explore the codebase to understand its structure, key files, and existing patterns. Ground your tasks in what you find.",
@@ -269,7 +290,10 @@ async function proposePhasesWithAgent(
     "- The scope is a straightforward refactor with clear before/after.",
     "",
     "BAD task: 'implement: optimize the data pipeline' (vague, no mechanism, no target file).",
-    "GOOD task: 'implement: add Redis caching to `src/services/user-service.ts` getUser() — Acceptance: cache-hit path returns in <10ms in test.'",
+    "BAD phase_task: 'measure: run post-change metrics for at least 10 successful runs' (depends on future CI runs — move to follow_up).",
+    "BAD phase_task: 'analyze: compare baseline vs post-change data and evaluate thresholds' (requires future data — move to follow_up).",
+    "GOOD phase_task: 'implement: add Redis caching to `src/services/user-service.ts` getUser() — Acceptance: cache-hit path returns in <10ms in test.'",
+    "GOOD follow_up: 'After 10+ successful CI runs on main, run `node scripts/ci/metrics.mjs compare` to verify >=25% p50 reduction.'",
     "",
     "Keep phases small (2-5). Prefer stable ids. Ensure every phase has at least 1 checklist item.",
     "",
@@ -362,10 +386,27 @@ function renderTaskMarkdown({
   return lines.join("\n");
 }
 
+function renderFollowUpMarkdown(items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  const lines = [
+    "# Follow-Up",
+    "",
+    "Items below require future data or human action after the automated plan completes.",
+    "Review and execute these manually once the prerequisite conditions are met.",
+    "",
+  ];
+  for (const item of items) {
+    lines.push(`- [ ] ${item}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 module.exports = {
   proposePhasesWithAgent,
   fallbackPhasesFromSeed,
   renderTaskMarkdown,
+  renderFollowUpMarkdown,
   sanitizeControlChars,
   extractPlanPayloadStrict,
   validatePlanSchema,

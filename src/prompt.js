@@ -236,6 +236,7 @@ function formatPrompt({
     "- If tests fail, fix the failures first.",
     "- If the same task has failed for 3+ consecutive iterations, reassess your approach.",
     "- Record any new guardrails if you detect repetition or drift.",
+    "- If your work reveals validation steps or checks that depend on future data (future CI runs, post-deploy metrics, production observations), append them to `.loopy/FOLLOW_UP.md` as checklist items instead of creating plan tasks.",
     "",
     "## Phase Lifecycle",
     "- Phases follow a two-gate lifecycle: Gate 1 = all tasks checked [x] (or skipped [~]/[-] or blocked [!]), Gate 2 = test report status is pass.",

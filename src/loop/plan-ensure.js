@@ -9,11 +9,21 @@ const { ensureGuardrails, formatPrompt } = require("../prompt");
 const { printStep } = require("../steps");
 const { getCurrentPhaseSection, getCurrentTask, parseTask, resolvePrdRefsForCurrentTask } = require("../task");
 const { redact, truncate } = require("../text");
-const { fallbackPhasesFromSeed, proposePhasesWithAgent, renderTaskMarkdown, sanitizeControlChars } = require("../auto-phase");
+const { fallbackPhasesFromSeed, proposePhasesWithAgent, renderTaskMarkdown, renderFollowUpMarkdown, sanitizeControlChars } = require("../auto-phase");
 const { pickCurrentPhaseId } = require("./phases");
 const { loadTaskSeed } = require("./seed");
 
 const PLAN_OUTPUT_FILE = "last_plan_output.txt";
+const FOLLOW_UP_FILE = "FOLLOW_UP.md";
+
+async function writeFollowUp(config, followUp) {
+  if (!Array.isArray(followUp) || !followUp.length) return;
+  const content = renderFollowUpMarkdown(followUp);
+  if (!content) return;
+  const filePath = path.join(config.loopyDir, FOLLOW_UP_FILE);
+  await writeText(filePath, content);
+  printStep(`Follow-up items saved to ${prettyPath(config.cwd, filePath)}`, { kind: "plan" });
+}
 
 async function recordPlanGenerationFailure(config, { output, stdout, stderr, error, seedSource }) {
   const logPath = path.join(config.loopyDir, PLAN_OUTPUT_FILE);
@@ -201,7 +211,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         });
       }
       const plan = proposed.ok
-        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
+        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase, followUp: proposed.followUp }
         : fallbackPhasesFromSeed(seed, { testCommand });
       if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
         plan.phaseDefaults = {};
@@ -230,6 +240,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         includeSeedComment: true,
         seedText: seed,
       });
+      await writeFollowUp(config, plan.followUp);
     } else {
       nextText = [
         "---",
@@ -299,7 +310,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         });
       }
       const plan = proposed.ok
-        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
+        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase, followUp: proposed.followUp }
         : fallbackPhasesFromSeed(seed, { testCommand });
       if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
         plan.phaseDefaults = {};
@@ -318,6 +329,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         includeSeedComment: true,
         seedText: seed,
       });
+      await writeFollowUp(config, plan.followUp);
     } else {
       // Non-phased update: overwrite checklist with a single new item.
       nextText = [
@@ -369,7 +381,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         });
       }
       const plan = proposed.ok
-        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
+        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase, followUp: proposed.followUp }
         : null;
       if (plan) {
         let testCommand = config.testCommand || parsed.frontMatter.test_command || parsed.frontMatter.testCommand || "";
@@ -404,6 +416,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
           });
           if (ok) {
             await writeText(taskPath, nextText);
+            await writeFollowUp(config, plan.followUp);
             return { taskText: nextText, rewritten: true };
           }
         }
