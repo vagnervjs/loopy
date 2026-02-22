@@ -87,7 +87,11 @@ function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
   return { phases, phaseDefaults: { stop_on: "all_checked", test_command: tc }, tasksByPhase };
 }
 
-async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes = 50000, noColor, stopSignal } = {}) {
+async function proposePhasesWithAgent(
+  agentCommand,
+  seedText,
+  { maxOutputBytes = 50000, noColor, stopSignal, streamToTerminal } = {}
+) {
   const cmd = String(agentCommand || "").trim();
   if (!cmd) return { ok: false, error: "missing-agent-command", output: "" };
 
@@ -141,6 +145,7 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
   const shellOptions = {};
   if (noColor !== undefined) shellOptions.noColor = noColor;
   if (stopSignal) shellOptions.stopSignal = stopSignal;
+  shellOptions.streamToTerminal = Boolean(streamToTerminal);
   const result = await runShellCommand(cmd, prompt, maxOutputBytes, shellOptions);
   if (result.aborted) {
     return { ok: false, aborted: true, error: "aborted", output: "" };

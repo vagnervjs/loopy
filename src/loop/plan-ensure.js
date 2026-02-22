@@ -173,7 +173,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
     let nextText = "";
     if (config.autoPhase) {
       logPhasePlan();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, {
+        noColor: config.noColor,
+        stopSignal,
+        streamToTerminal: Boolean(config.stream),
+      });
       if (proposed.aborted || shouldStop()) {
         return { taskText: "", rewritten: false, aborted: true };
       }
@@ -267,7 +271,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
     let nextText = existing;
     if (config.autoPhase) {
       logPhasePlan();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, {
+        noColor: config.noColor,
+        stopSignal,
+        streamToTerminal: Boolean(config.stream),
+      });
       if (proposed.aborted || shouldStop()) {
         return { taskText: existing, rewritten: false, aborted: true };
       }
@@ -331,7 +339,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
     if (!hasPhases) {
       const seed = parsed.body && parsed.body.trim() ? parsed.body.trim() : existing.trim();
       logPhasePlan();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, {
+        noColor: config.noColor,
+        stopSignal,
+        streamToTerminal: Boolean(config.stream),
+      });
       if (proposed.aborted || shouldStop()) {
         return { taskText: existing, rewritten: false, aborted: true };
       }
@@ -388,20 +400,6 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   return { taskText: existing, rewritten: false };
 }
 
-async function confirmPlanReview(config, { prdGenerated } = {}) {
-  if (!process.stdin.isTTY) return true;
-  const planLabel = prettyPath(config.cwd, config.taskFile);
-  const prdLabel = prdGenerated ? prettyPath(config.cwd, config.prdFile) : "";
-  const question = prdGenerated
-    ? `Review ${planLabel} and ${prdLabel} before continuing. Continue?`
-    : `Review ${planLabel} before continuing. Continue?`;
-  const ok = await confirm(question, { confirm: true, defaultYes: true });
-  if (!ok) {
-    throw new Error("Aborted: plan review not confirmed.");
-  }
-  return true;
-}
-
 async function writePromptPreview(config) {
   const taskText = await readText(config.taskFile);
   if (!taskText) {
@@ -449,7 +447,6 @@ async function writePromptPreview(config) {
 }
 
 module.exports = {
-  confirmPlanReview,
   enforcePrdRefsCoverage,
   ensureTaskBeforeLoop,
   recordPlanGenerationFailure,

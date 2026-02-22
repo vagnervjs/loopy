@@ -28,7 +28,7 @@ const { archiveCompletedLoop } = require("./loop/archive");
 const { runIteration } = require("./loop/iteration");
 const { formatPlanOverviewLines, printStepLines } = require("./loop/plan-overview");
 const { loadPromptTemplate } = require("./loop/prompt-templates");
-const { confirmPlanReview, enforcePrdRefsCoverage, ensureTaskBeforeLoop, writePromptPreview } = require("./loop/plan-ensure");
+const { enforcePrdRefsCoverage, ensureTaskBeforeLoop, writePromptPreview } = require("./loop/plan-ensure");
 const { loadTaskSeed, readStdinText } = require("./loop/seed");
 
 async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
@@ -230,7 +230,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const promptTemplate = await loadPromptTemplate(config);
   config.promptTemplateText = promptTemplate.text;
   config.promptTemplatePath = promptTemplate.path;
-  let prdGenerated = false;
   const planReviewRequired =
     !config.resume && config.mode === "plan" && (promptSeedProvided || !String(planText || "").trim());
   const stopBeforeLoop = async (message) => {
@@ -313,6 +312,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
             cwd: config.cwd,
             noColor: config.noColor,
             stopSignal: stop,
+            streamToTerminal: Boolean(config.stream),
           });
           if (prdResult.aborted || stop.stopRequested) {
             await stopBeforeLoop("PRD generation aborted; exiting before loop");
@@ -321,8 +321,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
           const prdText = prdResult.text;
           const payload = `${prdText.trimEnd()}\n`;
           await writeText(config.prdFile, payload);
-          prdGenerated = true;
-
           config.taskSeedText = prdText;
           config.taskSeedSource = "--generate-prd";
           effectiveSeed = { seed: prdText, source: config.taskSeedSource };
@@ -419,10 +417,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     printBlankLine();
     printStepLines(planLines, {});
   }
-  if (planReviewRequired) {
-    await confirmPlanReview(config, { prdGenerated });
-  }
-
   if (config.mode === "plan") {
     await writePromptPreview(config);
     const planOnlyMessage = "Plan ready. Run `loopy` to start build mode.";

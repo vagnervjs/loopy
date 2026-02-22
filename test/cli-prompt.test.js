@@ -165,6 +165,69 @@ test("`--prompt @file` errors on empty file when generating PRD", async () => {
   assert.match(stderr, /Seed prompt file is empty/i);
 });
 
+test("plan mode streams PRD generation output to terminal by default", async () => {
+  const tmp = await createTmp("loopy-plan-stream-prd-default-");
+  const prdCmd =
+    'node -e "console.log(\\"PRD_STREAM_OUT\\"); console.log(\\"# PRD: Stream Plan\\\\n\\\\n## Problem Statement\\\\nStreaming in plan mode.\\\\n\\"); console.error(\\"PRD_STREAM_ERR\\")"';
+
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--dry-run",
+      "--mode",
+      "plan",
+      "--prompt",
+      "build a thing",
+      "--generate-prd",
+      "--auto-phase=false",
+      "--test-command",
+      TEST_COMMAND,
+      "--agent",
+      prdCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+
+  assert.equal(code, 0, stderr);
+  const combined = `${stdout}\n${stderr}`;
+  assert.match(combined, /^PRD_STREAM_OUT$/m);
+  assert.match(combined, /^PRD_STREAM_ERR$/m);
+});
+
+test("`--no-stream` disables PRD output mirroring in plan mode", async () => {
+  const tmp = await createTmp("loopy-plan-stream-prd-off-");
+  const prdCmd =
+    'node -e "console.log(\\"PRD_NO_STREAM_OUT\\"); console.log(\\"# PRD: Stream Off\\\\n\\\\n## Problem Statement\\\\nNo streaming in plan mode.\\\\n\\"); console.error(\\"PRD_NO_STREAM_ERR\\")"';
+
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--dry-run",
+      "--mode",
+      "plan",
+      "--prompt",
+      "build a thing",
+      "--generate-prd",
+      "--auto-phase=false",
+      "--no-stream",
+      "--test-command",
+      TEST_COMMAND,
+      "--agent",
+      prdCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+
+  assert.equal(code, 0, stderr);
+  const combined = `${stdout}\n${stderr}`;
+  assert.doesNotMatch(combined, /^PRD_NO_STREAM_OUT$/m);
+  assert.doesNotMatch(combined, /^PRD_NO_STREAM_ERR$/m);
+});
+
 test("`--prompt` updates an existing plan without confirmation", async () => {
   const tmp = await createTmp("loopy-prompt-update-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
