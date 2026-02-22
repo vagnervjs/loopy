@@ -9,6 +9,13 @@ const { CLI_PATH, runNodeCli, runNodeCliWithStdin, writeTestConfig } = require("
 
 const TEST_COMMAND = 'node -e "process.exit(0)"';
 
+function hasStandaloneLine(text, value) {
+  const normalized = String(text || "").replace(/\r/g, "");
+  const escaped = String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(^|\\n)${escaped}(?=\\n|$)`);
+  return pattern.test(normalized);
+}
+
 async function createTmp(prefix) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   await writeTestConfig(tmp);
@@ -192,8 +199,8 @@ test("plan mode streams PRD generation output to terminal by default", async () 
 
   assert.equal(code, 0, stderr);
   const combined = `${stdout}\n${stderr}`;
-  assert.match(combined, /^PRD_STREAM_OUT$/m);
-  assert.match(combined, /^PRD_STREAM_ERR$/m);
+  assert.equal(hasStandaloneLine(combined, "PRD_STREAM_OUT"), true, combined);
+  assert.equal(hasStandaloneLine(combined, "PRD_STREAM_ERR"), true, combined);
 });
 
 test("`--no-stream` disables PRD output mirroring in plan mode", async () => {
@@ -224,8 +231,8 @@ test("`--no-stream` disables PRD output mirroring in plan mode", async () => {
 
   assert.equal(code, 0, stderr);
   const combined = `${stdout}\n${stderr}`;
-  assert.doesNotMatch(combined, /^PRD_NO_STREAM_OUT$/m);
-  assert.doesNotMatch(combined, /^PRD_NO_STREAM_ERR$/m);
+  assert.equal(hasStandaloneLine(combined, "PRD_NO_STREAM_OUT"), false, combined);
+  assert.equal(hasStandaloneLine(combined, "PRD_NO_STREAM_ERR"), false, combined);
 });
 
 test("`--prompt` updates an existing plan without confirmation", async () => {
