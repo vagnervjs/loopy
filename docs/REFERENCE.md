@@ -240,6 +240,8 @@ Notes:
 - `--phase-only` stops once the current phase meets its `stop_on` criteria.
 - Phase sections are detected via `<!-- loopy:phase <id> -->` (preferred) or `## Phase: <id>` headings.
 - If phases are absent and `--auto-phase=false`, Loopy behaves like the legacy single-checklist flow.
+- Auto-phase planner output is strict: planner `stdout` must contain exactly one `BEGIN_LOOPY_PLAN ... END_LOOPY_PLAN` block with YAML only.
+- Send planner diagnostics/logs to `stderr`; Loopy does not parse `stderr` as plan YAML.
 
 Disable auto-phase and use the legacy single-checklist behavior:
 

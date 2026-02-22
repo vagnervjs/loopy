@@ -9,14 +9,16 @@ const { ensureGuardrails, formatPrompt } = require("../prompt");
 const { printStep } = require("../steps");
 const { getCurrentPhaseSection, getCurrentTask, parseTask, resolvePrdRefsForCurrentTask } = require("../task");
 const { redact, truncate } = require("../text");
-const { fallbackPhasesFromSeed, proposePhasesWithAgent, renderTaskMarkdown } = require("../auto-phase");
+const { fallbackPhasesFromSeed, proposePhasesWithAgent, renderTaskMarkdown, sanitizeControlChars } = require("../auto-phase");
 const { pickCurrentPhaseId } = require("./phases");
 const { loadTaskSeed } = require("./seed");
 
 const PLAN_OUTPUT_FILE = "last_plan_output.txt";
 
-async function recordPlanGenerationFailure(config, { output, error, seedSource }) {
+async function recordPlanGenerationFailure(config, { output, stdout, stderr, error, seedSource }) {
   const logPath = path.join(config.loopyDir, PLAN_OUTPUT_FILE);
+  const safeStdout = sanitizeControlChars(stdout || output || "");
+  const safeStderr = sanitizeControlChars(stderr || "");
   const header = [
     "# Loopy Plan Generation Output",
     "",
@@ -25,7 +27,15 @@ async function recordPlanGenerationFailure(config, { output, error, seedSource }
     `Seed source: ${seedSource || "unknown"}`,
     "",
   ].join("\n");
-  const payload = header + (output ? truncate(String(output), DEFAULTS.maxOutputBytes) : "(no output)") + "\n";
+  const payload = [
+    header,
+    "STDOUT:",
+    safeStdout ? truncate(String(safeStdout), DEFAULTS.maxOutputBytes) : "(no stdout)",
+    "",
+    "STDERR:",
+    safeStderr ? truncate(String(safeStderr), DEFAULTS.maxOutputBytes) : "(no stderr)",
+    "",
+  ].join("\n");
   await writeText(logPath, payload);
   await appendActivity(config.activityLog, [
     `plan generation failed: ${error || "unknown"} (see ${prettyPath(config.cwd, logPath)})`,
@@ -184,6 +194,8 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       if (!proposed.ok) {
         await recordPlanGenerationFailure(config, {
           output: proposed.output,
+          stdout: proposed.stdout,
+          stderr: proposed.stderr,
           error: proposed.error,
           seedSource,
         });
@@ -350,6 +362,8 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
       if (!proposed.ok) {
         await recordPlanGenerationFailure(config, {
           output: proposed.output,
+          stdout: proposed.stdout,
+          stderr: proposed.stderr,
           error: proposed.error,
           seedSource: "plan-doc",
         });

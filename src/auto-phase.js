@@ -59,6 +59,11 @@ function normalizePhaseOutput(parsed) {
   };
 }
 
+function sanitizeControlChars(text) {
+  // Preserve tab/newline/carriage return but drop other control bytes (including ANSI escapes).
+  return String(text || "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
+}
+
 function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
   const seed = String(seedText || "").trim();
   const tc = String(testCommand || "").trim();
@@ -87,13 +92,115 @@ function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
   return { phases, phaseDefaults: { stop_on: "all_checked", test_command: tc }, tasksByPhase };
 }
 
+function stripYamlFences(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return raw;
+  const fenceMatch = raw.match(/```(?:yaml)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) return fenceMatch[1].trim();
+  return raw;
+}
+
+function extractPlanPayloadStrict(stdoutText) {
+  const raw = sanitizeControlChars(stdoutText).trim();
+  if (!raw) {
+    const err = new Error("missing BEGIN_LOOPY_PLAN/END_LOOPY_PLAN markers in stdout");
+    err.code = "invalid-plan-envelope";
+    throw err;
+  }
+  const markerRegex = /BEGIN_LOOPY_PLAN\s*([\s\S]*?)\s*END_LOOPY_PLAN/gim;
+  const matches = [];
+  let match = markerRegex.exec(raw);
+  while (match) {
+    matches.push(match);
+    match = markerRegex.exec(raw);
+  }
+  if (matches.length !== 1) {
+    const err = new Error(
+      matches.length === 0
+        ? "missing BEGIN_LOOPY_PLAN/END_LOOPY_PLAN markers in stdout"
+        : `found ${matches.length} BEGIN_LOOPY_PLAN blocks; expected exactly 1`
+    );
+    err.code = "invalid-plan-envelope";
+    throw err;
+  }
+
+  const full = matches[0][0].trim();
+  if (full !== raw) {
+    const err = new Error("stdout must contain only a single BEGIN_LOOPY_PLAN...END_LOOPY_PLAN block");
+    err.code = "invalid-plan-envelope";
+    throw err;
+  }
+  return stripYamlFences(matches[0][1]);
+}
+
+function normalizeStopOn(value) {
+  if (Array.isArray(value)) return value.map((v) => String(v || "").trim()).filter(Boolean);
+  if (value == null || value === "") return "all_checked";
+  return String(value).trim();
+}
+
+function validatePlanSchema(parsed) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return "root must be a mapping";
+  }
+
+  const phaseDefaults = parsed.phase_defaults || parsed.phaseDefaults || {};
+  if (phaseDefaults != null && (typeof phaseDefaults !== "object" || Array.isArray(phaseDefaults))) {
+    return "phase_defaults must be a mapping";
+  }
+
+  const phases = parsed.phases;
+  if (!Array.isArray(phases) || phases.length === 0) {
+    return "phases must be a non-empty array";
+  }
+
+  const phaseTasks = parsed.phase_tasks || parsed.phaseTasks;
+  if (!phaseTasks || typeof phaseTasks !== "object" || Array.isArray(phaseTasks)) {
+    return "phase_tasks must be a mapping";
+  }
+
+  const seen = new Set();
+  for (let i = 0; i < phases.length; i += 1) {
+    const p = phases[i];
+    if (!p || typeof p !== "object" || Array.isArray(p)) {
+      return `phases[${i}] must be a mapping`;
+    }
+    const id = toSlug(p.id || p.name || p.key || p.phase || p.title || "") || String(p.id || "").trim();
+    if (!id) return `phases[${i}].id is required`;
+    if (seen.has(id)) return `phases[${i}].id must be unique (${id})`;
+    seen.add(id);
+
+    const title = String(p.title || p.name || id || "").trim();
+    if (!title) return `phases[${i}].title is required`;
+
+    const stopOn = normalizeStopOn(p.stop_on != null ? p.stop_on : phaseDefaults.stop_on);
+    const stopValues = Array.isArray(stopOn) ? stopOn : [stopOn];
+    if (!stopValues.length || stopValues.some((v) => v !== "all_checked" && v !== "tests_pass")) {
+      return `phases[${i}].stop_on must be all_checked, tests_pass, or a list of them`;
+    }
+
+    const rawTasks = phaseTasks[id];
+    if (!Array.isArray(rawTasks) || rawTasks.length === 0) {
+      return `phase_tasks.${id} must be a non-empty array`;
+    }
+    for (let j = 0; j < rawTasks.length; j += 1) {
+      const item = rawTasks[j];
+      if (typeof item !== "string" || !item.trim()) {
+        return `phase_tasks.${id}[${j}] must be a non-empty string`;
+      }
+    }
+  }
+
+  return "";
+}
+
 async function proposePhasesWithAgent(
   agentCommand,
   seedText,
   { maxOutputBytes = 50000, noColor, stopSignal, streamToTerminal } = {}
 ) {
   const cmd = String(agentCommand || "").trim();
-  if (!cmd) return { ok: false, error: "missing-agent-command", output: "" };
+  if (!cmd) return { ok: false, error: "missing-agent-command", output: "", stdout: "", stderr: "" };
 
   const prompt = [
     "You are Loopy's planning assistant.",
@@ -105,6 +212,8 @@ async function proposePhasesWithAgent(
     "END_LOOPY_PLAN",
     "Do NOT include markdown fences (```), headings, or commentary.",
     "If you add any extra text, the plan will be rejected.",
+    "Output contract: stdout must contain exactly one BEGIN_LOOPY_PLAN...END_LOOPY_PLAN block and nothing else.",
+    "Send any diagnostics or logs to stderr only.",
     "",
     "YAML schema:",
     "phase_defaults:",
@@ -147,94 +256,47 @@ async function proposePhasesWithAgent(
   if (stopSignal) shellOptions.stopSignal = stopSignal;
   shellOptions.streamToTerminal = Boolean(streamToTerminal);
   const result = await runShellCommand(cmd, prompt, maxOutputBytes, shellOptions);
+  const stdout = sanitizeControlChars(result.stdout || "");
+  const stderr = sanitizeControlChars(result.stderr || "");
   if (result.aborted) {
-    return { ok: false, aborted: true, error: "aborted", output: "" };
+    return { ok: false, aborted: true, error: "aborted", output: "", stdout, stderr };
   }
-  let output = `${result.stdout || ""}\n${result.stderr || ""}`.trim();
+  const output = stdout.trim();
   if (result.code !== 0) {
-    return { ok: false, error: `agent-exit-${result.code}`, output };
+    return { ok: false, error: `agent-exit-${result.code}`, output, stdout, stderr };
+  }
+
+  let payload = "";
+  try {
+    payload = extractPlanPayloadStrict(stdout);
+  } catch (err) {
+    const msg = err && err.message ? err.message : "invalid-plan-envelope";
+    return { ok: false, error: `invalid-plan-envelope: ${msg}`, output, stdout, stderr };
   }
 
   let parsed = null;
   try {
-    output = normalizePlannerYaml(output);
-    parsed = yaml.load(output) || {};
+    parsed = yaml.load(payload) || {};
   } catch (err) {
-    try {
-      const recovered = quotePhaseTasks(output);
-      parsed = yaml.load(recovered) || {};
-      output = recovered;
-    } catch (err2) {
-      const msg = err && err.message ? err.message : "invalid-yaml";
-      return { ok: false, error: `invalid-yaml: ${msg}`, output };
-    }
+    const msg = err && err.message ? err.message : "invalid-yaml";
+    return { ok: false, error: `invalid-yaml: ${msg}`, output: payload, stdout, stderr };
+  }
+
+  const schemaError = validatePlanSchema(parsed);
+  if (schemaError) {
+    return { ok: false, error: `invalid-plan-schema: ${schemaError}`, output: payload, stdout, stderr };
   }
 
   const normalized = normalizePhaseOutput(parsed);
   if (!normalized.phases.length) {
-    return { ok: false, error: "no-phases", output };
+    return { ok: false, error: "no-phases", output: payload, stdout, stderr };
   }
   const anyTasks = normalized.phases.some((p) => (normalized.tasksByPhase[p.id] || []).length > 0);
   if (!anyTasks) {
-    return { ok: false, error: "no-phase-tasks", output };
+    return { ok: false, error: "no-phase-tasks", output: payload, stdout, stderr };
   }
 
-  return { ok: true, ...normalized, output };
-}
-
-function stripYamlFences(text) {
-  const raw = String(text || "").trim();
-  if (!raw) return raw;
-  const fenceMatch = raw.match(/```(?:yaml)?\s*([\s\S]*?)\s*```/i);
-  if (fenceMatch) return fenceMatch[1].trim();
-  return raw;
-}
-
-function normalizePlannerYaml(text) {
-  let raw = stripYamlFences(text);
-  if (!raw) return raw;
-
-  const marker = raw.match(/BEGIN_LOOPY_PLAN\s*([\s\S]*?)\s*END_LOOPY_PLAN/i);
-  if (marker) {
-    raw = marker[1].trim();
-  }
-
-  const yamlStart = raw.search(/(^|\n)phase_defaults:\s*/);
-  if (yamlStart >= 0) {
-    raw = raw.slice(yamlStart).trim();
-  }
-
-  const cutoff = raw.search(/\nTotal usage|\nAPI time spent|\nBreakdown by AI model|\nTotal session time/);
-  if (cutoff >= 0) {
-    raw = raw.slice(0, cutoff).trim();
-  }
-
-  return raw.trim();
-}
-
-function quotePhaseTasks(text) {
-  const lines = String(text || "").split(/\r?\n/);
-  let inPhaseTasks = false;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^\s*phase_tasks:\s*$/.test(line)) {
-      inPhaseTasks = true;
-      continue;
-    }
-    if (inPhaseTasks && /^\S/.test(line)) {
-      inPhaseTasks = false;
-    }
-    if (!inPhaseTasks) continue;
-
-    const match = line.match(/^(\s*-\s+)(.+)$/);
-    if (!match) continue;
-    const prefix = match[1];
-    const value = match[2].trim();
-    if (value.startsWith('"') || value.startsWith("'")) continue;
-    const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    lines[i] = `${prefix}"${escaped}"`;
-  }
-  return lines.join("\n");
+  return { ok: true, ...normalized, output: payload, stdout, stderr };
 }
 
 function renderTaskMarkdown({
@@ -278,4 +340,7 @@ module.exports = {
   proposePhasesWithAgent,
   fallbackPhasesFromSeed,
   renderTaskMarkdown,
+  sanitizeControlChars,
+  extractPlanPayloadStrict,
+  validatePlanSchema,
 };
