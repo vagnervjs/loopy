@@ -179,21 +179,10 @@ function formatPrompt({
   }
 
   const lines = [
-    "# Loopy Loop Prompt",
+    "# Loopy Build Prompt",
     "",
-    `Timestamp: ${new Date().toISOString()}`,
-    `Iteration: ${iteration}`,
-    `Rotation: ${rotationPending ? "fresh" : "standard"}`,
-    currentPhase ? `Phase: ${currentPhase}` : "",
+    "You are in BUILDING mode. Complete exactly one task from the current plan.",
     "",
-    seedLabel,
-    taskSeedText ? String(taskSeedText).trimEnd() : "",
-    taskSeedText ? "" : "",
-    normalizedHints ? "## Hints" : "",
-    normalizedHints ? normalizedHints : "",
-    normalizedHints ? "" : "",
-    prdRefsBlock ? prdRefsBlock : "",
-    prdRefsBlock ? "" : "",
   ];
 
   if (currentTask) {
@@ -201,47 +190,61 @@ function formatPrompt({
       "## Current Task",
       "",
       `- [ ] ${currentTask}`,
+      "",
+      "**Complete only the Current Task in this iteration.**",
       ""
     );
   }
 
   lines.push(
-    `## Plan (${planLabel})`,
-    displayPlan.trimEnd(),
+    "## Situation",
+    `Phase: ${currentPhase || "n/a"} | Iteration: ${iteration} | Rotation: ${rotationPending ? "fresh" : "standard"}`,
     "",
-    "## Guardrails",
-    guardrailsText.trimEnd(),
-    "",
-    "## Progress",
-    progressText.trimEnd()
+    progressText.trimEnd(),
+    ""
   );
 
   if (!rotationPending && lastOutput) {
-    lines.push("", "## Last Agent Output (truncated)", lastOutput.trimEnd());
+    lines.push("## Last Agent Output (truncated)", lastOutput.trimEnd(), "");
   }
 
   lines.push(
+    "## Context",
+    normalizedHints ? "## Hints" : "",
+    normalizedHints ? normalizedHints : "",
+    normalizedHints ? "" : "",
+    prdRefsBlock ? prdRefsBlock : "",
+    prdRefsBlock ? "" : "",
+    `## Plan (${planLabel})`,
+    displayPlan.trimEnd(),
     "",
-    "## Instructions"
-  );
-
-  if (currentTask) {
-    lines.push("- **Complete only the Current Task in this iteration.**");
-  }
-
-  lines.push(
+    seedLabel,
+    taskSeedText ? String(taskSeedText).trimEnd() : "",
+    taskSeedText ? "" : "",
+    "## Rules",
+    "- Do not assume functionality is missing; search first.",
+    "- No stubs or placeholder implementations.",
+    `- Use .loopy/PRD.md and the listed prd_refs before requirement-level decisions.`,
     `- Follow the plan checklist in ${planLabel}.`,
-    "- Update plan checkboxes as you complete items.",
-    "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",
-    "- Use referenced PRD sections before making requirement-level decisions.",
-    "- Complete all unchecked tasks in the current phase before tests will be run.",
+    "- Focus on one task at a time. Do not check multiple boxes in a single iteration.",
     "- Mark a task [x] when the implementation is done.",
-    "- Run tests in the agent workflow and report them in a ```loopy_test_report``` JSON block.",
     "- If a task should be skipped, mark it with [~] or [-] and note the reason.",
-    "- If a task is blocked by external factors after 3+ consecutive failures, mark it as [!] with a reason: `[!] task — BLOCKED: reason`.",
+    "- If a task is blocked by external factors after 3+ consecutive failures, mark it as [!] with a reason: `[!] task — BLOCKED: reason`. Blocked tasks do not block phase advancement.",
+    "- Complete all unchecked tasks in the current phase before tests will be run.",
+    "- Run tests in the agent workflow and report them in a ```loopy_test_report``` JSON block.",
     "- If tests fail, fix the failures first.",
     "- If the same task has failed for 3+ consecutive iterations, reassess your approach.",
+    "- Record any new guardrails if you detect repetition or drift.",
+    "",
+    "## Phase Lifecycle",
+    "- Phases follow a two-gate lifecycle: Gate 1 = all tasks checked [x] (or skipped [~]/[-] or blocked [!]), Gate 2 = test report status is pass.",
+    "- The validation report gate is NOT evaluated until every task in the current phase is checked. Focus on completing tasks first.",
+    "- Never cycle back to a previous phase. Phases are sequential and one-directional.",
+    "- When completing the last task of a phase, summarize any findings or measurements into `.loopy/hints.md` so the next phase has context. Also review the next phase's tasks and refine them if your work produced information that makes them inaccurate or too vague.",
+    "",
+    "## Guardrails",
+    guardrailsText.trimEnd(),
     ""
   );
 

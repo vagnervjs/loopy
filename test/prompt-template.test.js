@@ -51,7 +51,7 @@ test("built-in build template includes two-gate task rules", async () => {
   assert.match(result.text, /3\+ consecutive iterations, reassess your approach/);
 });
 
-test("built-in build template includes Built-in Rules section", async () => {
+test("built-in build template includes Phase Lifecycle section", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tpl-builtin-rules-"));
   const loopyDir = path.join(tmp, ".loopy");
   await fs.mkdir(loopyDir, { recursive: true });
@@ -63,7 +63,7 @@ test("built-in build template includes Built-in Rules section", async () => {
   });
 
   assert.equal(result.source, "built-in");
-  assert.match(result.text, /## Built-in Rules/);
+  assert.match(result.text, /## Phase Lifecycle/);
   assert.match(result.text, /two-gate lifecycle/);
   assert.match(result.text, /validation report gate is NOT evaluated until every task/i);
   assert.match(result.text, /Focus on one task at a time/);

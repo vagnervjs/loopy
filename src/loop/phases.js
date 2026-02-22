@@ -94,7 +94,7 @@ function didTestsPass(state) {
 function isCodeLikeTaskText(value) {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return false;
-  if (/\b(analysis|analyze|analyzing|analysing|research|spike|document|documentation|docs?|readme|changelog|license)\b/.test(text)) {
+  if (/\b(analysis|analyze|analyzing|analysing|research|spike|investigate|measure|baseline|discovery|document|documentation|docs?|readme|changelog|license)\b/.test(text)) {
     return false;
   }
   return true;
