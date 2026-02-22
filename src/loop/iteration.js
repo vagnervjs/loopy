@@ -54,8 +54,14 @@ function parseLoopyTestReport(text) {
   const command = String(parsed.command || "").trim();
   const summary = String(parsed.summary || "").trim();
   const evidence = String(parsed.evidence || "").trim();
-  if (!["pass", "fail", "skipped"].includes(status) || !command || !summary || !evidence) {
-    return { ok: false, reason: "invalid_test_report", detail: "missing required fields" };
+  const missing = [];
+  if (!["pass", "fail", "skipped"].includes(status)) missing.push("status (must be pass|fail|skipped)");
+  if (!command) missing.push("command (string: the test command that was run)");
+  if (!summary) missing.push("summary (string: one-line result description)");
+  if (!evidence) missing.push("evidence (string: relevant output excerpt)");
+  if (missing.length) {
+    const got = Object.keys(parsed).join(", ");
+    return { ok: false, reason: "invalid_test_report", detail: `missing required fields: ${missing.join("; ")}. Got keys: ${got}` };
   }
   return { ok: true, report: { status, command, summary, evidence } };
 }

@@ -91,7 +91,7 @@ const DEFAULT_BUILD_PROMPT_TEMPLATE = [
   "- If a task is impossible or should be skipped, mark it with [~] or [-] and explain the reason inline.",
   "- If a task is blocked by external factors after 3+ consecutive failures, mark it as [!] with a reason: `[!] task — BLOCKED: reason`. Blocked tasks do not block phase advancement.",
   "- Complete all unchecked tasks in the current phase before tests will be run.",
-  "- Execute tests in your workflow and include a valid ```loopy_test_report``` JSON block in your response.",
+  "- Execute tests in your workflow and include a valid ```loopy_test_report``` JSON block in your response. Required schema: `{ \"status\": \"pass|fail|skipped\", \"command\": \"the test command run\", \"summary\": \"one-line result\", \"evidence\": \"relevant output excerpt\" }`. All four fields are required strings. Do NOT use arrays, nested objects, or extra fields like `tests` or `phase`.",
   "- If tests fail after all tasks are checked, fix the failures before the phase can advance. Do not move on with broken tests.",
   "- If the same task has failed for 3+ consecutive iterations, reassess your approach: read the error output carefully, consider reverting recent changes, or switch to plan mode to re-scope the task.",
   "- If the plan is wrong or stale, switch to plan mode and regenerate it.",
