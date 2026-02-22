@@ -530,6 +530,27 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   if (totalDurationMs > 0) {
     printStep(`Total duration 🕐 ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
   }
+
+  const followUpText = String(archiveResult.followUpText || "").trim();
+  if (followUpText) {
+    printBlankLine();
+    printStep(`📋 Follow-up items (require human action)`, { kind: "plan" });
+    printStep(`${"─".repeat(48)}`, { kind: "plan" });
+    const items = followUpText.split("\n").filter((l) => /^\s*-\s*\[.\]/.test(l));
+    if (items.length) {
+      for (const item of items) {
+        printStep(item.replace(/^\s*-\s*\[.\]\s*/, "  → "), { kind: "plan" });
+      }
+    } else {
+      for (const line of followUpText.split("\n")) {
+        if (line.trim()) printStep(`  ${line}`, { kind: "plan" });
+      }
+    }
+    printStep(`${"─".repeat(48)}`, { kind: "plan" });
+    const archivePath = archiveResult.archiveDir || "";
+    const followUpPath = archivePath ? `${prettyPath(config.cwd, archivePath)}/FOLLOW_UP.md` : ".loopy/FOLLOW_UP.md";
+    printStep(`Full details: ${followUpPath}`, { kind: "plan" });
+  }
 }
 
 module.exports = {

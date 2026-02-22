@@ -95,14 +95,11 @@ async function archiveCompletedLoop(config) {
   await appendActivity(config.activityLog, [`Loop archived: ${prettyArchive}`]);
 
   const followUpSource = path.join(baseDir, FOLLOW_UP_FILE);
+  let followUpText = "";
   try {
-    await fs.access(followUpSource);
-    const cwd = config.cwd || path.dirname(baseDir);
-    const followUpDest = path.join(cwd, FOLLOW_UP_FILE);
-    await fs.copyFile(followUpSource, followUpDest);
-    await appendActivity(config.activityLog, [`Follow-up items copied to ${prettyPath(cwd, followUpDest)}`]);
+    followUpText = await fs.readFile(followUpSource, "utf8");
   } catch (_) {
-    // no FOLLOW_UP.md — nothing to promote
+    // no FOLLOW_UP.md
   }
 
   const entries = await fs.readdir(baseDir);
@@ -118,7 +115,7 @@ async function archiveCompletedLoop(config) {
     await movePath(taskPath, destinationPath);
   }
 
-  return { archived: true, archiveDir };
+  return { archived: true, archiveDir, followUpText };
 }
 
 module.exports = {
