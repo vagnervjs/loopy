@@ -88,8 +88,7 @@ function formatPrompt({
   currentTask,
   filteredPlan,
   promptTemplate,
-  agentsText,
-  specsText,
+  prdRefs,
 }) {
   const planLabel = taskFilePath ? path.basename(String(taskFilePath)) : "plan doc";
 
@@ -119,25 +118,33 @@ function formatPrompt({
   const lastOutputBlock = !rotationPending && lastOutput
     ? ["## Last Agent Output (truncated)", String(lastOutput).trimEnd()].join("\n")
     : "";
-  const agentsBlock = String(agentsText || "").trim() ? ["## AGENTS", String(agentsText || "").trimEnd()].join("\n") : "";
-  const specsBlock = String(specsText || "").trim()
-    ? ["## Specs Summary", String(specsText || "").trimEnd()].join("\n")
+  const refs = Array.isArray(prdRefs) ? prdRefs : [];
+  const prdRefsBlock = refs.length
+    ? ["## PRD References", ...refs.map((ref) => {
+      const parts = [];
+      if (ref && ref.section) parts.push(`section: ${ref.section}`);
+      if (ref && ref.anchor) parts.push(`anchor: ${ref.anchor}`);
+      if (ref && ref.quote) parts.push(`quote: ${ref.quote}`);
+      return `- ${parts.join(" | ")}`;
+    })].join("\n")
     : "";
   const instructionsLines = ["## Instructions"];
   instructionsLines.push(
     "- Don't assume something is unimplemented; search first.",
     currentTask ? null : "- Complete only the current task.",
-    "- Update AGENTS.md only for operational learnings.",
+    "- Treat .loopy/PRD.md as the requirements source of truth.",
     "- No stubs or placeholder implementations.",
     `- Follow the plan checklist in ${planLabel}.`,
     "- Update plan checkboxes as you complete items.",
     "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",
+    "- Deliver outcomes, not scaffolding. Fixing the root cause or implementing the feature is always higher priority than building tools to measure, verify, or monitor the problem.",
     "- Complete all unchecked tasks in the current phase before tests will be run.",
-    "- Mark a task [x] when the implementation is done. The test_command runs automatically after all phase tasks are checked.",
+    "- Mark a task [x] when the implementation is done.",
+    "- Run tests in the agent workflow and report them in a ```loopy_test_report``` JSON block. Required schema: `{ \"status\": \"pass|fail|skipped\", \"command\": \"the test command run\", \"summary\": \"one-line result\", \"evidence\": \"relevant output excerpt\" }`. All four fields are required strings.",
     "- If a task should be skipped, mark it with [~] or [-] and note the reason.",
     "- If a task is blocked by external factors after 3+ consecutive failures, mark it as [!] with a reason: `[!] task — BLOCKED: reason`. Blocked tasks do not block phase advancement.",
-    "- If tests fail after all tasks are checked, fix the failures first.",
+    "- If tests fail, fix the failures first.",
     "- If the same task has failed for 3+ consecutive iterations, reassess your approach."
   );
   if (currentTask) instructionsLines.push("- **Complete only the Current Task in this iteration.**");
@@ -159,16 +166,13 @@ function formatPrompt({
       seed_block: seedBlock,
       hints: normalizedHints,
       hints_block: hintsBlock,
+      prd_refs_block: prdRefsBlock,
       current_task: currentTask || "",
       current_task_block: currentTaskBlock,
       guardrails: String(guardrailsText || "").trimEnd(),
       progress: String(progressText || "").trimEnd(),
       last_output: String(lastOutput || "").trimEnd(),
       last_output_block: lastOutputBlock,
-      agents: String(agentsText || "").trimEnd(),
-      agents_block: agentsBlock,
-      specs: String(specsText || "").trimEnd(),
-      specs_block: specsBlock,
       instructions: instructionsBlock,
     };
     const rendered = applyPromptTemplate(templateText, tokens);
@@ -176,25 +180,10 @@ function formatPrompt({
   }
 
   const lines = [
-    "# Loopy Loop Prompt",
+    "# Loopy Build Prompt",
     "",
-    `Timestamp: ${new Date().toISOString()}`,
-    `Iteration: ${iteration}`,
-    `Rotation: ${rotationPending ? "fresh" : "standard"}`,
-    currentPhase ? `Phase: ${currentPhase}` : "",
+    "You are in BUILDING mode. Complete exactly one task from the current plan.",
     "",
-    seedLabel,
-    taskSeedText ? String(taskSeedText).trimEnd() : "",
-    taskSeedText ? "" : "",
-    normalizedHints ? "## Hints" : "",
-    normalizedHints ? normalizedHints : "",
-    normalizedHints ? "" : "",
-    String(specsText || "").trim() ? "## Specs Summary" : "",
-    String(specsText || "").trim() ? String(specsText).trimEnd() : "",
-    String(specsText || "").trim() ? "" : "",
-    String(agentsText || "").trim() ? "## AGENTS" : "",
-    String(agentsText || "").trim() ? String(agentsText).trimEnd() : "",
-    String(agentsText || "").trim() ? "" : "",
   ];
 
   if (currentTask) {
@@ -202,45 +191,63 @@ function formatPrompt({
       "## Current Task",
       "",
       `- [ ] ${currentTask}`,
+      "",
+      "**Complete only the Current Task in this iteration.**",
       ""
     );
   }
 
   lines.push(
-    `## Plan (${planLabel})`,
-    displayPlan.trimEnd(),
+    "## Situation",
+    `Phase: ${currentPhase || "n/a"} | Iteration: ${iteration} | Rotation: ${rotationPending ? "fresh" : "standard"}`,
     "",
-    "## Guardrails",
-    guardrailsText.trimEnd(),
-    "",
-    "## Progress",
-    progressText.trimEnd()
+    progressText.trimEnd(),
+    ""
   );
 
   if (!rotationPending && lastOutput) {
-    lines.push("", "## Last Agent Output (truncated)", lastOutput.trimEnd());
+    lines.push("## Last Agent Output (truncated)", lastOutput.trimEnd(), "");
   }
 
   lines.push(
+    "## Context",
+    normalizedHints ? "## Hints" : "",
+    normalizedHints ? normalizedHints : "",
+    normalizedHints ? "" : "",
+    prdRefsBlock ? prdRefsBlock : "",
+    prdRefsBlock ? "" : "",
+    `## Plan (${planLabel})`,
+    displayPlan.trimEnd(),
     "",
-    "## Instructions"
-  );
-
-  if (currentTask) {
-    lines.push("- **Complete only the Current Task in this iteration.**");
-  }
-
-  lines.push(
+    seedLabel,
+    taskSeedText ? String(taskSeedText).trimEnd() : "",
+    taskSeedText ? "" : "",
+    "## Rules",
+    "- Do not assume functionality is missing; search first.",
+    "- No stubs or placeholder implementations.",
+    `- Use .loopy/PRD.md and the listed prd_refs before requirement-level decisions.`,
     `- Follow the plan checklist in ${planLabel}.`,
-    "- Update plan checkboxes as you complete items.",
-    "- Record any new guardrails if you detect repetition or drift.",
     "- Keep changes focused and maintain repo state.",
-    "- Complete all unchecked tasks in the current phase before tests will be run.",
-    "- Mark a task [x] when the implementation is done. The test_command runs after all phase tasks are checked.",
+    "- Deliver outcomes, not scaffolding. Fixing the root cause or implementing the feature is always higher priority than building tools to measure, verify, or monitor the problem.",
+    "- Focus on one task at a time. Do not check multiple boxes in a single iteration.",
+    "- Mark a task [x] when the implementation is done.",
     "- If a task should be skipped, mark it with [~] or [-] and note the reason.",
-    "- If a task is blocked by external factors after 3+ consecutive failures, mark it as [!] with a reason: `[!] task — BLOCKED: reason`.",
-    "- If tests fail after all tasks are checked, fix the failures first.",
+    "- If a task is blocked by external factors after 3+ consecutive failures, mark it as [!] with a reason: `[!] task — BLOCKED: reason`. Blocked tasks do not block phase advancement.",
+    "- Complete all unchecked tasks in the current phase before tests will be run.",
+    "- Run tests in the agent workflow and report them in a ```loopy_test_report``` JSON block. Required schema: `{ \"status\": \"pass|fail|skipped\", \"command\": \"the test command run\", \"summary\": \"one-line result\", \"evidence\": \"relevant output excerpt\" }`. All four fields are required strings.",
+    "- If tests fail, fix the failures first.",
     "- If the same task has failed for 3+ consecutive iterations, reassess your approach.",
+    "- Record any new guardrails if you detect repetition or drift.",
+    "- If your work reveals validation steps or checks that depend on future data (future CI runs, post-deploy metrics, production observations), append them to `.loopy/FOLLOW_UP.md` as checklist items instead of creating plan tasks.",
+    "",
+    "## Phase Lifecycle",
+    "- Phases follow a two-gate lifecycle: Gate 1 = all tasks checked [x] (or skipped [~]/[-] or blocked [!]), Gate 2 = test report status is pass.",
+    "- The validation report gate is NOT evaluated until every task in the current phase is checked. Focus on completing tasks first.",
+    "- Never cycle back to a previous phase. Phases are sequential and one-directional.",
+    "- When completing the last task of a phase, summarize findings into `.loopy/hints.md` (what was found, the conclusion, recommended action). Then review every task in the next phase -- remove irrelevant tasks, rewrite vague ones with concrete details from your findings, and ensure the next phase implements the solution rather than building more analysis tooling.",
+    "",
+    "## Guardrails",
+    guardrailsText.trimEnd(),
     ""
   );
 

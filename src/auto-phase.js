@@ -42,11 +42,32 @@ function normalizePhaseOutput(parsed) {
     tasksByPhase[key] = items.map((t) => String(t || "").trim()).filter(Boolean);
   }
 
+  const followUpRaw = parsed && (parsed.follow_up || parsed.followUp) ? parsed.follow_up || parsed.followUp : [];
+  const followUp = (Array.isArray(followUpRaw) ? followUpRaw : [])
+    .map((t) => String(t || "").trim())
+    .filter(Boolean);
+
+  const counts = Object.values(tasksByPhase).map((t) => t.length);
+  const allSame = counts.length > 1 && counts.every((c) => c === counts[0]);
+  const anyOversize = counts.some((c) => c > 8);
+  if (allSame && counts[0] > 3) {
+    console.warn(`[loopy] Warning: all ${counts.length} phases have exactly ${counts[0]} tasks -- plan may be formulaic.`);
+  }
+  if (anyOversize) {
+    console.warn(`[loopy] Warning: phase has ${Math.max(...counts)} tasks (>8) -- consider splitting.`);
+  }
+
   return {
     phaseDefaults,
     phases: out,
     tasksByPhase,
+    followUp,
   };
+}
+
+function sanitizeControlChars(text) {
+  // Preserve tab/newline/carriage return but drop other control bytes (including ANSI escapes).
+  return String(text || "").replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g, "");
 }
 
 function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
@@ -60,26 +81,144 @@ function fallbackPhasesFromSeed(seedText, { testCommand } = {}) {
   const tasksByPhase = {
     plan: [
       seed
-        ? `Plan: ${seed} — Acceptance: outline scope and milestones`
-        : "Plan: Clarify requirements and outline approach — Acceptance: outline scope and milestones",
+        ? `Plan: [needs refinement] ${seed} — Acceptance: outline scope and milestones`
+        : "Plan: [needs refinement] Clarify requirements and outline approach — Acceptance: outline scope and milestones",
     ],
     implement: [
       seed
-        ? `Implement: ${seed} — Acceptance: behavior matches requirements`
-        : "Implement: Apply the requested changes — Acceptance: behavior matches requirements",
+        ? `Implement: [needs refinement] ${seed} — Acceptance: behavior matches requirements`
+        : "Implement: [needs refinement] Apply the requested changes — Acceptance: behavior matches requirements",
     ],
     verify: [
       tc
-        ? `Verify: Run tests (${tc}) — Acceptance: test suite passes`
-        : "Verify: Validate behavior and edge cases — Acceptance: expected behavior confirmed",
+        ? `Verify: [needs refinement] Run tests (${tc}) — Acceptance: test suite passes`
+        : "Verify: [needs refinement] Validate behavior and edge cases — Acceptance: expected behavior confirmed",
     ],
   };
   return { phases, phaseDefaults: { stop_on: "all_checked", test_command: tc }, tasksByPhase };
 }
 
-async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes = 50000, noColor, stopSignal } = {}) {
+function stripYamlFences(text) {
+  const raw = String(text || "").trim();
+  if (!raw) return raw;
+  const fenceMatch = raw.match(/```(?:yaml)?\s*([\s\S]*?)\s*```/i);
+  if (fenceMatch) return fenceMatch[1].trim();
+  return raw;
+}
+
+function extractPlanPayloadStrict(stdoutText) {
+  const raw = sanitizeControlChars(stdoutText).trim();
+  if (!raw) {
+    const err = new Error("missing BEGIN_LOOPY_PLAN/END_LOOPY_PLAN markers in stdout");
+    err.code = "invalid-plan-envelope";
+    throw err;
+  }
+  const markerRegex = /BEGIN_LOOPY_PLAN\s*([\s\S]*?)\s*END_LOOPY_PLAN/gim;
+  const matches = [];
+  let match = markerRegex.exec(raw);
+  while (match) {
+    matches.push(match);
+    match = markerRegex.exec(raw);
+  }
+  if (matches.length !== 1) {
+    const err = new Error(
+      matches.length === 0
+        ? "missing BEGIN_LOOPY_PLAN/END_LOOPY_PLAN markers in stdout"
+        : `found ${matches.length} BEGIN_LOOPY_PLAN blocks; expected exactly 1`
+    );
+    err.code = "invalid-plan-envelope";
+    throw err;
+  }
+
+  const full = matches[0][0].trim();
+  if (full !== raw) {
+    const err = new Error("stdout must contain only a single BEGIN_LOOPY_PLAN...END_LOOPY_PLAN block");
+    err.code = "invalid-plan-envelope";
+    throw err;
+  }
+  return stripYamlFences(matches[0][1]);
+}
+
+function normalizeStopOn(value) {
+  if (Array.isArray(value)) return value.map((v) => String(v || "").trim()).filter(Boolean);
+  if (value == null || value === "") return "all_checked";
+  return String(value).trim();
+}
+
+function validatePlanSchema(parsed) {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return "root must be a mapping";
+  }
+
+  const phaseDefaults = parsed.phase_defaults || parsed.phaseDefaults || {};
+  if (phaseDefaults != null && (typeof phaseDefaults !== "object" || Array.isArray(phaseDefaults))) {
+    return "phase_defaults must be a mapping";
+  }
+
+  const phases = parsed.phases;
+  if (!Array.isArray(phases) || phases.length === 0) {
+    return "phases must be a non-empty array";
+  }
+
+  const phaseTasks = parsed.phase_tasks || parsed.phaseTasks;
+  if (!phaseTasks || typeof phaseTasks !== "object" || Array.isArray(phaseTasks)) {
+    return "phase_tasks must be a mapping";
+  }
+
+  const seen = new Set();
+  for (let i = 0; i < phases.length; i += 1) {
+    const p = phases[i];
+    if (!p || typeof p !== "object" || Array.isArray(p)) {
+      return `phases[${i}] must be a mapping`;
+    }
+    const id = toSlug(p.id || p.name || p.key || p.phase || p.title || "") || String(p.id || "").trim();
+    if (!id) return `phases[${i}].id is required`;
+    if (seen.has(id)) return `phases[${i}].id must be unique (${id})`;
+    seen.add(id);
+
+    const title = String(p.title || p.name || id || "").trim();
+    if (!title) return `phases[${i}].title is required`;
+
+    const stopOn = normalizeStopOn(p.stop_on != null ? p.stop_on : phaseDefaults.stop_on);
+    const stopValues = Array.isArray(stopOn) ? stopOn : [stopOn];
+    if (!stopValues.length || stopValues.some((v) => v !== "all_checked" && v !== "tests_pass")) {
+      return `phases[${i}].stop_on must be all_checked, tests_pass, or a list of them`;
+    }
+
+    const rawTasks = phaseTasks[id];
+    if (!Array.isArray(rawTasks) || rawTasks.length === 0) {
+      return `phase_tasks.${id} must be a non-empty array`;
+    }
+    for (let j = 0; j < rawTasks.length; j += 1) {
+      const item = rawTasks[j];
+      if (typeof item !== "string" || !item.trim()) {
+        return `phase_tasks.${id}[${j}] must be a non-empty string`;
+      }
+    }
+  }
+
+  const followUp = parsed.follow_up || parsed.followUp;
+  if (followUp != null) {
+    if (!Array.isArray(followUp)) {
+      return "follow_up must be an array";
+    }
+    for (let i = 0; i < followUp.length; i += 1) {
+      if (typeof followUp[i] !== "string" || !followUp[i].trim()) {
+        return `follow_up[${i}] must be a non-empty string`;
+      }
+    }
+  }
+
+  return "";
+}
+
+async function proposePhasesWithAgent(
+  agentCommand,
+  seedText,
+  { maxOutputBytes = 50000, noColor, stopSignal, streamToTerminal } = {}
+) {
   const cmd = String(agentCommand || "").trim();
-  if (!cmd) return { ok: false, error: "missing-agent-command", output: "" };
+  if (!cmd) return { ok: false, error: "missing-agent-command", output: "", stdout: "", stderr: "" };
 
   const prompt = [
     "You are Loopy's planning assistant.",
@@ -91,6 +230,8 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "END_LOOPY_PLAN",
     "Do NOT include markdown fences (```), headings, or commentary.",
     "If you add any extra text, the plan will be rejected.",
+    "Output contract: stdout must contain exactly one BEGIN_LOOPY_PLAN...END_LOOPY_PLAN block and nothing else.",
+    "Send any diagnostics or logs to stderr only.",
     "",
     "YAML schema:",
     "phase_defaults:",
@@ -104,18 +245,72 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
     "phase_tasks:",
     "  <phase id>:",
     "    - \"<checklist item text>\"",
+    "follow_up: # optional — items that require future data or human action after the plan completes",
+    "  - \"<description of what to validate, when, and how>\"",
     "",
-    "Break work into JIRA-sized tasks (as if assigning to a junior engineer):",
+    "Break work into tasks that an AI code agent can execute in a single session:",
+    "- Specific: say HOW, not just WHAT. Name the file, function, config key, or mechanism when known.",
     "- Atomic: exactly ONE outcome per task (no compound items).",
-    "- Testable: include explicit acceptance criteria.",
+    "- Testable: include explicit acceptance criteria that can be verified programmatically or by inspecting output.",
     "- Scoped: small enough for < 1 day of work.",
-    "- Clear: start with a strong verb (add/implement/update/remove/verify).",
+    "- Executable: every task must be completable by a code agent RIGHT NOW (read/search/edit files, run commands). Exclude tasks requiring human judgment over time, multi-day monitoring, or manual approval gates.",
+    "- Immediate: every task must be implementable, testable, and verifiable in the current session using current data. Never put tasks that depend on future events into phase_tasks. Instead, put them in the top-level `follow_up` list. Examples of follow_up items: 'after 10+ CI runs on main, compare p50/p95 workflow duration against baseline using scripts/ci/metrics.mjs', 'validate artifact parity on first production deploy', 'review error rate 1 week post-merge'.",
     "- Format: \"<type>: <short summary> — Acceptance: <clear test/result>\"",
+    "- Start with a strong verb: add / implement / update / remove / verify / investigate / measure / analyze.",
+    "- Reference actual file paths, function names, or config keys in task descriptions when discoverable.",
+    "- Use 2-8 tasks per phase, sized to actual work. Do NOT pad to reach a minimum count.",
     "- Ensure phase_defaults.test_command is set (ask if unsure).",
     "- Quote every checklist item in YAML.",
-    "- Prefer 5-10 tasks per phase.",
     "",
-    "Keep phases small (3-6). Prefer stable ids. Ensure every phase has at least 1 checklist item.",
+    "RESEARCH BEFORE PLANNING:",
+    "Before proposing phases, you MUST explore the project:",
+    "- Read the top-level directory and key project files to understand the codebase.",
+    "- Search for files, configs, and code relevant to the task description.",
+    "- Run `git log --oneline -15` to identify recent changes that may relate.",
+    "- If the task describes a problem (bug, regression, performance issue), investigate the likely cause in the code before deciding what phases to create.",
+    "- Ground every task in what you actually find. Reference real file paths, function names, config keys, or command outputs -- not hypothetical ones.",
+    "- If your research reveals the root cause or solution, skip generic discovery phases and go straight to implementation tasks that address what you found.",
+    "",
+    "DISCOVERY PHASES:",
+    "When the problem requires understanding WHY something is happening before deciding WHAT to change, include a discovery phase before implementation.",
+    "This applies broadly: performance issues, unexpected behavior, system migrations, dependency upgrades, infrastructure changes, data inconsistencies, or any situation where the right fix is not obvious from the problem statement alone.",
+    "",
+    "Discovery phase rules:",
+    "- Tasks use investigate / measure / analyze verbs.",
+    "- Each task specifies: what question to answer, what data source or tool to use, and what artifact to produce.",
+    "- Findings from discovery ground the implementation tasks -- later phases should reference what was learned.",
+    "- Discovery tasks are non-code: they read, query, compare, and document. They do NOT edit source files.",
+    "- A discovery phase uses stop_on: all_checked (no test_command needed).",
+    "",
+    "GOOD discovery tasks (specific tool, clear output):",
+    "- 'investigate: query CI API for job durations over last 14 days, identify trend changes, correlate with git history — Acceptance: documented finding with pre/post comparison'",
+    "- 'measure: profile build step wall-clock time with and without cache, compare output sizes — Acceptance: table of timings and sizes for each variant'",
+    "- 'analyze: diff dependency tree before and after upgrade using npm ls, identify new transitive dependencies — Acceptance: list of added packages with sizes'",
+    "",
+    "BAD discovery tasks (vague, no tool, no output):",
+    "- 'investigate: understand why the system is slow'",
+    "- 'analyze: look into the problem'",
+    "- 'research: figure out root cause'",
+    "",
+    "When NOT to include a discovery phase:",
+    "- The problem statement already contains the root cause and the fix is known.",
+    "- The task is additive (new feature, new file, new test) with no diagnostic ambiguity.",
+    "- The scope is a straightforward refactor with clear before/after.",
+    "",
+    "BAD task: 'implement: optimize the data pipeline' (vague, no mechanism, no target file).",
+    "BAD phase_task: 'measure: run post-change metrics for at least 10 successful runs' (depends on future CI runs — move to follow_up).",
+    "BAD phase_task: 'analyze: compare baseline vs post-change data and evaluate thresholds' (requires future data — move to follow_up).",
+    "GOOD phase_task: 'implement: add Redis caching to `src/services/user-service.ts` getUser() — Acceptance: cache-hit path returns in <10ms in test.'",
+    "GOOD follow_up: 'After 10+ successful CI runs on main, run `node scripts/ci/metrics.mjs compare` to verify >=25% p50 reduction.'",
+    "",
+    "PLAN ANTI-PATTERNS:",
+    "- Scaffolding over substance: building measurement scripts, verification tools, or contract tests as primary deliverables instead of implementing the actual fix/feature.",
+    "- Perpetual discovery: planning multiple investigation phases when the first phase's findings would already point to a clear solution.",
+    "- Tooling-as-progress: creating helper scripts, dashboards, or automation that support the goal but don't advance it. The plan should deliver the outcome, not infrastructure to measure it.",
+    "- Generic phase structures: defaulting to discover-measure-optimize-validate when the problem and fix are already identifiable from the codebase.",
+    "- If your research reveals a clear cause and a known fix, plan the fix directly. Do not insert measurement or tooling phases between diagnosis and implementation.",
+    "",
+    "Keep phases small (2-5). Prefer stable ids. Ensure every phase has at least 1 checklist item.",
     "",
     `Task:\n${String(seedText || "").trim()}`,
     "",
@@ -124,95 +319,49 @@ async function proposePhasesWithAgent(agentCommand, seedText, { maxOutputBytes =
   const shellOptions = {};
   if (noColor !== undefined) shellOptions.noColor = noColor;
   if (stopSignal) shellOptions.stopSignal = stopSignal;
+  shellOptions.streamToTerminal = Boolean(streamToTerminal);
   const result = await runShellCommand(cmd, prompt, maxOutputBytes, shellOptions);
+  const stdout = sanitizeControlChars(result.stdout || "");
+  const stderr = sanitizeControlChars(result.stderr || "");
   if (result.aborted) {
-    return { ok: false, aborted: true, error: "aborted", output: "" };
+    return { ok: false, aborted: true, error: "aborted", output: "", stdout, stderr };
   }
-  let output = `${result.stdout || ""}\n${result.stderr || ""}`.trim();
+  const output = stdout.trim();
   if (result.code !== 0) {
-    return { ok: false, error: `agent-exit-${result.code}`, output };
+    return { ok: false, error: `agent-exit-${result.code}`, output, stdout, stderr };
+  }
+
+  let payload = "";
+  try {
+    payload = extractPlanPayloadStrict(stdout);
+  } catch (err) {
+    const msg = err && err.message ? err.message : "invalid-plan-envelope";
+    return { ok: false, error: `invalid-plan-envelope: ${msg}`, output, stdout, stderr };
   }
 
   let parsed = null;
   try {
-    output = normalizePlannerYaml(output);
-    parsed = yaml.load(output) || {};
+    parsed = yaml.load(payload) || {};
   } catch (err) {
-    try {
-      const recovered = quotePhaseTasks(output);
-      parsed = yaml.load(recovered) || {};
-      output = recovered;
-    } catch (err2) {
-      const msg = err && err.message ? err.message : "invalid-yaml";
-      return { ok: false, error: `invalid-yaml: ${msg}`, output };
-    }
+    const msg = err && err.message ? err.message : "invalid-yaml";
+    return { ok: false, error: `invalid-yaml: ${msg}`, output: payload, stdout, stderr };
+  }
+
+  const schemaError = validatePlanSchema(parsed);
+  if (schemaError) {
+    return { ok: false, error: `invalid-plan-schema: ${schemaError}`, output: payload, stdout, stderr };
   }
 
   const normalized = normalizePhaseOutput(parsed);
   if (!normalized.phases.length) {
-    return { ok: false, error: "no-phases", output };
+    return { ok: false, error: "no-phases", output: payload, stdout, stderr };
   }
   const anyTasks = normalized.phases.some((p) => (normalized.tasksByPhase[p.id] || []).length > 0);
   if (!anyTasks) {
-    return { ok: false, error: "no-phase-tasks", output };
+    return { ok: false, error: "no-phase-tasks", output: payload, stdout, stderr };
   }
 
-  return { ok: true, ...normalized, output };
-}
-
-function stripYamlFences(text) {
-  const raw = String(text || "").trim();
-  if (!raw) return raw;
-  const fenceMatch = raw.match(/```(?:yaml)?\s*([\s\S]*?)\s*```/i);
-  if (fenceMatch) return fenceMatch[1].trim();
-  return raw;
-}
-
-function normalizePlannerYaml(text) {
-  let raw = stripYamlFences(text);
-  if (!raw) return raw;
-
-  const marker = raw.match(/BEGIN_LOOPY_PLAN\s*([\s\S]*?)\s*END_LOOPY_PLAN/i);
-  if (marker) {
-    raw = marker[1].trim();
-  }
-
-  const yamlStart = raw.search(/(^|\n)phase_defaults:\s*/);
-  if (yamlStart >= 0) {
-    raw = raw.slice(yamlStart).trim();
-  }
-
-  const cutoff = raw.search(/\nTotal usage|\nAPI time spent|\nBreakdown by AI model|\nTotal session time/);
-  if (cutoff >= 0) {
-    raw = raw.slice(0, cutoff).trim();
-  }
-
-  return raw.trim();
-}
-
-function quotePhaseTasks(text) {
-  const lines = String(text || "").split(/\r?\n/);
-  let inPhaseTasks = false;
-  for (let i = 0; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^\s*phase_tasks:\s*$/.test(line)) {
-      inPhaseTasks = true;
-      continue;
-    }
-    if (inPhaseTasks && /^\S/.test(line)) {
-      inPhaseTasks = false;
-    }
-    if (!inPhaseTasks) continue;
-
-    const match = line.match(/^(\s*-\s+)(.+)$/);
-    if (!match) continue;
-    const prefix = match[1];
-    const value = match[2].trim();
-    if (value.startsWith('"') || value.startsWith("'")) continue;
-    const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-    lines[i] = `${prefix}"${escaped}"`;
-  }
-  return lines.join("\n");
+  return { ok: true, ...normalized, output: payload, stdout, stderr };
 }
 
 function renderTaskMarkdown({
@@ -252,8 +401,28 @@ function renderTaskMarkdown({
   return lines.join("\n");
 }
 
+function renderFollowUpMarkdown(items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  const lines = [
+    "# Follow-Up",
+    "",
+    "Items below require future data or human action after the automated plan completes.",
+    "Review and execute these manually once the prerequisite conditions are met.",
+    "",
+  ];
+  for (const item of items) {
+    lines.push(`- [ ] ${item}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
 module.exports = {
   proposePhasesWithAgent,
   fallbackPhasesFromSeed,
   renderTaskMarkdown,
+  renderFollowUpMarkdown,
+  sanitizeControlChars,
+  extractPlanPayloadStrict,
+  validatePlanSchema,
 };

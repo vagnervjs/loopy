@@ -7,18 +7,28 @@ const { confirm, promptLine } = require("../confirm");
 const { readText, writeText } = require("../fs");
 const { ensureGuardrails, formatPrompt } = require("../prompt");
 const { printStep } = require("../steps");
-const { getCurrentPhaseSection, getCurrentTask, parseTask } = require("../task");
+const { getCurrentPhaseSection, getCurrentTask, parseTask, resolvePrdRefsForCurrentTask } = require("../task");
 const { redact, truncate } = require("../text");
-const { fallbackPhasesFromSeed, proposePhasesWithAgent, renderTaskMarkdown } = require("../auto-phase");
-const { buildSpecsSummary } = require("./specs");
-const { ensureAgentsDoc } = require("./agents-doc");
+const { fallbackPhasesFromSeed, proposePhasesWithAgent, renderTaskMarkdown, renderFollowUpMarkdown, sanitizeControlChars } = require("../auto-phase");
 const { pickCurrentPhaseId } = require("./phases");
 const { loadTaskSeed } = require("./seed");
 
 const PLAN_OUTPUT_FILE = "last_plan_output.txt";
+const FOLLOW_UP_FILE = "FOLLOW_UP.md";
 
-async function recordPlanGenerationFailure(config, { output, error, seedSource }) {
+async function writeFollowUp(config, followUp) {
+  if (!Array.isArray(followUp) || !followUp.length) return;
+  const content = renderFollowUpMarkdown(followUp);
+  if (!content) return;
+  const filePath = path.join(config.loopyDir, FOLLOW_UP_FILE);
+  await writeText(filePath, content);
+  printStep(`Follow-up items saved to ${prettyPath(config.cwd, filePath)}`, { kind: "plan" });
+}
+
+async function recordPlanGenerationFailure(config, { output, stdout, stderr, error, seedSource }) {
   const logPath = path.join(config.loopyDir, PLAN_OUTPUT_FILE);
+  const safeStdout = sanitizeControlChars(stdout || output || "");
+  const safeStderr = sanitizeControlChars(stderr || "");
   const header = [
     "# Loopy Plan Generation Output",
     "",
@@ -27,11 +37,118 @@ async function recordPlanGenerationFailure(config, { output, error, seedSource }
     `Seed source: ${seedSource || "unknown"}`,
     "",
   ].join("\n");
-  const payload = header + (output ? truncate(String(output), DEFAULTS.maxOutputBytes) : "(no output)") + "\n";
+  const payload = [
+    header,
+    "STDOUT:",
+    safeStdout ? truncate(String(safeStdout), DEFAULTS.maxOutputBytes) : "(no stdout)",
+    "",
+    "STDERR:",
+    safeStderr ? truncate(String(safeStderr), DEFAULTS.maxOutputBytes) : "(no stderr)",
+    "",
+  ].join("\n");
   await writeText(logPath, payload);
   await appendActivity(config.activityLog, [
     `plan generation failed: ${error || "unknown"} (see ${prettyPath(config.cwd, logPath)})`,
   ]);
+}
+
+function isImplementationTaskText(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return false;
+  if (/\b(analysis|analyze|analyzing|analysing|research|spike|investigate|measure|baseline|discovery|document|documentation|docs?|readme|changelog|license)\b/.test(text)) {
+    return false;
+  }
+  return true;
+}
+
+function collectMissingPrdRefs(parsedTask) {
+  const missing = [];
+  if (!parsedTask || !Array.isArray(parsedTask.checklist) || !parsedTask.checklist.length) return missing;
+  if (Array.isArray(parsedTask.phases) && parsedTask.phases.length) {
+    for (const phase of parsedTask.phases) {
+      const phaseId = String((phase && phase.id) || "").trim();
+      if (!phaseId) continue;
+      const sec = parsedTask.phaseSections && parsedTask.phaseSections[phaseId];
+      const list = sec && Array.isArray(sec.checklist) ? sec.checklist : [];
+      for (const item of list) {
+        if (!item || !isImplementationTaskText(item.text)) continue;
+        const refs = resolvePrdRefsForCurrentTask(parsedTask, phaseId, item);
+        if (!Array.isArray(refs) || refs.length === 0) {
+          missing.push({ phaseId, task: String(item.text || "").trim() });
+        }
+      }
+    }
+    return missing;
+  }
+  for (const item of parsedTask.checklist) {
+    if (!item || !isImplementationTaskText(item.text)) continue;
+    const refs = resolvePrdRefsForCurrentTask(parsedTask, "", item);
+    if (!Array.isArray(refs) || refs.length === 0) {
+      missing.push({ phaseId: "", task: String(item.text || "").trim() });
+    }
+  }
+  return missing;
+}
+
+function derivePrdRefsDefaults(prdText) {
+  const text = String(prdText || "");
+  const refs = [];
+  const headings = text.match(/^#{1,6}\s+(.+)$/gm) || [];
+  for (const line of headings) {
+    const section = String(line || "").replace(/^#{1,6}\s+/, "").trim();
+    if (!section) continue;
+    if (/^prd\b/i.test(section)) continue;
+    refs.push({ section });
+    if (refs.length >= 6) break;
+  }
+  if (refs.length) return refs;
+  return [{ section: "Goals" }, { section: "Acceptance Criteria" }];
+}
+
+function upsertPrdRefsDefaults(taskText, refs) {
+  const text = String(taskText || "");
+  const defaults = Array.isArray(refs) ? refs : [];
+  const match = text.match(/^---\s*\n([\s\S]*?)\n---\s*\n?/);
+  let fm = {};
+  let body = text;
+  if (match) {
+    try {
+      fm = yaml.load(match[1]) || {};
+    } catch (_) {
+      fm = {};
+    }
+    body = text.slice(match[0].length);
+  }
+  fm = fm && typeof fm === "object" ? { ...fm } : {};
+  if (!Array.isArray(fm.prd_refs_defaults) || !fm.prd_refs_defaults.length) {
+    fm.prd_refs_defaults = defaults;
+  }
+  const yamlText = yaml.dump(fm, { lineWidth: 120 }).trimEnd();
+  const normalizedBody = String(body || "").replace(/^\n+/, "");
+  return ["---", yamlText, "---", "", normalizedBody].join("\n");
+}
+
+async function enforcePrdRefsCoverage(config) {
+  const taskText = await readText(config.taskFile);
+  if (!taskText) return { changed: false, missing: [] };
+  const parsed = parseTask(taskText);
+  const missing = collectMissingPrdRefs(parsed);
+  if (!missing.length) return { changed: false, missing: [] };
+
+  const prdText = await readText(config.prdFile);
+  const defaults = derivePrdRefsDefaults(prdText);
+  const nextText = upsertPrdRefsDefaults(taskText, defaults);
+  if (nextText !== taskText) {
+    await writeText(config.taskFile, nextText);
+  }
+
+  const reParsed = parseTask(nextText);
+  const remaining = collectMissingPrdRefs(reParsed);
+  if (remaining.length) {
+    const sample = remaining.slice(0, 3).map((entry) => entry.phaseId ? `[${entry.phaseId}] ${entry.task}` : entry.task).join("; ");
+    throw new Error(`Plan requires PRD references for implementation tasks. Missing refs: ${sample}`);
+  }
+  return { changed: nextText !== taskText, missing };
 }
 
 async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
@@ -76,19 +193,25 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
     let nextText = "";
     if (config.autoPhase) {
       logPhasePlan();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, {
+        noColor: config.noColor,
+        stopSignal,
+        streamToTerminal: Boolean(config.stream),
+      });
       if (proposed.aborted || shouldStop()) {
         return { taskText: "", rewritten: false, aborted: true };
       }
       if (!proposed.ok) {
         await recordPlanGenerationFailure(config, {
           output: proposed.output,
+          stdout: proposed.stdout,
+          stderr: proposed.stderr,
           error: proposed.error,
           seedSource,
         });
       }
       const plan = proposed.ok
-        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
+        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase, followUp: proposed.followUp }
         : fallbackPhasesFromSeed(seed, { testCommand });
       if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
         plan.phaseDefaults = {};
@@ -117,6 +240,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         includeSeedComment: true,
         seedText: seed,
       });
+      await writeFollowUp(config, plan.followUp);
     } else {
       nextText = [
         "---",
@@ -170,7 +294,11 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
     let nextText = existing;
     if (config.autoPhase) {
       logPhasePlan();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, {
+        noColor: config.noColor,
+        stopSignal,
+        streamToTerminal: Boolean(config.stream),
+      });
       if (proposed.aborted || shouldStop()) {
         return { taskText: existing, rewritten: false, aborted: true };
       }
@@ -182,7 +310,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         });
       }
       const plan = proposed.ok
-        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
+        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase, followUp: proposed.followUp }
         : fallbackPhasesFromSeed(seed, { testCommand });
       if (!plan.phaseDefaults || typeof plan.phaseDefaults !== "object") {
         plan.phaseDefaults = {};
@@ -201,6 +329,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
         includeSeedComment: true,
         seedText: seed,
       });
+      await writeFollowUp(config, plan.followUp);
     } else {
       // Non-phased update: overwrite checklist with a single new item.
       nextText = [
@@ -234,19 +363,25 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
     if (!hasPhases) {
       const seed = parsed.body && parsed.body.trim() ? parsed.body.trim() : existing.trim();
       logPhasePlan();
-      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, { noColor: config.noColor, stopSignal });
+      const proposed = await proposePhasesWithAgent(config.agentCommand, seed, {
+        noColor: config.noColor,
+        stopSignal,
+        streamToTerminal: Boolean(config.stream),
+      });
       if (proposed.aborted || shouldStop()) {
         return { taskText: existing, rewritten: false, aborted: true };
       }
       if (!proposed.ok) {
         await recordPlanGenerationFailure(config, {
           output: proposed.output,
+          stdout: proposed.stdout,
+          stderr: proposed.stderr,
           error: proposed.error,
           seedSource: "plan-doc",
         });
       }
       const plan = proposed.ok
-        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase }
+        ? { phases: proposed.phases, phaseDefaults: proposed.phaseDefaults, tasksByPhase: proposed.tasksByPhase, followUp: proposed.followUp }
         : null;
       if (plan) {
         let testCommand = config.testCommand || parsed.frontMatter.test_command || parsed.frontMatter.testCommand || "";
@@ -281,6 +416,7 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
           });
           if (ok) {
             await writeText(taskPath, nextText);
+            await writeFollowUp(config, plan.followUp);
             return { taskText: nextText, rewritten: true };
           }
         }
@@ -289,20 +425,6 @@ async function ensureTaskBeforeLoop(config, loadedSeed, { stopSignal } = {}) {
   }
 
   return { taskText: existing, rewritten: false };
-}
-
-async function confirmPlanReview(config, { prdGenerated } = {}) {
-  if (!process.stdin.isTTY) return true;
-  const planLabel = prettyPath(config.cwd, config.taskFile);
-  const prdLabel = prdGenerated ? prettyPath(config.cwd, config.prdFile) : "";
-  const question = prdGenerated
-    ? `Review ${planLabel} and ${prdLabel} before continuing. Continue?`
-    : `Review ${planLabel} before continuing. Continue?`;
-  const ok = await confirm(question, { confirm: true, defaultYes: true });
-  if (!ok) {
-    throw new Error("Aborted: plan review not confirmed.");
-  }
-  return true;
 }
 
 async function writePromptPreview(config) {
@@ -323,13 +445,11 @@ async function writePromptPreview(config) {
   const hintsTextRaw = await readText(config.hintsFile);
   const hintsText = truncate(hintsTextRaw, 8000);
 
-  const specsSummary = await buildSpecsSummary(config.cwd);
-  const agentsDoc = await ensureAgentsDoc(config, { stopSignal: null });
-
   const currentPhaseId = pickCurrentPhaseId(parsedTask, {}, config, { phaseExplicit: false });
   const currentTaskObj = getCurrentTask(taskText, { phaseId: currentPhaseId });
   const currentTaskText = currentTaskObj ? currentTaskObj.text.trim() : null;
   const filteredPlan = currentPhaseId ? getCurrentPhaseSection(taskText, currentPhaseId) : taskText;
+  const prdRefs = resolvePrdRefsForCurrentTask(parsedTask, currentPhaseId, currentTaskObj);
 
   const prompt = formatPrompt({
     iteration: 0,
@@ -343,8 +463,7 @@ async function writePromptPreview(config) {
     currentPhase: currentPhaseId,
     taskFilePath: config.taskFile,
     hintsText,
-    agentsText: agentsDoc.text || "",
-    specsText: specsSummary || "",
+    prdRefs,
     currentTask: currentTaskText,
     filteredPlan,
     promptTemplate: config.promptTemplateText || "",
@@ -355,7 +474,7 @@ async function writePromptPreview(config) {
 }
 
 module.exports = {
-  confirmPlanReview,
+  enforcePrdRefsCoverage,
   ensureTaskBeforeLoop,
   recordPlanGenerationFailure,
   writePromptPreview,

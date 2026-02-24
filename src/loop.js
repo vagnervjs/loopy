@@ -28,7 +28,7 @@ const { archiveCompletedLoop } = require("./loop/archive");
 const { runIteration } = require("./loop/iteration");
 const { formatPlanOverviewLines, printStepLines } = require("./loop/plan-overview");
 const { loadPromptTemplate } = require("./loop/prompt-templates");
-const { confirmPlanReview, ensureTaskBeforeLoop, writePromptPreview } = require("./loop/plan-ensure");
+const { enforcePrdRefsCoverage, ensureTaskBeforeLoop, writePromptPreview } = require("./loop/plan-ensure");
 const { loadTaskSeed, readStdinText } = require("./loop/seed");
 
 async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
@@ -230,7 +230,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   const promptTemplate = await loadPromptTemplate(config);
   config.promptTemplateText = promptTemplate.text;
   config.promptTemplatePath = promptTemplate.path;
-  let prdGenerated = false;
   const planReviewRequired =
     !config.resume && config.mode === "plan" && (promptSeedProvided || !String(planText || "").trim());
   const stopBeforeLoop = async (message) => {
@@ -313,6 +312,7 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
             cwd: config.cwd,
             noColor: config.noColor,
             stopSignal: stop,
+            streamToTerminal: Boolean(config.stream),
           });
           if (prdResult.aborted || stop.stopRequested) {
             await stopBeforeLoop("PRD generation aborted; exiting before loop");
@@ -321,8 +321,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
           const prdText = prdResult.text;
           const payload = `${prdText.trimEnd()}\n`;
           await writeText(config.prdFile, payload);
-          prdGenerated = true;
-
           config.taskSeedText = prdText;
           config.taskSeedSource = "--generate-prd";
           effectiveSeed = { seed: prdText, source: config.taskSeedSource };
@@ -406,6 +404,12 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     return next;
   });
 
+  const prdCoverage = await enforcePrdRefsCoverage(config);
+  if (prdCoverage.changed) {
+    printStep(`Plan updated with PRD refs defaults in ${prettyPath(config.cwd, config.taskFile)}`, { kind: "plan" });
+    await appendActivity(config.activityLog, ["Plan updated with PRD refs defaults (auto-enforced)."]);
+  }
+
   const summaryText = await readText(config.taskFile);
   const parsedSummary = summaryText ? parseTask(summaryText) : null;
   const planLines = formatPlanOverviewLines(parsedSummary, { verbose: config.verbose });
@@ -413,10 +417,6 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
     printBlankLine();
     printStepLines(planLines, {});
   }
-  if (planReviewRequired) {
-    await confirmPlanReview(config, { prdGenerated });
-  }
-
   if (config.mode === "plan") {
     await writePromptPreview(config);
     const planOnlyMessage = "Plan ready. Run `loopy` to start build mode.";
@@ -529,6 +529,27 @@ async function runLoop(command, flags, { stopSignal, onActivityLog } = {}) {
   }
   if (totalDurationMs > 0) {
     printStep(`Total duration 🕐 ${formatDurationMs(totalDurationMs)}`, { kind: "plan" });
+  }
+
+  const followUpText = String(archiveResult.followUpText || "").trim();
+  if (followUpText) {
+    printBlankLine();
+    printStep(`📋 Follow-up items (require human action)`, { kind: "plan" });
+    printStep(`${"─".repeat(48)}`, { kind: "plan" });
+    const items = followUpText.split("\n").filter((l) => /^\s*-\s*\[.\]/.test(l));
+    if (items.length) {
+      for (const item of items) {
+        printStep(item.replace(/^\s*-\s*\[.\]\s*/, "  → "), { kind: "plan" });
+      }
+    } else {
+      for (const line of followUpText.split("\n")) {
+        if (line.trim()) printStep(`  ${line}`, { kind: "plan" });
+      }
+    }
+    printStep(`${"─".repeat(48)}`, { kind: "plan" });
+    const archivePath = archiveResult.archiveDir || "";
+    const followUpPath = archivePath ? `${prettyPath(config.cwd, archivePath)}/FOLLOW_UP.md` : ".loopy/FOLLOW_UP.md";
+    printStep(`Full details: ${followUpPath}`, { kind: "plan" });
   }
 }
 

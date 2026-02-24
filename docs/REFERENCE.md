@@ -21,7 +21,7 @@ In build mode (default), Loopy follows tasks from `LOOPY_PLAN.md` and updates pr
 
 If no plan exists, running `loopy` starts plan mode and prompts for a seed.
 
-Loopy also includes `AGENTS.md` and a `specs/` summary in each prompt. If `AGENTS.md` is missing, it bootstraps one in the project root unless `--no-bootstrap-agents` is set.
+Loopy prompts are plan-first and minimal by default. It does not implicitly inject `AGENTS.md` or `specs/` summaries.
 
 **Start a new loop (non-interactive — for automation):**
 ```bash
@@ -43,7 +43,7 @@ Loopy follows the Ralph playbook structure with separate planning and building p
 - Build mode requires an existing plan; `--prompt` is ignored.
 - `--generate-prd` (plan mode): generate PRD first; uses `--prompt` as the PRD seed
 - Prompt templates: `PROMPT_plan.md` + `PROMPT_build.md` (or `--prompt-template` override)
-- `AGENTS.md` and `specs/` summary are injected into every prompt; `AGENTS.md` is bootstrapped in the project root when missing (disable with `--no-bootstrap-agents`)
+- Prompt context is driven by the current plan/task and explicit PRD references (`prd_refs`).
 - `test_command` is required when generating or updating plans; use `--test-command` in non-interactive runs
 - Use `loopy add-judge` to scaffold optional LLM judge tests for subjective criteria
 
@@ -141,7 +141,7 @@ Completion is driven by checked items, not by agent confidence.
 ### Plan doc (`--plan-file`, default `.loopy/LOOPY_PLAN.md`)
 The plan doc is the durable source of truth for the loop. It contains:
 
-- YAML front matter (agent command, test command, loop limits, git settings, phases)
+- YAML front matter (agent command, loop limits, git settings, phases, optional `prd_refs_defaults`)
 - The checklist(s) that represent progress and completion
 
 You can point Loopy at any path via `--plan-file <file>`.
@@ -240,6 +240,8 @@ Notes:
 - `--phase-only` stops once the current phase meets its `stop_on` criteria.
 - Phase sections are detected via `<!-- loopy:phase <id> -->` (preferred) or `## Phase: <id>` headings.
 - If phases are absent and `--auto-phase=false`, Loopy behaves like the legacy single-checklist flow.
+- Auto-phase planner output is strict: planner `stdout` must contain exactly one `BEGIN_LOOPY_PLAN ... END_LOOPY_PLAN` block with YAML only.
+- Send planner diagnostics/logs to `stderr`; Loopy does not parse `stderr` as plan YAML.
 
 Disable auto-phase and use the legacy single-checklist behavior:
 
@@ -329,7 +331,7 @@ Output/utility:
 - `.loopy/hints.md` append-only hints included in prompts
 - `.loopy/last_agent_output.txt` most recent agent output (redacted)
 - `.loopy/agent_stream.log` live agent stdout/stderr stream (redacted)
-- `.loopy/last_test_output.txt` most recent test output (redacted)
+- `.loopy/last_test_output.txt` most recent parsed `loopy_test_report` payload
 - `.loopy/PROMPT.md` generated prompt input for each iteration
 - `.loopy/PRD.md` generated PRD (when `--generate-prd` is enabled)
 
@@ -433,7 +435,7 @@ Artifacts:
 - **CLI entrypoint**: `bin/loopy.js` -> `src/cli.js` handles commands, help, signals, and status/hints/reset.
 - **Config + validation**: `src/config.js` merges defaults/front matter/flags; `src/config-validate.js` enforces flag rules.
 - **Loop orchestrator**: `src/loop.js` wires planning, git setup, prompt templates, and iteration control.
-- **Loop modules**: `src/loop/iteration.js` (single iteration), `src/loop/plan-ensure.js` (plan/PRD bootstrap + preview), `src/loop/prompt-templates.js` (template loading), `src/loop/agents-doc.js` (AGENTS bootstrap), `src/loop/phases.js` (phase logic), `src/loop/plan-overview.js` (plan summaries), `src/loop/archive.js` (artifact archiving), `src/loop/seed.js` (stdin/seed loading).
+- **Loop modules**: `src/loop/iteration.js` (single iteration), `src/loop/plan-ensure.js` (plan/PRD bootstrap + preview), `src/loop/prompt-templates.js` (template loading), `src/loop/phases.js` (phase logic), `src/loop/plan-overview.js` (plan summaries), `src/loop/archive.js` (artifact archiving), `src/loop/seed.js` (stdin/seed loading).
 - **Domain utilities**: `src/task.js` (plan parsing + task detection), `src/guardrails.js` (repeat/thrash detection), `src/prompt.js` (prompt assembly), `src/text.js` (redaction, truncation), `src/git.js` (git integration), `src/shell.js` (process execution).
 - **Artifacts**: `.loopy/` stores prompts, guardrails, progress, state, and agent/test outputs per run.
 

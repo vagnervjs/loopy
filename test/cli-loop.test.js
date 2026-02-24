@@ -132,7 +132,7 @@ test("prints step status lines to terminal during loop", async () => {
   assert.ok(!/\x1b\[[0-9;]*m/.test(stdout));
 });
 
-test("skips tests when iteration changes only documentation files", async () => {
+test("does not execute local test command for doc-only changes", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tests-skip-docs-"));
   const gitEnv = await initGitRepo(tmp);
 
@@ -157,14 +157,14 @@ test("skips tests when iteration changes only documentation files", async () => 
     { cwd: tmp, env: gitEnv }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /Tests skipped: no code changes detected/);
   assert.doesNotMatch(stdout, /Tests run /);
+  assert.doesNotMatch(stdout, /Tests skipped:/);
 
   const state = JSON.parse(await fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
-  assert.equal(state.lastTest, "skipped (no code changes detected)");
+  assert.equal(state.lastTest, "n/a");
 });
 
-test("runs tests when iteration changes code files", async () => {
+test("does not execute local test command for code changes", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "loopy-tests-run-code-"));
   const gitEnv = await initGitRepo(tmp);
 
@@ -190,12 +190,11 @@ test("runs tests when iteration changes code files", async () => {
     { cwd: tmp, env: gitEnv }
   );
   assert.equal(code, 0, stderr);
-  assert.match(stdout, /Tests run /);
-  assert.match(stdout, /Tests fail/);
+  assert.doesNotMatch(stdout, /Tests run /);
+  assert.doesNotMatch(stdout, /Tests fail/);
 
   const state = JSON.parse(await fs.readFile(path.join(tmp, ".loopy", "state.json"), "utf8"));
-  // Test failures may be treated as pass (baseline) if they are pre-existing on base branch
-  assert.match(String(state.lastTest || ""), /^(fail|pass)\b/i);
+  assert.equal(state.lastTest, "n/a");
 });
 
 test("NO_COLOR disables ANSI formatting in logs", async () => {
@@ -401,18 +400,18 @@ test("phase progression: `--phase-only` stops after phase completion and records
       "",
       "## Phase: phase1",
       "<!-- loopy:phase phase1 -->",
-      "- [ ] do phase 1",
+      "- [ ] document phase 1",
       "",
       "## Phase: phase2",
       "<!-- loopy:phase phase2 -->",
-      "- [ ] do phase 2",
+      "- [ ] document phase 2",
       "",
     ].join("\n"),
     "utf8"
   );
 
   const agentCmd =
-    'node -e "const fs=require(\\\"fs\\\");let t=fs.readFileSync(\\\".loopy/LOOPY_PLAN.md\\\",\\\"utf8\\\");t=t.replace(/(## Phase: phase1[\\\\s\\\\S]*?- \\\\[) \\\\]/,(m,g1)=>g1+\\\"x]\\\");fs.writeFileSync(\\\".loopy/LOOPY_PLAN.md\\\",t);process.exit(0)"';
+    'node -e "const fs=require(\\\"fs\\\");let t=fs.readFileSync(\\\".loopy/LOOPY_PLAN.md\\\",\\\"utf8\\\");t=t.replace(/- \\[ \\] document phase 1/,\\\"- [x] document phase 1\\\");fs.writeFileSync(\\\".loopy/LOOPY_PLAN.md\\\",t);process.exit(0)"';
 
   const { code, stderr } = await runNodeCli(
     [

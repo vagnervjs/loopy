@@ -8,6 +8,15 @@ const path = require("node:path");
 const { CLI_PATH, runNodeCli, runNodeCliWithStdin, writeTestConfig } = require("./cli-helpers");
 
 const TEST_COMMAND = 'node -e "process.exit(0)"';
+const STRICT_PLANNER_CMD =
+  'node -e "process.stdout.write(\\\"BEGIN_LOOPY_PLAN\\\\nphase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - \\\\\\"implement: do build — Acceptance: done\\\\\\"\\\\nEND_LOOPY_PLAN\\\")"';
+
+function hasStandaloneLine(text, value) {
+  const normalized = String(text || "").replace(/\r/g, "");
+  const escaped = String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(^|\\n)${escaped}(?=\\n|$)`);
+  return pattern.test(normalized);
+}
 
 async function createTmp(prefix) {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -17,9 +26,6 @@ async function createTmp(prefix) {
 
 test("auto-phase task creation requires confirmation with `--confirm`", async () => {
   const tmp = await createTmp("loopy-auto-phase-confirm-");
-
-  const plannerCmd =
-    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
 
   const { code, stderr } = await runNodeCli(
     [
@@ -32,7 +38,7 @@ test("auto-phase task creation requires confirmation with `--confirm`", async ()
       TEST_COMMAND,
       "--confirm",
       "--agent",
-      plannerCmd,
+      STRICT_PLANNER_CMD,
       "--max-minutes",
       "1",
     ],
@@ -165,6 +171,69 @@ test("`--prompt @file` errors on empty file when generating PRD", async () => {
   assert.match(stderr, /Seed prompt file is empty/i);
 });
 
+test("plan mode streams PRD generation output to terminal by default", async () => {
+  const tmp = await createTmp("loopy-plan-stream-prd-default-");
+  const prdCmd =
+    'node -e "console.log(\\"PRD_STREAM_OUT\\"); console.log(\\"# PRD: Stream Plan\\\\n\\\\n## Problem Statement\\\\nStreaming in plan mode.\\\\n\\"); console.error(\\"PRD_STREAM_ERR\\")"';
+
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--dry-run",
+      "--mode",
+      "plan",
+      "--prompt",
+      "build a thing",
+      "--generate-prd",
+      "--auto-phase=false",
+      "--test-command",
+      TEST_COMMAND,
+      "--agent",
+      prdCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+
+  assert.equal(code, 0, stderr);
+  const combined = `${stdout}\n${stderr}`;
+  assert.equal(hasStandaloneLine(combined, "PRD_STREAM_OUT"), true, combined);
+  assert.equal(hasStandaloneLine(combined, "PRD_STREAM_ERR"), true, combined);
+});
+
+test("`--no-stream` disables PRD output mirroring in plan mode", async () => {
+  const tmp = await createTmp("loopy-plan-stream-prd-off-");
+  const prdCmd =
+    'node -e "console.log(\\"PRD_NO_STREAM_OUT\\"); console.log(\\"# PRD: Stream Off\\\\n\\\\n## Problem Statement\\\\nNo streaming in plan mode.\\\\n\\"); console.error(\\"PRD_NO_STREAM_ERR\\")"';
+
+  const { code, stdout, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--dry-run",
+      "--mode",
+      "plan",
+      "--prompt",
+      "build a thing",
+      "--generate-prd",
+      "--auto-phase=false",
+      "--no-stream",
+      "--test-command",
+      TEST_COMMAND,
+      "--agent",
+      prdCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+
+  assert.equal(code, 0, stderr);
+  const combined = `${stdout}\n${stderr}`;
+  assert.equal(hasStandaloneLine(combined, "PRD_NO_STREAM_OUT"), false, combined);
+  assert.equal(hasStandaloneLine(combined, "PRD_NO_STREAM_ERR"), false, combined);
+});
+
 test("`--prompt` updates an existing plan without confirmation", async () => {
   const tmp = await createTmp("loopy-prompt-update-");
   await fs.mkdir(path.join(tmp, ".loopy"), { recursive: true });
@@ -244,9 +313,6 @@ test("`--prompt` update requires confirmation with `--confirm`", async () => {
 test("`--prompt` generates phased `LOOPY_PLAN.md` before looping", async () => {
   const tmp = await createTmp("loopy-auto-phase-generate-");
 
-  const plannerCmd =
-    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
-
   const { code, stdout, stderr } = await runNodeCli(
     [
       CLI_PATH,
@@ -259,7 +325,7 @@ test("`--prompt` generates phased `LOOPY_PLAN.md` before looping", async () => {
       "--test-command",
       TEST_COMMAND,
       "--agent",
-      plannerCmd,
+      STRICT_PLANNER_CMD,
       "--max-minutes",
       "1",
     ],
@@ -272,15 +338,12 @@ test("`--prompt` generates phased `LOOPY_PLAN.md` before looping", async () => {
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
   assert.match(task, /## Phase:\s+build/);
-  assert.match(task, /- \[ \]\s+do build/);
+  assert.match(task, /- \[ \]\s+implement: do build/);
 });
 
 test("`--prompt @file` generates phased `LOOPY_PLAN.md` before looping", async () => {
   const tmp = await createTmp("loopy-auto-phase-generate-file-");
   await fs.writeFile(path.join(tmp, "task.txt"), "build a thing\n", "utf8");
-
-  const plannerCmd =
-    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
 
   const { code, stdout, stderr } = await runNodeCli(
     [
@@ -294,7 +357,7 @@ test("`--prompt @file` generates phased `LOOPY_PLAN.md` before looping", async (
       "--test-command",
       TEST_COMMAND,
       "--agent",
-      plannerCmd,
+      STRICT_PLANNER_CMD,
       "--max-minutes",
       "1",
     ],
@@ -307,7 +370,7 @@ test("`--prompt @file` generates phased `LOOPY_PLAN.md` before looping", async (
   const task = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
   assert.match(task, /phases:/);
   assert.match(task, /## Phase:\s+build/);
-  assert.match(task, /- \[ \]\s+do build/);
+  assert.match(task, /- \[ \]\s+implement: do build/);
 });
 
 test("`--prompt @file` accepts markdown and includes it in `.loopy/PROMPT.md`", async () => {
@@ -320,9 +383,6 @@ test("`--prompt @file` accepts markdown and includes it in `.loopy/PROMPT.md`", 
     "utf8"
   );
 
-  const plannerCmd =
-    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
-
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
@@ -333,7 +393,7 @@ test("`--prompt @file` accepts markdown and includes it in `.loopy/PROMPT.md`", 
       "--test-command",
       TEST_COMMAND,
       "--agent",
-      plannerCmd,
+      STRICT_PLANNER_CMD,
       "--max-minutes",
       "1",
     ],
@@ -357,9 +417,6 @@ test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `.
     "utf8"
   );
 
-  const plannerCmd =
-    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
-
   const { code, stderr } = await runNodeCli(
     [
       CLI_PATH,
@@ -370,7 +427,7 @@ test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `.
       "--test-command",
       TEST_COMMAND,
       "--agent",
-      plannerCmd,
+      STRICT_PLANNER_CMD,
       "--max-minutes",
       "1",
     ],
@@ -387,9 +444,6 @@ test("`--prompt @file` accepts arbitrary extensions (.rst) and includes it in `.
 test("`--prompt -` reads prompt from stdin", async () => {
   const tmp = await createTmp("loopy-auto-phase-generate-stdin-");
 
-  const plannerCmd =
-    'node -e "process.stdout.write(\\\"phase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - do build\\\\n\\\")"';
-
   const { code, stdout, stderr } = await runNodeCliWithStdin(
     [
       CLI_PATH,
@@ -402,7 +456,7 @@ test("`--prompt -` reads prompt from stdin", async () => {
       "--test-command",
       TEST_COMMAND,
       "--agent",
-      plannerCmd,
+      STRICT_PLANNER_CMD,
       "--max-minutes",
       "1",
     ],
@@ -557,4 +611,40 @@ test("unsupported legacy seed flag errors even when `--prompt` is provided", asy
   );
   assert.equal(code, 1);
   assert.match(stderr, /Unsupported legacy seed flag/i);
+});
+
+test("auto-phase strict envelope failures write split stdout/stderr logs and fallback plan", async () => {
+  const tmp = await createTmp("loopy-auto-phase-strict-envelope-");
+  const plannerCmd =
+    'node -e "process.stdout.write(\\"noise before marker\\\\nBEGIN_LOOPY_PLAN\\\\nphase_defaults:\\\\n  stop_on: all_checked\\\\nphases:\\\\n  - id: build\\\\n    title: Build\\\\nphase_tasks:\\\\n  build:\\\\n    - \\\\\\"implement: do it — Acceptance: done\\\\\\"\\\\nEND_LOOPY_PLAN\\\\n\\"); process.stderr.write(\\"mcp: atlassian ready\\\\n\\")"';
+
+  const { code, stderr } = await runNodeCli(
+    [
+      CLI_PATH,
+      "--dry-run",
+      "--mode",
+      "plan",
+      "--prompt",
+      "build a thing",
+      "--generate-prd=false",
+      "--test-command",
+      TEST_COMMAND,
+      "--agent",
+      plannerCmd,
+      "--max-minutes",
+      "1",
+    ],
+    { cwd: tmp }
+  );
+  assert.equal(code, 0, stderr);
+
+  const plan = await fs.readFile(path.join(tmp, ".loopy", "LOOPY_PLAN.md"), "utf8");
+  assert.match(plan, /## Phase:\s+plan/);
+  assert.match(plan, /\[needs refinement\]/);
+
+  const output = await fs.readFile(path.join(tmp, ".loopy", "last_plan_output.txt"), "utf8");
+  assert.match(output, /Error:\s+invalid-plan-envelope:/);
+  assert.match(output, /\nSTDOUT:\n/);
+  assert.match(output, /\nSTDERR:\n/);
+  assert.match(output, /mcp: atlassian ready/);
 });

@@ -14,7 +14,7 @@ test("areAllPhasesComplete: no phases defined → returns true", () => {
   assert.equal(areAllPhasesComplete(parsed, {}), true);
 });
 
-test("areAllPhasesComplete: all boxes checked + all phases stop_on all_checked → complete", () => {
+test("areAllPhasesComplete: all boxes checked + validation passing → complete", () => {
   const text = [
     "---",
     "phases:",
@@ -33,7 +33,7 @@ test("areAllPhasesComplete: all boxes checked + all phases stop_on all_checked �
     "",
   ].join("\n");
   const parsed = parseTask(text);
-  assert.equal(areAllPhasesComplete(parsed, {}), true);
+  assert.equal(areAllPhasesComplete(parsed, { lastTest: "pass @ 2026-02-06T12:00:00" }), true);
 });
 
 test("areAllPhasesComplete: all boxes checked + tests failing + phase has test_command → NOT complete", () => {
@@ -125,7 +125,7 @@ test("areAllPhasesComplete: one phase incomplete (unchecked box) → NOT complet
   assert.equal(areAllPhasesComplete(parsed, {}), false);
 });
 
-test("areAllPhasesComplete: all boxes checked + tests failing + no phase has test_command → complete", () => {
+test("areAllPhasesComplete: all boxes checked + tests failing + implementation tasks → NOT complete", () => {
   const text = [
     "---",
     "phases:",
@@ -142,9 +142,9 @@ test("areAllPhasesComplete: all boxes checked + tests failing + no phase has tes
   ].join("\n");
   const parsed = parseTask(text);
 
-  // Tests failing, but no phase has a test_command — should still be complete (Gate 2 not applicable)
+  // Validation gate is inferred from implementation tasks.
   const state = { lastTest: "fail @ 2026-02-06T12:00:00" };
-  assert.equal(areAllPhasesComplete(parsed, state), true);
+  assert.equal(areAllPhasesComplete(parsed, state), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -306,7 +306,7 @@ test("pickCurrentPhaseId: advances to next incomplete phase", () => {
     "",
   ].join("\n");
   const parsed = parseTask(text);
-  const state = { currentPhase: "plan" };
+  const state = { currentPhase: "plan", lastTest: "pass @ 2026-02-06T12:00:00" };
   const result = pickCurrentPhaseId(parsed, state, {});
   assert.equal(result, "implement");
 });
@@ -393,7 +393,7 @@ test("isPhaseComplete: skipped tasks [~] count as checked for Gate 1", () => {
     "",
   ].join("\n");
   const parsed = parseTask(text);
-  assert.equal(isPhaseComplete(parsed, "impl", {}), true, "Skipped tasks satisfy Gate 1");
+  assert.equal(isPhaseComplete(parsed, "impl", { lastTest: "pass @ 2026-02-06T12:00:00" }), true, "Skipped tasks satisfy Gate 1");
 });
 
 test("isPhaseComplete: skipped tasks [-] count as checked for Gate 1", () => {
@@ -409,10 +409,10 @@ test("isPhaseComplete: skipped tasks [-] count as checked for Gate 1", () => {
     "",
   ].join("\n");
   const parsed = parseTask(text);
-  assert.equal(isPhaseComplete(parsed, "impl", {}), true, "Cancelled tasks satisfy Gate 1");
+  assert.equal(isPhaseComplete(parsed, "impl", { lastTest: "pass @ 2026-02-06T12:00:00" }), true, "Cancelled tasks satisfy Gate 1");
 });
 
-test("isPhaseComplete: legacy stop_on: tests_pass without test_command → complete when all checked", () => {
+test("isPhaseComplete: legacy stop_on ignored, validation still required for implementation tasks", () => {
   const text = [
     "---",
     "phases:",
@@ -425,9 +425,9 @@ test("isPhaseComplete: legacy stop_on: tests_pass without test_command → compl
     "",
   ].join("\n");
   const parsed = parseTask(text);
-  // Under the new model, stop_on is ignored. No test_command means Gate 2 not needed.
+  // Under the new model, stop_on is ignored and implementation tasks still require validation pass.
   const state = { lastTest: "fail @ 2026-02-06T12:00:00" };
-  assert.equal(isPhaseComplete(parsed, "build", state), true);
+  assert.equal(isPhaseComplete(parsed, "build", state), false);
 });
 
 test("isPhaseAllChecked: returns false when tasks remain unchecked", () => {
@@ -481,7 +481,7 @@ test("phaseHasTestCommand: returns true when test_command configured", () => {
   ].join("\n");
   const parsed = parseTask(text);
   assert.equal(phaseHasTestCommand(parsed, "build"), true);
-  assert.equal(phaseHasTestCommand(parsed, "docs"), false);
+  assert.equal(phaseHasTestCommand(parsed, "docs"), true);
 });
 
 test("phaseHasTestCommand: inherits from phase_defaults", () => {
@@ -523,7 +523,7 @@ test("isPhaseComplete: blocked tasks [!] count as checked for Gate 1", () => {
     "",
   ].join("\n");
   const parsed = parseTask(text);
-  assert.equal(isPhaseComplete(parsed, "impl", {}), true, "Blocked tasks satisfy Gate 1");
+  assert.equal(isPhaseComplete(parsed, "impl", { lastTest: "pass @ 2026-02-06T12:00:00" }), true, "Blocked tasks satisfy Gate 1");
 });
 
 test("isPhaseAllChecked: blocked tasks count as checked", () => {
@@ -604,7 +604,7 @@ test("pickCurrentPhaseId: respects forward-only order from current phase", () =>
   const parsed = parseTask(text);
   // State says we are on beta; beta is complete.
   // Should advance to gamma (not wrap back to alpha).
-  const state = { currentPhase: "beta" };
+  const state = { currentPhase: "beta", lastTest: "pass @ 2026-02-06T12:00:00" };
   const result = pickCurrentPhaseId(parsed, state, {});
   assert.equal(result, "gamma");
 });
